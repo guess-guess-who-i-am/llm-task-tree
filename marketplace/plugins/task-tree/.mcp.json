@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "task_tree": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["./runtime/scripts/mcp-server.mjs"]
+    }
+  }
+}

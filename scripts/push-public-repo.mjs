@@ -22,7 +22,7 @@ const flag = (name, fallback = "") => {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : fallback;
 };
-const repo = flag("--repo", "guess-guess-who-i-am/tree");
+const repo = flag("--repo", "guess-guess-who-i-am/llm-task-tree-workspace-backup");
 const branch = flag("--branch", "main");
 const dryRun = process.argv.includes("--dry-run");
 

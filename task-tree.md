@@ -206,16 +206,15 @@
 - Completion: 进行中
 - Problem: 如何让人借助任务图舒适地形成局面感、恢复上下文并保持对模型的控制？
 - Approach:
-  - 保留任务树为主界面，焦点透镜只承担当前节点与上下游的集中阅读。
-  - 总览只回答根本目标、当前进度和当前问题；关闭后回到普通树。
-  - 滚轮始终缩放画布；节点“◎”显式打开透镜，透镜内可展开完整详情，关闭后回图并居中当前节点。
+  - 任务树保持主界面；总览只答根本目标、当前进度和问题。
+  - 滚轮只缩放画布；节点按钮打开透镜查看详情和上下游，关闭后回图居中。
 - Input:
-- Output: 四版切换页与可重复验收脚本：llm-task-tree-kit/public/task-tree-prototype-v2/、scripts/test-task-tree-prototype-v2.mjs；桌面和手机截图见 artifacts/task-tree-prototype-v2/。
-- Metrics: 同任务对照当前全树视图：能否正确说出根本任务状态与卡点；找到当前节点及相关依据所需的搜索操作；是否被无关节点分散；切到全貌后能否保持方向感。
+- Output: 三层界面、验收脚本与截图见 llm-task-tree-kit/public/task-tree-prototype-v2/、scripts/test-task-tree-prototype-v2.mjs、artifacts/。
+- Metrics: 能否快速说出项目目标、当前问题和焦点依据；缩放与切换全貌后是否保持方向感。
 - Notes:
 - CodeLoc:
-- CurrentResult: 已验证三层导航可连续使用：总览恢复项目方向，普通树支持缩放浏览，节点“◎”进入透镜后可直接查看问题、思路、结果、上下游及完整字段；关闭后准确居中当前节点。桌面与手机交互测试通过，截图见 artifacts/focus-lens-desktop.png、artifacts/focus-lens-mobile.png。界面已消除“缩放被透镜抢占”和“看详情必须退出”的阻力；仍需用户真实使用反馈，根本目标暂不能宣称完全达到。
-- RootCauseAnalysis: 原交互让滚轮同时承担“放大画布”和“进入透镜”两个意图，导致普通缩放被强制中断；透镜又未提供完整字段，用户只能反复退出查看。
+- CurrentResult: 三层导航已验证：总览看方向，普通树缩放，透镜查看节点问题、思路、结果、上下游和详情，关闭后回图居中。桌面与手机测试通过；仍待真实使用反馈，舒适使用目标暂未达到。
+- RootCauseAnalysis: 原设计把缩放与进入透镜绑定，且透镜缺少详情，导致操作中断和反复退出。
 - CaseStudy:
 - NextIdea: 请用户在正式界面实测总览、连续放大进入透镜、上下游切换和关闭定位，再按真实阅读与导航阻力收敛。
 - SelectedSkills:
@@ -248,8 +247,8 @@
 - Metrics:
 - Notes:
 - CodeLoc:
-- CurrentResult: 0.7.0 提供 17 个 task_tree 工具和 1 个内联 UI；写入继承备份、焦点保护与 flow 同步。
-- RootCauseAnalysis:
+- CurrentResult: 共享插件现已支持 Codex、Cursor、Claude Code 原生入口和 Trae 的 stdio MCP 模板；README 说明目标、能力与安装。运行时、清单和公开包构建均通过，公开包 233 个文件、3.85 MB，未发现路径或凭据泄漏；尚未逐端实装，跨平台易用目标暂未完全达到。
+- RootCauseAnalysis: 原 README 仍描述过期行为，且 marketplace 被 Git 忽略，造成文档与可安装产物脱节。现统一为自足运行时与多平台入口，Trae 只承诺已支持的 MCP 接入。
 - CaseStudy:
 - NextIdea:
 - SelectedSkills:

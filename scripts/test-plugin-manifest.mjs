@@ -123,8 +123,28 @@ function checkPlugin(pluginRoot, entryName) {
     assert.equal(readJson(cursorManifest).version, manifest.version, "Cursor manifest version drifted from the Codex one");
   }
 
+  const claudeManifest = path.join(pluginRoot, ".claude-plugin", "plugin.json");
+  assert.ok(existsSync(claudeManifest), `missing .claude-plugin/plugin.json in ${pluginRoot}`);
+  const claude = readJson(claudeManifest);
+  assert.equal(claude.name, manifest.name, "Claude manifest name drifted from the Codex one");
+  assert.equal(claude.version, manifest.version, "Claude manifest version drifted from the Codex one");
+  resolveManifestPath(pluginRoot, claude.skills, "Claude skills");
+  resolveManifestPath(pluginRoot, claude.mcpServers, "Claude mcpServers");
+
   return manifest;
 }
+
+runCase("Claude marketplace resolves the shared plugin", () => {
+  const marketplaceFile = path.join(repoRoot, ".claude-plugin", "marketplace.json");
+  assert.ok(existsSync(marketplaceFile), `missing ${marketplaceFile}`);
+  const marketplace = readJson(marketplaceFile);
+  assert.ok(marketplace.name && marketplace.owner?.name, "Claude marketplace identity is incomplete");
+  assert.ok(Array.isArray(marketplace.plugins) && marketplace.plugins.length, "Claude marketplace lists no plugins");
+  for (const entry of marketplace.plugins) {
+    const pluginRoot = resolveManifestPath(repoRoot, entry.source, `Claude plugins[${entry.name}].source`);
+    assert.equal(readJson(path.join(pluginRoot, ".claude-plugin", "plugin.json")).name, entry.name);
+  }
+});
 
 for (const root of marketplaceRoots) {
   const label = path.basename(root);

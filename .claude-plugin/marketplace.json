@@ -1,0 +1,17 @@
+{
+  "name": "llm-task-tree",
+  "owner": {
+    "name": "llm-task-tree",
+    "url": "https://github.com/guess-guess-who-i-am/llm-task-tree-workspace-backup"
+  },
+  "plugins": [
+    {
+      "name": "task-tree",
+      "displayName": "LLM Task Tree",
+      "description": "让人与 Agent 通过可视任务图共享项目目标、进度、方法和下一步。",
+      "version": "0.8.0",
+      "source": "./marketplace/plugins/task-tree",
+      "category": "productivity"
+    }
+  ]
+}

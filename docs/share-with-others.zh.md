@@ -56,7 +56,7 @@ powershell -File kit\deploy-task-tree.ps1 -ProjectRoot <项目路径> -UseShared
 
 注册的是**共享 kit** 的入口而不是某个仓库路径，所以一台机器注册一次，所有装了 stub 的项目都能用；每个会话按自己的 cwd 定位项目根。写入前自动备份 `config.toml`，重复执行是空操作，`--remove` 整块撤销；机器上没有 `~/.codex` 时安装脚本直接跳过，不会凭空造配置。
 
-装了 codex CLI 的人还可以 `codex plugin marketplace add guess-guess-who-i-am/tree` 从 Git 市场取插件（仓库根的 `.agents/plugins/marketplace.json` 指向 `./marketplace/plugins/task-tree`）。Git 快照登记由该命令自己管理，安装脚本只写已验证的本地市场形态（`source_type = "local"`），不伪造 Git 字段。
+装了 codex CLI 的人还可以 `codex plugin marketplace add guess-guess-who-i-am/llm-task-tree-workspace-backup` 从 Git 市场取插件（仓库根的 `.agents/plugins/marketplace.json` 指向 `./marketplace/plugins/task-tree`）。Git 快照登记由该命令自己管理，安装脚本只写已验证的本地市场形态（`source_type = "local"`），不伪造 Git 字段。
 
 ## 路径 3：本地市场 / 本地插件（不发布也能用）
 

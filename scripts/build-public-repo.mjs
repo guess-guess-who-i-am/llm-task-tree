@@ -6,7 +6,10 @@
  *
  * Layout produced (what `codex plugin marketplace add <owner>/<repo>` and a plain clone both need):
  *   .agents/plugins/marketplace.json   marketplace manifest at the repo root
- *   marketplace/plugins/task-tree/     plugin package (Codex + Cursor manifests, shared SKILL.md)
+ *   .claude-plugin/marketplace.json     Claude Code marketplace manifest
+ *   marketplace/plugins/task-tree/     plugin package (Codex + Cursor + Claude manifests)
+ *   integrations/                      platform-specific MCP templates
+ *   artifacts/                         README screenshots
  *   kit/                               runtime: server.js, server/, public/, scripts/, templates
  *   docs/                              distribution guide
  *
@@ -117,13 +120,23 @@ async function blankKitPath(root) {
 if (!existsSync(kitDir)) throw new Error(`shared kit not found: ${kitDir}`);
 
 // Keep the existing git history: only the working tree is rebuilt.
-for (const entry of ["kit", "marketplace", "docs", ".agents"]) {
+for (const entry of ["kit", "marketplace", "docs", "integrations", "artifacts", ".agents", ".claude-plugin"]) {
   await rm(path.join(outDir, entry), { recursive: true, force: true });
 }
 await mkdir(outDir, { recursive: true });
 
 await copyKit(kitDir, path.join(outDir, "kit"));
 await cp(path.join(repoRoot, "marketplace"), path.join(outDir, "marketplace"), { recursive: true });
+await cp(path.join(repoRoot, ".claude-plugin"), path.join(outDir, ".claude-plugin"), { recursive: true });
+await cp(path.join(repoRoot, "integrations"), path.join(outDir, "integrations"), { recursive: true });
+await mkdir(path.join(outDir, "artifacts"), { recursive: true });
+for (const name of [
+  "focus-lens-desktop.png",
+  "task-tree-semantic-zoom-macro.png",
+  "task-tree-core-summary-detail.png"
+]) {
+  await cp(path.join(repoRoot, "artifacts", name), path.join(outDir, "artifacts", name));
+}
 await mkdir(path.join(outDir, ".agents", "plugins"), { recursive: true });
 await cp(
   path.join(repoRoot, ".agents", "plugins", "marketplace.json"),
@@ -135,6 +148,7 @@ await cp(
   path.join(outDir, "docs", "share-with-others.zh.md")
 );
 await cp(path.join(kitDir, "LICENSE"), path.join(outDir, "LICENSE"));
+await cp(path.join(repoRoot, "README.md"), path.join(outDir, "README.md"));
 
 await writeFile(path.join(outDir, ".gitignore"), [
   "node_modules/",

@@ -1,427 +1,53 @@
 {
   "schema": "flow-step/v1",
   "nodeId": "N12",
-  "title": "让 Agent 直接调用任务图（MCP 集成层）",
+  "blockId": "",
+  "updatedAt": "2026-08-13T08:36:26.439Z",
+  "title": "公开 README 与跨平台插件分发",
   "reportZh": "report.zh.md",
-  "updatedAt": "2026-08-01T14:20:00.000Z",
   "substeps": [
     {
-      "title": "调研现有对接点与可行路径",
+      "title": "重写公开 README 并建立多平台安装入口",
       "inputs": [
-        { "path": ".codex/hooks.json", "line": 1 },
-        { "path": ".cursor/rules/llm-task-tree-edit.mdc", "line": 1 },
-        { "path": "open-webSearch/docs/architecture/local-http-adapter.md", "line": 19 }
+        {
+          "path": "README.md"
+        },
+        {
+          "path": ".agents/plugins/marketplace.json"
+        }
       ],
-      "outputs": [{ "path": "task-tree.md", "line": 307 }]
-    },
-    {
-      "title": "零依赖 stdio MCP 前门与四个只读工具",
-      "functions": [
-        { "path": "scripts/mcp-server.mjs", "name": "handleMessage" },
-        { "path": "scripts/mcp-server.mjs", "name": "toolFocus" },
-        { "path": "scripts/mcp-server.mjs", "name": "toolNode" },
-        { "path": "scripts/mcp-server.mjs", "name": "toolCheckCompact" },
-        { "path": "scripts/mcp-server.mjs", "name": "toolFlowStatus" }
-      ],
-      "inputs": [
-        { "path": "server/tree-quality.js", "line": 32 },
-        { "path": "server/tree-registry.js", "line": 71 },
-        { "path": "server/flow-script.js", "line": 422 }
-      ],
-      "outputs": [{ "path": "scripts/mcp-server.mjs" }]
-    },
-    {
-      "title": "握手与工具回归测试",
-      "functions": [{ "path": "scripts/test-mcp-server.mjs", "name": "mcpSession" }],
-      "inputs": [{ "path": "task-tree.md", "line": 307 }],
-      "outputs": [{ "path": "scripts/test-mcp-server.mjs" }]
-    },
-    {
-      "title": "可逆注册进 Codex config.toml",
-      "functions": [
-        { "path": "scripts/install-codex-mcp.mjs", "name": "stripBlock" },
-        { "path": "scripts/install-codex-mcp.mjs", "name": "backup" }
-      ],
-      "inputs": [{ "path": "scripts/mcp-server.mjs", "line": 1 }],
-      "outputs": [{ "path": "scripts/install-codex-mcp.mjs" }]
-    },
-    {
-      "title": "服务按需自动拉起与端口发现",
-      "functions": [
-        { "path": "scripts/mcp-server.mjs", "name": "ensureServer" },
-        { "path": "scripts/mcp-server.mjs", "name": "startServer" },
-        { "path": "scripts/mcp-server.mjs", "name": "kitDir" },
-        { "path": "scripts/mcp-server.mjs", "name": "toolServer" }
-      ],
-      "inputs": [
-        { "path": "llm-task-tree-kit/open-task-tree.ps1", "line": 273 },
-        { "path": "llm-task-tree/task-tree.config.json", "line": 1 }
-      ],
-      "outputs": [{ "path": ".task-tree-port" }]
-    },
-    {
-      "title": "动作类工具代理现有 HTTP API",
-      "functions": [
-        { "path": "scripts/mcp-server.mjs", "name": "api" },
-        { "path": "scripts/mcp-server.mjs", "name": "toolWrite" },
-        { "path": "scripts/mcp-server.mjs", "name": "patchNodeFields" },
-        { "path": "scripts/mcp-server.mjs", "name": "toolChain" },
-        { "path": "scripts/mcp-server.mjs", "name": "toolSubtree" },
-        { "path": "scripts/mcp-server.mjs", "name": "toolKnowledge" },
-        { "path": "scripts/mcp-server.mjs", "name": "toolModels" },
-        { "path": "scripts/mcp-server.mjs", "name": "toolVersions" },
-        { "path": "scripts/mcp-server.mjs", "name": "toolFlowWrite" }
-      ],
-      "inputs": [
-        { "path": "server.js", "line": 3794 },
-        { "path": "server.js", "line": 3719 },
-        { "path": "server.js", "line": 3202 }
-      ],
-      "outputs": [{ "path": "scripts/mcp-server.mjs" }]
-    },
-    {
-      "title": "轮廓布局抽成前后端共用模块",
-      "functions": [
-        { "path": "public/tree-layout.js", "name": "layoutContourTree" },
-        { "path": "public/tree-layout.js", "name": "buildSpanningTreeAdjacency" },
-        { "path": "scripts/mcp-server.mjs", "name": "toolLayout" }
-      ],
-      "inputs": [{ "path": "public/app.js", "line": 2973 }],
       "outputs": [
-        { "path": "public/tree-layout.js" },
-        { "path": "public/index.html", "line": 234 }
+        {
+          "path": "README.md"
+        },
+        {
+          "path": ".claude-plugin/marketplace.json"
+        },
+        {
+          "path": "marketplace/plugins/task-tree/.claude-plugin/plugin.json"
+        },
+        {
+          "path": "integrations/trae/mcp.json"
+        }
       ]
     },
     {
-      "title": "修掉空字段写入吞掉下一行的数据丢失 bug",
+      "title": "验证插件包和公开分发",
       "functions": [
-        { "path": "server.js", "name": "fieldLinePattern" },
-        { "path": "server.js", "name": "setGraphStateField" }
-      ],
-      "inputs": [{ "path": "server.js", "line": 3437 }],
-      "outputs": [{ "path": "scripts/test-mcp-server.mjs" }]
-    },
-    {
-      "title": "Codex 本地插件包与注册器",
-      "inputs": [
-        { "path": "C:/Users/Administrator/.codex/config.toml", "line": 107 }
-      ],
-      "outputs": [
-        { "path": "marketplace/.agents/plugins/marketplace.json" },
-        { "path": "marketplace/plugins/task-tree/.codex-plugin/plugin.json" },
-        { "path": "marketplace/plugins/task-tree/skills/task-tree/SKILL.md" },
-        { "path": "scripts/build-kit.ps1", "line": 24 }
-      ]
-    },
-    {
-      "title": "安装期产出可提交的项目级配置（stub + .cursor/mcp.json）",
-      "functions": [
-        { "path": "llm-task-tree-kit/kit-runtime.ps1", "name": "Write-SharedKitStub" },
-        { "path": "llm-task-tree-kit/kit-runtime.ps1", "name": "Ensure-ProjectCursorMcp" }
-      ],
-      "inputs": [
-        { "path": "llm-task-tree-kit/install.ps1", "line": 161 }
+        {
+          "path": "scripts/test-plugin-manifest.mjs"
+        },
+        {
+          "path": "scripts/test-plugin-package.mjs"
+        },
+        {
+          "path": "scripts/build-public-repo.mjs"
+        }
       ],
       "outputs": [
-        { "path": ".cursor/mcp.json" },
-        { "path": "llm-task-tree-kit/templates/AGENTS.merge.md", "line": 7 }
-      ]
-    },
-    {
-      "title": "注册器可移植化：共享 kit 入口、--codex-home、空白 config.toml",
-      "functions": [
-        { "path": "scripts/install-codex-mcp.mjs", "name": "resolveEntryScript" },
-        { "path": "scripts/install-codex-mcp.mjs", "name": "resolveMarketplaceDir" },
-        { "path": "scripts/install-codex-mcp.mjs", "name": "readSharedKitDir" }
-      ],
-      "inputs": [
-        { "path": "llm-task-tree/task-tree.config.json", "line": 1 }
-      ],
-      "outputs": [
-        { "path": ".agents/plugins/marketplace.json" },
-        { "path": "marketplace/plugins/task-tree/.cursor-plugin/plugin.json" },
-        { "path": "marketplace/plugins/task-tree/mcp.json" }
-      ]
-    },
-    {
-      "title": "陌生机器端到端测试（临时项目 + 临时 CODEX_HOME）",
-      "functions": [
-        { "path": "scripts/test-share-install.mjs", "name": "mcpSession" },
-        { "path": "scripts/test-share-install.mjs", "name": "powershell" }
-      ],
-      "inputs": [
-        { "path": "llm-task-tree-kit/templates/task-tree.starter.md", "line": 1 }
-      ],
-      "outputs": [
-        { "path": "scripts/test-share-install.mjs" },
-        { "path": "docs/share-with-others.zh.md" },
-        { "path": "marketplace/plugins/task-tree/README.md" }
-      ]
-    },
-    {
-      "title": "分发到全部注册项目并逐项核对",
-      "functions": [
-        { "path": "llm-task-tree-kit/kit-runtime.ps1", "name": "Update-AllRegisteredProjects" },
-        { "path": "llm-task-tree-kit/kit-runtime.ps1", "name": "Sync-ProjectAgentPrompts" }
-      ],
-      "inputs": [
-        { "path": "llm-task-tree-kit/one-click-update.ps1", "line": 94 }
-      ],
-      "outputs": [
-        { "path": "scripts/steps/N12/latest/report.zh.md", "line": 60 }
-      ]
-    },
-    {
-      "title": "公开包构建、脱敏与泄漏自检",
-      "functions": [
-        { "path": "scripts/build-public-repo.mjs", "name": "copyKit" },
-        { "path": "scripts/build-public-repo.mjs", "name": "sanitizeTree" },
-        { "path": "scripts/build-public-repo.mjs", "name": "blankKitPath" }
-      ],
-      "inputs": [
-        { "path": "llm-task-tree-kit/setup-task-tree.cmd", "line": 10 }
-      ],
-      "outputs": [
-        { "path": "scripts/build-public-repo.mjs" },
-        { "path": "dist/task-tree-public/README.md" }
-      ]
-    },
-    {
-      "title": "Codex 桌面端免 CLI：安装即注册",
-      "functions": [
-        { "path": "llm-task-tree-kit/kit-runtime.ps1", "name": "Ensure-CodexRegistration" }
-      ],
-      "inputs": [
-        { "path": "llm-task-tree-kit/install.ps1", "line": 240 }
-      ],
-      "outputs": [
-        { "path": "scripts/test-share-install.mjs", "line": 230 },
-        { "path": "docs/share-with-others.zh.md", "line": 35 }
-      ]
-    },
-    {
-      "title": "发布到公开仓库并用真实克隆复验",
-      "functions": [
-        { "path": "scripts/test-share-install.mjs", "name": "runCase" }
-      ],
-      "inputs": [
-        { "path": "dist/task-tree-public/.agents/plugins/marketplace.json", "line": 1 }
-      ],
-      "outputs": [
-        { "path": "dist/task-tree-public/README.md", "line": 1 },
-        { "path": "scripts/steps/N12/latest/report.zh.md", "line": 1 }
-      ]
-    },
-    {
-      "title": "修掉关服端点的假停止",
-      "functions": [{ "path": "server.js", "name": "shutdownBackgroundServices" }],
-      "inputs": [{ "path": "server.js", "line": 3784 }],
-      "outputs": [{ "path": "scripts/test-share-install.mjs", "line": 296 }]
-    },
-    {
-      "title": "桌面应用上架形态：图标、元数据与清单审计",
-      "functions": [
-        { "path": "scripts/build-plugin-assets.mjs", "name": "render" },
-        { "path": "scripts/build-plugin-assets.mjs", "name": "encodePng" },
-        { "path": "scripts/build-plugin-assets.mjs", "name": "shapes" },
-        { "path": "scripts/test-plugin-manifest.mjs", "name": "checkPlugin" },
-        { "path": "scripts/test-plugin-manifest.mjs", "name": "resolveManifestPath" }
-      ],
-      "inputs": [
-        { "path": "C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime/plugins/documents/.codex-plugin/plugin.json", "line": 1 },
-        { "path": "C:/Users/Administrator/.codex/config.toml", "line": 107 }
-      ],
-      "outputs": [
-        { "path": "marketplace/plugins/task-tree/assets/icon.png" },
-        { "path": "marketplace/plugins/task-tree/assets/logo.png" },
-        { "path": "marketplace/plugins/task-tree/.codex-plugin/plugin.json", "line": 22 },
-        { "path": "marketplace/.agents/plugins/marketplace.json", "line": 3 },
-        { "path": "scripts/test-share-install.mjs", "line": 281 },
-        { "path": "marketplace/plugins/task-tree/README.md", "line": 52 }
-      ]
-    },
-    {
-      "title": "把整张任务图截进对话（task_tree_render）",
-      "functions": [
-        { "path": "server/graph-render.js", "name": "renderGraphPng" },
-        { "path": "server/graph-render.js", "name": "findChromium" },
-        { "path": "server/png.js", "name": "decodePng" },
-        { "path": "server/png.js", "name": "cropTransparentMargins" },
-        { "path": "server/png.js", "name": "flattenOnto" },
-        { "path": "public/app.js", "name": "enterSnapshotMode" },
-        { "path": "scripts/mcp-server.mjs", "name": "toolRender" }
-      ],
-      "inputs": [
-        { "path": "public/app.js", "line": 4959 },
-        { "path": "public/styles.css", "line": 3429 }
-      ],
-      "outputs": [
-        { "path": "server/graph-render.js" },
-        { "path": "server/png.js" },
-        { "path": "scripts/test-mcp-server.mjs", "line": 433 },
-        { "path": "marketplace/plugins/task-tree/.codex-plugin/plugin.json", "line": 3 },
-        { "path": "marketplace/plugins/task-tree/skills/task-tree/SKILL.md", "line": 28 }
-      ]
-    },
-    {
-      "title": "把可交互界面嵌进对话（MCP Apps widget / task_tree_open）",
-      "functions": [
-        { "path": "server/graph-widget.js", "name": "widgetHtml" },
-        { "path": "scripts/mcp-server.mjs", "name": "toolOpen" },
-        { "path": "scripts/mcp-server.mjs", "name": "handleMessage" },
-        { "path": "public/app.js", "name": "signalEmbedHost" },
-        { "path": "scripts/install-codex-mcp.mjs", "name": "setFeatureFlag" }
-      ],
-      "inputs": [
-        { "path": "docs/agent-context-research/codex-mcp-apps-probe.zh.md", "line": 1 }
-      ],
-      "outputs": [
-        { "path": "server/graph-widget.js" },
-        { "path": "scripts/test-mcp-server.mjs", "line": 470 },
-        { "path": "scripts/test-share-install.mjs", "line": 218 },
-        { "path": "marketplace/plugins/task-tree/.codex-plugin/plugin.json", "line": 3 }
-      ]
-    },
-    {
-      "title": "按钮发什么：三档由树现算的 preset，没依据就灰掉",
-      "functions": [
-        { "path": "server/codex-prompts.js", "name": "buildNextStepPrompt" },
-        { "path": "server/codex-prompts.js", "name": "buildChainPrompt" },
-        { "path": "server/codex-prompts.js", "name": "buildPresetPrompt" },
-        { "path": "server/codex-prompts.js", "name": "describePresets" },
-        { "path": "server.js", "name": "readCodexPromptState" },
-        { "path": "public/app.js", "name": "renderCodexThreadMenu" }
-      ],
-      "inputs": [
-        { "path": "server.js", "line": 2179 },
-        { "path": "server.js", "line": 2012 }
-      ],
-      "outputs": [
-        { "path": "server/codex-prompts.js" },
-        { "path": "scripts/test-mcp-server.mjs", "line": 640 },
-        { "path": "marketplace/plugins/task-tree/README.md", "line": 61 }
-      ]
-    },
-    {
-      "title": "按钮发到固定会话：resume 续接、按 cwd 列会话、可换可新开",
-      "functions": [
-        { "path": "server/codex-run.js", "name": "listProjectThreads" },
-        { "path": "server/codex-run.js", "name": "readPinnedThread" },
-        { "path": "server/codex-run.js", "name": "writePinnedThread" },
-        { "path": "server/codex-run.js", "name": "startCodexTurn" },
-        { "path": "public/app.js", "name": "runCodex" },
-        { "path": "public/app.js", "name": "renderCodexThreadMenu" }
-      ],
-      "inputs": [
-        { "path": "server/codex-run.js", "line": 22 }
-      ],
-      "outputs": [
-        { "path": "server.js", "line": 3792 },
-        { "path": "public/index.html", "line": 41 },
-        { "path": "scripts/fake-app-server.mjs" },
-        { "path": "scripts/test-mcp-server.mjs", "line": 605 },
-        { "path": "marketplace/plugins/task-tree/README.md", "line": 57 }
-      ]
-    },
-    {
-      "title": "一个项目一个固定地址：启动器与 MCP 统一端口推导",
-      "functions": [
-        { "path": "llm-task-tree-kit/open-task-tree.ps1", "name": "Get-StableProjectPort" },
-        { "path": "llm-task-tree-kit/open-task-tree.ps1", "name": "Get-FreePort" },
-        { "path": "llm-task-tree-kit/open-task-tree.ps1", "name": "Get-CandidateProjectPorts" },
-        { "path": "scripts/mcp-server.mjs", "name": "stablePort" }
-      ],
-      "inputs": [
-        { "path": "scripts/mcp-server.mjs", "line": 162 }
-      ],
-      "outputs": [
-        { "path": "llm-task-tree-kit/open-task-tree.ps1", "line": 28 },
-        { "path": "scripts/test-mcp-server.mjs", "line": 519 }
-      ]
-    },
-    {
-      "title": "一机多项目：注册表里挑一个，叫醒它再跳过去",
-      "functions": [
-        { "path": "server/projects.js", "name": "describeProjects" },
-        { "path": "server/projects.js", "name": "ensureProjectServer" },
-        { "path": "server/projects.js", "name": "resolveRuntime" },
-        { "path": "server/projects.js", "name": "stablePortFor" },
-        { "path": "public/app.js", "name": "switchProject" },
-        { "path": "public/app.js", "name": "renderProjectMenu" }
-      ],
-      "inputs": [
-        { "path": "llm-task-tree-kit/kit-runtime.ps1", "line": 126 },
-        { "path": "scripts/mcp-server.mjs", "line": 162 }
-      ],
-      "outputs": [
-        { "path": "server/projects.js" },
-        { "path": "server.js", "line": 3821 },
-        { "path": "public/index.html", "line": 21 },
-        { "path": "scripts/test-mcp-server.mjs", "line": 580 }
-      ]
-    },
-    {
-      "title": "链条底栏一键开跑，并修掉菜单被压成竖字的渲染 bug",
-      "functions": [
-        { "path": "public/app.js", "name": "runCodex" },
-        { "path": "public/app.js", "name": "renderChainLoopCmdBar" }
-      ],
-      "inputs": [
-        { "path": "public/styles.css", "line": 194 }
-      ],
-      "outputs": [
-        { "path": "public/index.html", "line": 173 },
-        { "path": "public/styles.css", "line": 1697 },
-        { "path": "server/codex-run.js", "line": 220 }
-      ]
-    },
-    {
-      "title": "确认一个全局注册够所有项目用：MCP 按会话目录起",
-      "inputs": [
-        { "path": "C:/Users/Administrator/.codex/config.toml", "line": 78 },
-        { "path": "scripts/mcp-server.mjs", "line": 36 }
-      ],
-      "outputs": [
-        { "path": "scripts/probe-mcp-cwd.mjs" },
-        { "path": "marketplace/plugins/task-tree/README.md", "line": 20 }
-      ]
-    },
-    {
-      "title": "嵌入框空白：把嫌疑收敛到宿主 CSP，并让沙箱自己报回来",
-      "functions": [
-        { "path": "server/graph-widget.js", "name": "widgetMeta" },
-        { "path": "server/graph-widget.js", "name": "widgetHtml" },
-        { "path": "scripts/mcp-server.mjs", "name": "toolServer" }
-      ],
-      "inputs": [
-        { "path": "server/graph-widget.js", "line": 17 },
-        { "path": "public/app.js", "line": 25 }
-      ],
-      "outputs": [
-        { "path": "scripts/probe-widget-embed.mjs" },
-        { "path": "scripts/test-mcp-server.mjs", "line": 543 },
-        { "path": ".gitignore", "line": 4 }
-      ]
-    },
-    {
-      "title": "插件包一个工具都不提供：补齐包内运行时与 MCP 声明",
-      "functions": [
-        { "path": "scripts/build-plugin-runtime.mjs", "name": "buildPluginRuntime" },
-        { "path": "scripts/test-plugin-package.mjs", "name": "declaredEntry" },
-        { "path": "scripts/test-plugin-package.mjs", "name": "toolsThePackagePromises" },
-        { "path": "scripts/install-codex-mcp.mjs", "name": "pointsElsewhere" },
-        { "path": "scripts/install-codex-mcp.mjs", "name": "replaceBlock" }
-      ],
-      "inputs": [
-        { "path": "scripts/probe-host-strings.mjs" },
-        { "path": "C:/Users/Administrator/.codex/plugins/cache/llm-task-tree/task-tree/0.6.0/mcp.json" }
-      ],
-      "outputs": [
-        { "path": "marketplace/plugins/task-tree/.mcp.json" },
-        { "path": "marketplace/plugins/task-tree/.codex-plugin/plugin.json", "line": 23 },
-        { "path": "scripts/test-plugin-package.mjs" },
-        { "path": "scripts/test-share-install.mjs", "line": 240 },
-        { "path": "marketplace/plugins/task-tree/README.md", "line": 11 }
+        {
+          "path": "dist/task-tree-public/README.md"
+        }
       ]
     }
   ]

@@ -1,0 +1,306 @@
+/* Block-flow layout — scoped inside .graphPane / .flowViewRoot */
+
+.flowViewRoot {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.flowViewToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 12px 0;
+  flex-shrink: 0;
+}
+
+.flowViewActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scriptModeToggle {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--bg, #f7f7f4);
+  border: 1px solid var(--line, #d9ded7);
+}
+
+.modeBtn {
+  border: 0;
+  background: transparent;
+  color: var(--muted, #667085);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.modeBtn.is-active {
+  background: var(--accent, #176b5b);
+  color: #fff;
+}
+
+.flowViewToolBtn,
+.flowViewGhostBtn {
+  border: 1px solid var(--line, #d9ded7);
+  background: var(--panel, #fff);
+  color: var(--ink, #202124);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 11px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.flowViewToolBtn:hover,
+.flowViewGhostBtn:hover {
+  border-color: var(--accent, #176b5b);
+  color: var(--accent, #176b5b);
+}
+
+.blocksHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px 8px;
+  flex-shrink: 0;
+}
+
+.blocksHead h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  color: var(--ink, #202124);
+}
+
+.blocksHead p {
+  margin: 0;
+  color: var(--muted, #667085);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.scriptVersionBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 240px;
+}
+
+.scriptVersionSelect {
+  min-width: 180px;
+  max-width: 320px;
+  flex: 1;
+  border: 1px solid var(--line, #d9ded7);
+  background: var(--panel, #fff);
+  color: var(--ink, #202124);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+
+.scriptVersionMeta {
+  font-size: 11px;
+  color: var(--muted, #667085);
+  white-space: nowrap;
+}
+
+.flowViewRoot .restoreScriptVersionBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.blocksLayout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr) minmax(260px, 320px);
+  gap: 12px;
+  min-height: 0;
+  padding: 0 12px 12px;
+}
+
+.flowDriftBanner {
+  margin: 0 12px 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fff8e6;
+  border: 1px solid #f0d78c;
+  font-size: 12px;
+  color: #7a5b00;
+}
+
+.flowStepInspector {
+  border: 1px solid var(--line, #d9ded7);
+  border-radius: 10px;
+  background: var(--panel, #fff);
+  overflow: auto;
+  min-height: 0;
+  font-size: 12px;
+}
+
+.flowStepInspectorInner {
+  padding: 10px 12px 16px;
+}
+
+.flowOverviewLink {
+  border: 0;
+  background: none;
+  color: var(--accent, #176b5b);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.flowStepInspectorTitle {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.flowStepMeta {
+  margin-bottom: 10px;
+  font-size: 11px;
+}
+
+.flowStepActions {
+  margin-bottom: 10px;
+}
+
+.flowStepLinkBtn,
+.flowStepCodeBtn {
+  display: inline-block;
+  margin: 2px 4px 2px 0;
+  padding: 4px 8px;
+  border: 1px solid var(--line, #d9ded7);
+  border-radius: 6px;
+  background: #f7f9f8;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.flowStepLinkBtn:hover,
+.flowStepCodeBtn:hover {
+  border-color: var(--accent, #176b5b);
+  color: var(--accent, #176b5b);
+}
+
+.flowSubstepList {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.flowSubstepItem {
+  margin-bottom: 12px;
+}
+
+.flowSubstepTitle {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.flowSubstepRow {
+  margin: 4px 0;
+}
+
+.flowSubstepLabel {
+  display: inline-block;
+  min-width: 42px;
+  color: var(--muted, #667085);
+}
+
+.flowStepFilePreview {
+  margin-top: 10px;
+  max-height: 240px;
+  overflow: auto;
+  padding: 8px;
+  background: #f4f6f5;
+  border-radius: 6px;
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+.stepPackBadge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  margin-left: 6px;
+}
+
+.stepPackBadge.has-pack {
+  background: #e6f4ef;
+  color: #176b5b;
+}
+
+.stepPackBadge.no-pack {
+  background: #f3f4f6;
+  color: #888;
+}
+
+.blockWrap.is-step-selected .sb-task,
+.blockWrap.is-step-selected .sb-reporter {
+  outline: 2px solid var(--accent, #176b5b);
+  outline-offset: 2px;
+}
+
+.flowViewRoot .blockPalette {
+  border: 1px solid var(--line, #d9ded7);
+  border-radius: 8px;
+  background: var(--panel, #fff);
+  padding: 12px;
+  overflow: auto;
+  min-height: 0;
+}
+
+.flowViewRoot .blockPalette h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--muted, #667085);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+}
+
+.flowViewRoot .blockPalette h3:not(:first-child) {
+  margin-top: 16px;
+}
+
+.flowViewRoot .blocksStage {
+  border: 1px solid var(--line, #d9ded7);
+  border-radius: 8px;
+  overflow: auto;
+  min-height: 0;
+}
+
+.graphPane .flowViewRoot .blocksStage {
+  background-color: #e5ecf2;
+  background-image: radial-gradient(circle, #c8d4df 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+@media (max-width: 900px) {
+  .blocksLayout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flowViewRoot * {
+    transition: none !important;
+  }
+}

@@ -17,6 +17,7 @@ web-search-config.json
 open-websearch-launcher.log
 open-websearch-launcher.err.log
 llm-task-tree-kit/node_modules/
+llm-task-tree-kit/marketplace/
 skill-routing-log.md
 .task-tree-maintenance/
 .chain-run/
@@ -42,7 +43,6 @@ CL4R1T4S/
 
 # External research/skill collections; project integrations remain in llm-task-tree/ and skills/
 scientific-agent-skills/
-marketplace/
 copilot/
 gill_with_doc/
 handoff/

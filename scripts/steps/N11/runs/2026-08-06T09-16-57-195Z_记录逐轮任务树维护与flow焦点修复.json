@@ -1,0 +1,89 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N11",
+  "title": "重构多树上下文与 Agent 维护闭环",
+  "updatedAt": "2026-07-11T08:00:42.000Z",
+  "reportZh": "report.zh.md",
+  "substeps": [
+    {
+      "title": "审计当前上下文与执行维护失效点",
+      "inputs": [
+        { "path": "AGENTS.md", "line": 1 },
+        { "path": "task-tree.md", "line": 1 },
+        { "path": "scripts/project.json", "line": 1 }
+      ],
+      "outputs": [
+        { "path": "docs/agent-context-research/README.md" },
+        { "path": "docs/agent-context-research/AGENTS-lite.proposed.md" }
+      ]
+    },
+    {
+      "title": "检索并保存上下文管理与 Prompt 优化证据",
+      "inputs": [
+        { "path": "docs/agent-context-research/sources.md" }
+      ],
+      "outputs": [
+        { "path": "docs/agent-context-research/papers/lost-in-the-middle.pdf" },
+        { "path": "docs/agent-context-research/papers/reflexion.pdf" },
+        { "path": "docs/agent-context-research/papers/memgpt.pdf" },
+        { "path": "docs/agent-context-research/papers/opro.pdf" }
+      ]
+    },
+    {
+      "title": "逐句审核并功能等价重构 AGENTS.md",
+      "inputs": [
+        { "path": "docs/agent-context-research/prompt-audit/AGENTS.original.20260710.md" },
+        { "path": "docs/agent-context-research/pdf-design-notes.md" }
+      ],
+      "outputs": [
+        { "path": "AGENTS.md" },
+        { "path": "docs/agent-context-research/prompt-audit/AGENTS.annotated.md" },
+        { "path": "docs/agent-context-research/prompt-audit/statement-map.tsv" },
+        { "path": "docs/agent-context-research/prompt-audit/prompt-review.md" },
+        { "path": "scripts/verify-agent-prompt-coverage.mjs" }
+      ]
+    },
+    {
+      "title": "实现多树隔离与活动方法树执行边界",
+      "inputs": [
+        { "path": "task-trees.json" },
+        { "path": "task-tree.md", "line": 272 }
+      ],
+      "outputs": [
+        { "path": "server/tree-registry.js" },
+        { "path": "trees/background.md" },
+        { "path": "public/app.js" },
+        { "path": "scripts/test-multitree-ui.py" }
+      ]
+    },
+    {
+      "title": "把树、步骤证据和执行流维护变成 Stop postflight",
+      "inputs": [
+        { "path": "scripts/project.json" },
+        { "path": "scripts/steps/README.md" }
+      ],
+      "outputs": [
+        { "path": "server/maintenance.js" },
+        { "path": "server/turn-tracker.js" },
+        { "path": ".codex/hooks/stop-postflight.mjs" },
+        { "path": "scripts/test-multitree-maintenance.mjs" }
+      ]
+    },
+    {
+      "title": "消除旧 NextPlan 重做并自动维护确定性 flow/step 状态",
+      "inputs": [
+        { "path": "task-tree.md", "line": 306 },
+        { "path": "AGENTS.md", "line": 1 },
+        { "path": "scripts/project.json", "line": 1 }
+      ],
+      "outputs": [
+        { "path": "public/app.js" },
+        { "path": "server/maintenance.js" },
+        { "path": ".codex/hooks/turn-start.mjs" },
+        { "path": ".codex/hooks/stop-postflight.mjs" },
+        { "path": "scripts/test-multitree-maintenance.mjs" },
+        { "path": "scripts/test-multitree-ui.py" }
+      ]
+    }
+  ]
+}

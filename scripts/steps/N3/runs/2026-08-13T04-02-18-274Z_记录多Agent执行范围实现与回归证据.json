@@ -1,0 +1,132 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N3",
+  "blockId": "",
+  "updatedAt": "2026-08-11T07:21:50.412Z",
+  "title": "让 Codex 同步维护任务图",
+  "reportZh": "report.zh.md",
+  "substeps": [
+    {
+      "title": "生成实际落盘差异并向用户逐项回执",
+      "functions": [
+        {
+          "path": "server/tree-diff.js",
+          "name": "diffTreeMarkdown"
+        },
+        {
+          "path": "server.js",
+          "name": "PUT /api/tree 与子树写入端点"
+        },
+        {
+          "path": "scripts/mcp-server.mjs",
+          "name": "toolWrite"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "AGENTS.md",
+          "name": "F24 回执覆盖规则"
+        },
+        {
+          "path": "C:/Users/Administrator/.codex/prompts/global-every-turn.zh.md",
+          "name": "TT10 全局逐轮规则"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "scripts/test-share-install.mjs",
+          "name": "共享安装与真实差异端到端测试"
+        },
+        {
+          "path": "llm-task-tree-kit/templates/AGENTS.merge.md",
+          "name": "所有项目安装模板"
+        }
+      ],
+      "result": "服务端返回实际节点字段旧值→新值；31 个有效本机项目完成入口与 Prompt 同步，本机和 huangyu 全局 Prompt 哈希一致；端到端安装测试通过。"
+    },
+    {
+      "title": "修复 Codex 会话菜单叠字与等待",
+      "functions": [
+        {
+          "path": "server.js",
+          "name": "readCodexThreadsFast"
+        },
+        {
+          "path": "server/codex-run.js",
+          "name": "listProjectThreads 与 startCodexTurn"
+        },
+        {
+          "path": "public/app.js",
+          "name": "loadCodexThreadMenu"
+        },
+        {
+          "path": "public/styles.css",
+          "name": "嵌入模式会话菜单样式"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "public/styles.css",
+          "name": "嵌入工具栏 30px 按钮规则"
+        },
+        {
+          "path": "server/codex-run.js",
+          "name": "机器级会话扫描入口"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "scripts/test-codex-picker-ui.cjs",
+          "name": "真实嵌入界面几何与响应测试"
+        },
+        {
+          "path": "artifacts/codex-picker-embed.png",
+          "name": "修复后界面截图"
+        },
+        {
+          "path": "llm-task-tree-kit/marketplace/plugins/task-tree/runtime",
+          "name": "已重建插件运行时"
+        }
+      ],
+      "result": "持久缓存使重启后接口约 7–10 毫秒返回；真实嵌入测试首个可选项约 150 毫秒，14 个点击项最小宽度 406px，无行间或字段重叠；完整 MCP 测试通过。"
+    },
+    {
+      "title": "让打开任务图不依赖宿主保留嵌入元数据",
+      "functions": [
+        {
+          "path": "scripts/mcp-server.mjs",
+          "name": "openDesktopUrl 与 toolOpen"
+        },
+        {
+          "path": "scripts/test-mcp-server.mjs",
+          "name": "task_tree_open 浏览器后备回归测试"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/codex-run.js",
+          "name": "当前 Codex 延迟工具桥限制说明"
+        },
+        {
+          "path": "docs/agent-context-research/codex-mcp-apps-probe.zh.md",
+          "name": "MCP Apps 协议探针"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "llm-task-tree-kit/scripts/mcp-server.mjs",
+          "name": "共享 kit 修复入口"
+        },
+        {
+          "path": "marketplace/plugins/task-tree/runtime",
+          "name": "0.7.1 插件运行时"
+        },
+        {
+          "path": "llm-task-tree-kit/marketplace/plugins/task-tree/runtime",
+          "name": "0.7.1 共享插件运行时"
+        }
+      ],
+      "result": "红灯测试先复现只返回“已嵌入”文字；修复后 task_tree_open 会直接打开桌面浏览器并保留 MCP Apps 元数据。完整 MCP 测试、两个插件包测试及运行时一致性检查全部通过，本机 Codex 已安装 0.7.1。"
+    }
+  ]
+}

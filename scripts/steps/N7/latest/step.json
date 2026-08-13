@@ -1,0 +1,26 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N7",
+  "title": "集成 Markdown 知识库检索面板",
+  "reportZh": "report.zh.md",
+  "updatedAt": "2026-07-08T08:20:00.000Z",
+  "substeps": [
+    {
+      "title": "Embedding 索引重建",
+      "functions": [
+        { "path": "server.js", "line": 3609, "name": "POST /api/knowledge/reindex" },
+        { "path": "server.js", "line": 3614, "name": "GET /api/knowledge/reindex-status" }
+      ],
+      "promptZh": "prompts/01.zh.md",
+      "inputs": [{ "path": "subtrees/N7-subtree.md", "line": 6 }],
+      "outputs": [{ "path": "docs/subtree-parallel/v2-N7-findings.md", "line": 1 }]
+    },
+    {
+      "title": "并发 embedding 吞吐",
+      "functions": [
+        { "path": "task-tree.md", "line": 128, "name": "concurrency=40" }
+      ],
+      "outputs": [{ "path": ".env.example", "line": 1 }]
+    }
+  ]
+}

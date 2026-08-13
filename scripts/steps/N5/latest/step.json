@@ -1,0 +1,28 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N5",
+  "title": "处理任务树回溯后的文件漂移",
+  "reportZh": "report.zh.md",
+  "updatedAt": "2026-07-08T08:20:00.000Z",
+  "substeps": [
+    {
+      "title": "回溯/漂移协议",
+      "functions": [
+        { "path": "llm-task-tree/skills/task-tree-grill/references/rollback-drift.md", "line": 1, "name": "Rollback And Drift" }
+      ],
+      "promptZh": "prompts/01.zh.md",
+      "inputs": [{ "path": "task-tree.md", "line": 211 }],
+      "outputs": [{ "path": "AGENTS.md", "line": 1 }]
+    },
+    {
+      "title": "建树 skill 渐进披露拆分",
+      "functions": [
+        { "path": "llm-task-tree/skills/task-tree-grill/SKILL.md", "line": 1, "name": "task-tree-grill entry" }
+      ],
+      "outputs": [
+        { "path": "llm-task-tree/skills/task-tree-grill/references/graph-quality.md", "line": 1 },
+        { "path": "llm-task-tree/skills/task-tree-grill/references/schema-template.md", "line": 1 }
+      ]
+    }
+  ]
+}

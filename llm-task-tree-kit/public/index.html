@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LLM Task Tree</title>
+    <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/flow-view.css">
+  <link rel="stylesheet" href="/scratch-blocks.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="topbarLead">
+          <button id="chainAutoAdvanceBtn" type="button" class="chainAutoAdvanceBtn" title="Next 节点完成后自动沿执行链推进" aria-pressed="false">自动推进</button>
+          <div>
+            <h1>LLM Task Tree</h1>
+            <p id="subtitle">Markdown-backed shared task memory</p>
+          </div>
+          <div class="projectSwitch">
+            <button id="projectSwitchBtn" type="button" class="projectSwitchBtn" title="切到本机其它装过任务图的项目；每个项目有自己固定的地址和自己的 Codex 会话" aria-haspopup="menu" aria-expanded="false">
+              <span id="projectSwitchName">项目</span><span class="projectSwitchCaret">▾</span>
+            </button>
+            <div id="projectMenu" class="projectMenu hidden" role="menu" aria-label="切换项目"></div>
+          </div>
+          <div class="treeSwitcher" aria-label="任务树选择">
+            <label for="treeSelect">当前树</label>
+            <select id="treeSelect" title="切换背景树、方法树或其它独立任务树"></select>
+            <span id="activeMethodBadge" class="activeMethodBadge" title="执行流程只读取当前活动方法树">方法树</span>
+            <button id="setActiveMethodBtn" type="button" class="treeActionBtn" hidden>设为活动方法树</button>
+            <button id="createTreeBtn" type="button" class="treeActionBtn" title="创建一棵独立任务树">＋ 新树</button>
+            <span id="maintenanceState" class="maintenanceState" title="活动方法树、步骤证据与执行流程的维护状态">维护检查中…</span>
+          </div>
+        </div>
+        <div class="toolbar">
+          <button id="addChildBtn" title="Add child node">＋</button>
+          <label class="toolbarEdgeOpacity" title="选中节点时，非连接边的透明度">
+            <span>边透明</span>
+            <input id="edgeDimOpacity" type="range" min="10" max="90" value="35">
+          </label>
+          <button id="nodeCardCompactBtn" type="button" class="nodeCardCompactBtn" title="节点卡片摘要模式：默认只显示问题与一行结果，详情点开" aria-pressed="true">摘要</button>
+          <button id="projectOverviewBtn" type="button" class="projectOverviewBtn" title="查看项目决策总览">总览</button>
+          <button id="layoutTreeBtn" title="Layout as tree">⇲</button>
+          <button id="fitViewBtn" title="Fit view">⛶</button>
+          <button id="embedExpandBtn" type="button" class="embedExpandBtn" title="在对话里铺开" aria-pressed="false" hidden>⤢</button>
+          <button id="saveBtn" title="Save to task-tree.md">💾</button>
+          <button id="reloadBtn" title="Reload Markdown">↻</button>
+          <span class="codexLaunch">
+            <button id="openInCodexBtn" type="button" class="openInCodexBtn" title="让 Codex 执行 Next 节点的 NextIdea，自动跑一轮，不用按回车。默认续用本项目上次那条会话；点右边的 ▾ 可以直接跟它说别的">Codex</button>
+            <button id="codexThreadsBtn" type="button" class="codexThreadsBtn" title="换一条会话，或新开一条" aria-haspopup="menu" aria-expanded="false">▾</button>
+            <div id="codexThreadMenu" class="codexThreadMenu hidden" role="menu" aria-label="选择 Codex 会话"></div>
+          </span>
+          <button id="shutdownBtn" title="关闭后台服务">⏻</button>
+        </div>
+      </header>
+
+      <div id="workspaceBanner" class="workspaceBanner hidden" role="status">
+        <span id="workspaceBannerTitle">子树编辑</span>
+        <button type="button" id="workspaceBannerExitBtn">返回主树</button>
+      </div>
+
+      <main class="layout">
+        <aside class="knowledgePane" aria-label="Knowledge base">
+          <div class="paneHeader">
+            <strong>知识库</strong>
+            <span id="knowledgeState">未配置</span>
+          </div>
+          <div class="knowledgeBody">
+            <details class="knowledgeSection knowledgeSection--env" open>
+              <summary>环境配置</summary>
+              <div id="kbEnvInfo" class="knowledgeMeta"></div>
+              <details class="knowledgeSection knowledgeSection--retrieval" open>
+                <summary>知识库文件夹</summary>
+                <p class="knowledgeRetrievalHint">在 <code>libraryRoot</code> 下每个一级子文件夹 = 一个独立知识库，索引互不覆盖（<code>knowledge-indices/*.json</code>）。</p>
+                <label class="knowledgeField">
+                  <span>当前检索库</span>
+                  <select id="kbLibrarySelect" aria-label="选择知识库"></select>
+                </label>
+                <label class="knowledgeToggle">
+                  <input id="kbSearchAllLibraries" type="checkbox">
+                  <span>检索全部知识库（合并各库 top 结果）</span>
+                </label>
+                <div id="kbLibraryStats" class="knowledgeMeta"></div>
+              </details>
+              <details class="knowledgeSection knowledgeSection--retrieval" open>
+                <summary>检索多样性（横向对比）</summary>
+                <p class="knowledgeRetrievalHint">无需重建索引。候选池越大越容易覆盖更多论文；每篇段数越大单篇证据越深。</p>
+                <label class="knowledgeToggle">
+                  <input id="kbRetrievalDiversify" type="checkbox" checked>
+                  <span>按论文 path 轮询去重（推荐开启）</span>
+                </label>
+                <label class="knowledgeSliderRow">
+                  <span>每篇最多段数 <strong id="kbRetrievalMaxChunksVal">1</strong></span>
+                  <input id="kbRetrievalMaxChunks" type="range" min="1" max="5" step="1" value="1" aria-label="每篇最多段数">
+                </label>
+                <label class="knowledgeSliderRow">
+                  <span>候选池倍数 <strong id="kbRetrievalPoolVal">10</strong></span>
+                  <input id="kbRetrievalPool" type="range" min="2" max="30" step="1" value="10" aria-label="候选池倍数">
+                </label>
+                <div class="knowledgeActions knowledgeRetrievalActions">
+                  <button id="kbRetrievalSaveBtn" type="button">保存检索设置</button>
+                  <span id="kbRetrievalStatus" class="knowledgeMeta"></span>
+                </div>
+              </details>
+              <div class="knowledgeActions">
+                <button id="kbReindexBtn" type="button">重建当前库</button>
+                <button id="kbReindexAllBtn" type="button" class="ghost">重建全部库</button>
+              </div>
+              <div id="kbIndexInfo" class="knowledgeMeta"></div>
+            </details>
+            <section class="knowledgeSection knowledgeSection--chat">
+              <div class="knowledgeChatControls">
+                <div class="knowledgeTitle">检索 / 问答</div>
+                <textarea id="kbQuestion" placeholder="基于 Markdown 知识库提问"></textarea>
+                <label class="knowledgeToggle">
+                  <input id="kbUseForModels" type="checkbox" checked>
+                  <span>多模型协作：运行前自动检索知识库（可追加 search JSON）</span>
+                </label>
+                <label class="knowledgeToggle">
+                  <input id="kbUseWebSearch" type="checkbox" checked>
+                  <span>检索和问答时同时联网搜索</span>
+                </label>
+                <div class="knowledgeActions">
+                  <button id="kbSearchBtn" type="button">检索</button>
+                  <button id="kbAskBtn" type="button">问模型</button>
+                  <button id="kbClearHistoryBtn" type="button" class="ghost">清空历史</button>
+                </div>
+                <div id="kbHistorySummary" class="knowledgeMeta"></div>
+              </div>
+              <div id="kbHistory" class="knowledgeHistory" aria-label="检索与模型回答历史"></div>
+            </section>
+          </div>
+          <div class="paneResizeHandle paneResizeHandle--left" data-pane-resize="left" aria-label="拖动调整知识库宽度" title="拖动调整宽度"></div>
+        </aside>
+        <section class="graphPane" aria-label="Task graph">
+          <button type="button" id="toggleLeftPaneBtn" class="paneEdgeToggle paneEdgeToggle--left" aria-expanded="true" title="收起知识库">‹</button>
+          <button type="button" id="toggleRightPaneBtn" class="paneEdgeToggle paneEdgeToggle--right" aria-expanded="true" title="收起版本树">›</button>
+          <div class="paneHeader">
+            <div class="graphPaneHeadRow">
+              <strong>任务图谱</strong>
+              <div class="graphViewToggle" role="tablist" aria-label="图谱视图">
+                <button type="button" class="graphViewBtn is-active" data-graph-view="tree">关系图</button>
+                <button type="button" class="graphViewBtn" data-graph-view="flow">执行流程</button>
+              </div>
+            </div>
+            <span>
+              <span id="nodeCount"></span>
+              <span id="linkState"></span>
+              <span id="saveState">已加载</span>
+              <span class="graphExportBtns">
+                <button type="button" id="exportTreeSvgBtn" class="graphExportBtn" title="导出关系图 SVG（自动撑高+树形排版，样式与界面一致）">⤓ 关系图</button>
+                <button type="button" id="exportFlowSvgBtn" class="graphExportBtn" title="导出执行流程脚本为 SVG 矢量图">⤓ 流程图</button>
+              </span>
+            </span>
+          </div>
+          <div id="graphViewport" class="graphViewport">
+            <div id="graphCanvas" class="graphCanvas">
+              <svg id="edges" class="edges" aria-hidden="true"></svg>
+              <div id="edgeLabels" class="edgeLabels"></div>
+              <div id="nodesLayer" class="nodesLayer"></div>
+            </div>
+          </div>
+          <section id="focusLens" class="focusLens" aria-label="节点焦点透镜" hidden>
+            <header class="focusLensHeader">
+              <div>
+                <span class="focusLensEyebrow">焦点透镜</span>
+                <p>沿上下游查看节点</p>
+              </div>
+              <button type="button" id="focusLensClose" aria-label="关闭焦点透镜" title="关闭并定位到当前节点">×</button>
+            </header>
+            <nav id="focusLensTrail" class="focusLensTrail" aria-label="节点路径"></nav>
+            <div id="focusLensBody" class="focusLensBody"></div>
+          </section>
+          <div id="flowViewHost" class="flowViewHost" hidden></div>
+        </section>
+        <aside class="versionPane" aria-label="Version history">
+          <div class="paneHeader">
+            <strong>版本树</strong>
+            <span id="versionState">已加载</span>
+          </div>
+          <div id="versionList" class="versionList"></div>
+        </aside>
+      </main>
+
+      <div id="chainLoopCmdBar" class="chainLoopCmdBar hidden" aria-label="Codex loop 命令">
+        <span class="chainLoopCmdLabel">链式循环</span>
+        <button type="button" id="chainRunBtn" class="chainRunBtn" title="直接发给 Codex 桌面端：按 chain-step 算出的单步提示跑一轮，不用复制命令">▶ 直接开跑</button>
+        <code id="chainLoopCmdText" class="chainLoopCmdText"></code>
+        <button type="button" id="chainLoopCmdCopyBtn" class="chainLoopCmdCopyBtn" title="复制 loop 命令，给 Cursor 或别的 Agent 用">复制</button>
+      </div>
+      <footer class="chainDock" aria-label="Agent 执行链">
+        <span class="chainDockLabel">执行链</span>
+        <div id="chainSlot" class="chainSlot"></div>
+        <button id="chainLoopHelpBtn" type="button" class="chainLoopHelpBtn" title="链式 loop 使用说明">循环说明</button>
+        <button id="chainClearBtn" type="button" class="chainClearBtn" title="清空执行链">清空</button>
+      </footer>
+    </div>
+    <dialog id="projectOverviewDialog" class="projectOverviewDialog" aria-label="项目决策总览">
+      <header class="projectOverviewHeader">
+        <div>
+          <span class="projectOverviewEyebrow">重新进入项目</span>
+          <h2 id="projectOverviewTitle">项目总览</h2>
+          <p id="projectOverviewMeta"></p>
+        </div>
+        <button type="button" id="projectOverviewClose" title="关闭项目总览" aria-label="关闭项目总览">×</button>
+      </header>
+      <div id="projectOverviewBody" class="projectOverviewBody"></div>
+    </dialog>
+    <dialog id="chainLoopHelpDialog" class="chainLoopHelpDialog" aria-label="链式 loop 使用说明">
+      <div class="chainLoopHelpHeader">
+        <strong>链式 loop：Codex / Cursor 自动跑执行链</strong>
+        <button type="button" id="chainLoopHelpClose" title="关闭">×</button>
+      </div>
+      <div class="chainLoopHelpBody">
+        <p class="chainLoopHelpLead">每轮 loop 的<strong>唯一执行依据</strong>是当前 <code>Next</code> 节点卡片上的<strong>「下一步思路」</strong>（节点字段 <code>NextIdea</code>，见 <code>chain-step</code> 的 <code>stepMarkdown</code>）。<strong>不要</strong>按 <code>GraphState.NextPlan</code>（「下一步」输入框）执行。Agent 可以读完整任务树、改树、跑命令；但<strong>一轮只完成 Next 节点上的这一项 NextIdea</strong>，不要跳去做 Chain 里后面的节点。</p>
+
+        <section class="chainLoopHelpSection">
+          <h3>一、在项目页面配置（任务图 UI）</h3>
+          <ol>
+            <li>双击项目里的 <strong>打开任务图.cmd</strong>，确保本页已连上后台（地址栏端口即服务端口，当前：<span id="chainLoopHelpPort">—</span>）。</li>
+            <li>把节点设为 <strong>Next</strong>（◆ 按钮）后，在卡片上的 <strong>「下一步思路」</strong> 里写本轮 Codex 要做的<strong>一句可执行话</strong>（字段 <code>NextIdea</code>）。</li>
+            <li>点击节点标题旁的 <strong>⊕</strong> 加入底部<strong>执行链</strong>；拖动排序；高亮项 = 当前 <code>Next</code>。</li>
+            <li>左上角 <strong>自动推进</strong>（<code>ChainAutoAdvance</code>）：本步标记完成后，下轮自动把 Chain 下一节点设为 Next（你在新 Next 节点写好 NextIdea 再跑）。</li>
+            <li>「下一步」(<code>NextPlan</code>) 仅供 UI/备忘，<strong>loop 不读</strong>；保存后确认 <code>Next</code>、<code>NextIdea</code>、<code>Chain</code> 正确。</li>
+          </ol>
+        </section>
+
+        <section class="chainLoopHelpSection">
+          <h3>二、在 Codex / Cursor 里配置 loop</h3>
+          <ol>
+            <li>项目根目录打开 Agent（Codex 或 Cursor），工作目录必须是本项目根（含 <code>AGENTS.md</code>、<code>task-tree.md</code>）。</li>
+            <li>在 Cursor 聊天框粘贴下面命令启动 loop（推荐 3 分钟一轮）；Codex 同样粘贴为每轮指令或定时任务：</li>
+          </ol>
+          <pre id="chainLoopHelpPrompt" class="chainLoopHelpCode"></pre>
+          <button type="button" id="chainLoopHelpCopyBtn" class="chainLoopHelpCopyBtn">复制 loop 命令</button>
+          <p class="chainLoopHelpNote"><strong>读哪些文件？</strong> 每轮先用 <code>chain-step</code> 拿本步焦点（ROOT + 链上已走到的节点 + Next 的 <code>NextIdea</code>）。若需要全局上下文，<strong>可以</strong>再读完整 <code>task-tree.md</code>、改节点/边、运行 shell 命令——这些都是正常 Agent 能力。</p>
+          <p class="chainLoopHelpNote"><strong>不要做什么？</strong> 一轮内不要擅自做完 Chain 里多个节点；不要按 <code>NextPlan</code>（「下一步」）执行；链结束或 <code>shouldStopLoop</code> 后不要继续 arm loop。</p>
+        </section>
+
+        <section class="chainLoopHelpSection">
+          <h3>三、每轮 loop Agent 固定流程</h3>
+          <ol>
+            <li><code>GET …/api/graph-state/chain-step</code> → 若 <code>shouldStopLoop</code> 则 <code>chain-loop-stop.ps1 -SoftOnly</code> 并结束。</li>
+            <li>从 <code>stepMarkdown</code> 读取 <code>Next</code> 与 Next 节点的 <code>NextIdea</code>（下一步思路）。</li>
+            <li><strong>按 NextIdea 执行</strong>：写代码、跑命令、更新 Next 节点 <code>CurrentResult</code>；完成则 <code>Completion: 已完成</code>；按 AGENTS 备份并保存 <code>task-tree.md</code>。</li>
+            <li>若已开自动推进且本步完成 → <code>POST …/api/graph-state/chain-advance</code>；<code>done: true</code> 或 again <code>shouldStopLoop</code> → stop 脚本。</li>
+          </ol>
+          <p class="chainLoopHelpNote">Windows 门禁（可选）：<code>powershell -File llm-task-tree-kit/scripts/chain-loop-gate.ps1</code>（<code>$env:PORT</code> = 本页端口）。</p>
+        </section>
+
+        <section class="chainLoopHelpSection">
+          <h3>四、停止与注意</h3>
+          <ul>
+            <li>链结束或 <code>shouldStopLoop</code> 后运行 stop 脚本；默认 <code>-SoftOnly</code> 只停 loop 任务、<strong>不关闭</strong> Cursor/VS Code（需硬停时加 <code>-Hard</code>）。</li>
+            <li>底部「多模型协作」面板是临时讨论，<strong>不能代替</strong> Agent 链式 loop。</li>
+            <li>详细协议见项目 <code>skills/task-tree-chain-run/SKILL.md</code>。</li>
+          </ul>
+        </section>
+      </div>
+    </dialog>
+    <dialog id="codexParallelDialog" class="codexParallelDialog" aria-label="并行 Codex 运行">
+      <div class="codexParallelHeader">
+        <strong>并行 Codex</strong>
+        <button type="button" id="codexParallelClose" title="关闭">×</button>
+      </div>
+      <form id="codexParallelForm" class="codexParallelForm">
+        <div class="codexParallelTableWrap">
+          <table class="codexParallelTable">
+            <thead><tr><th>启用</th><th>节点</th><th>任务</th><th>独占写集</th></tr></thead>
+            <tbody id="codexParallelRows"></tbody>
+          </table>
+        </div>
+        <div class="codexParallelActions">
+          <span id="codexParallelState" role="status"></span>
+          <button type="button" id="codexParallelOpen" hidden>打开协调任务</button>
+          <button type="submit" id="codexParallelStart">开始并行</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="filePreviewDialog" class="filePreviewDialog" aria-label="File preview">
+      <div class="filePreviewHeader">
+        <strong id="filePreviewTitle">文件预览</strong>
+        <button type="button" id="filePreviewClose" title="关闭">×</button>
+      </div>
+      <pre id="filePreviewContent" class="filePreviewContent"></pre>
+    </dialog>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+    <script src="/tree-layout.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

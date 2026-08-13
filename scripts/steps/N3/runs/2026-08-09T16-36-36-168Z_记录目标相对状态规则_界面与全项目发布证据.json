@@ -1,0 +1,25 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N3",
+  "title": "让 Codex 同步维护任务图",
+  "reportZh": "report.zh.md",
+  "updatedAt": "2026-07-08T08:20:00.000Z",
+  "substeps": [
+    {
+      "title": "Agent 写树协议",
+      "functions": [
+        { "path": "llm-task-tree/AGENTS.task-tree.md", "line": 49, "name": "Start-of-Task Protocol" }
+      ],
+      "promptZh": "prompts/01.zh.md",
+      "inputs": [{ "path": "subtrees/N3-subtree.md", "line": 6 }],
+      "outputs": [{ "path": "AGENTS.md", "line": 1 }]
+    },
+    {
+      "title": "精炼写树与版本备份",
+      "functions": [
+        { "path": "AGENTS.md", "line": 7, "name": "Compact Current-State Rule" }
+      ],
+      "outputs": [{ "path": "versions/", "line": 1 }]
+    }
+  ]
+}

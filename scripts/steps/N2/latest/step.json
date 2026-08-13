@@ -1,0 +1,57 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N2",
+  "title": "实现可视化图谱编辑器",
+  "reportZh": "report.zh.md",
+  "updatedAt": "2026-07-23T03:30:00.000Z",
+  "substeps": [
+    {
+      "title": "紧凑自动整理",
+      "functions": [
+        { "path": "public/app.js", "name": "buildContourSubtreeLayout" },
+        { "path": "public/app.js", "name": "placeContourTree" }
+      ],
+      "inputs": [{ "path": "task-tree.md", "line": 38 }],
+      "outputs": [{ "path": "public/app.js" }]
+    },
+    {
+      "title": "节点卡片摘要模式与活树精炼",
+      "functions": [
+        { "path": "public/app.js", "line": 2143, "name": "syncNodeCardCompactButton" },
+        { "path": "public/app.js", "line": 2163, "name": "toggleNodeCardCompact" },
+        { "path": "public/app.js", "line": 4980, "name": "displayNodeHeight" }
+      ],
+      "inputs": [{ "path": "task-tree.md", "line": 1 }],
+      "outputs": [
+        { "path": "task-tree.md", "line": 1 },
+        { "path": "public/index.html", "line": 1 },
+        { "path": "versions/202607220946224_精炼节点可读性.md", "line": 1 }
+      ]
+    },
+    {
+      "title": "图谱编辑与自动保存",
+      "functions": [
+        { "path": "public/app.js", "line": 4093, "name": "saveTree" }
+      ],
+      "promptZh": "prompts/01.zh.md",
+      "inputs": [{ "path": "task-tree.md", "line": 38 }],
+      "outputs": [{ "path": "task-tree.md", "line": 67 }]
+    },
+    {
+      "title": "关系图与执行流程双视图",
+      "functions": [
+        { "path": "public/app.js", "line": 5088, "name": "initFlowView" },
+        { "path": "public/flow-view.js", "line": 448, "name": "initFlowView" }
+      ],
+      "outputs": [{ "path": "public/flow-view.js", "line": 435 }]
+    },
+    {
+      "title": "I/O 文件路径预览",
+      "functions": [
+        { "path": "server.js", "line": 1, "name": "GET /api/file preview" }
+      ],
+      "inputs": [{ "path": "AGENTS.md", "line": 1 }],
+      "outputs": [{ "path": "task-tree.md", "line": 58 }]
+    }
+  ]
+}

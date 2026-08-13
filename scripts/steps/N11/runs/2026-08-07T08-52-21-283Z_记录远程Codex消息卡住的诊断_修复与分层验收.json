@@ -1,0 +1,77 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N11",
+  "blockId": "",
+  "updatedAt": "2026-08-07T07:13:42.189Z",
+  "title": "全局 Prompt 自动翻译与跨机器发布",
+  "reportZh": "report.zh.md",
+  "substeps": [
+    {
+      "title": "实现翻译、逐行门禁与两阶段发布",
+      "functions": [
+        {
+          "path": "scripts/prompt-publisher/publish-global-prompt.mjs",
+          "line": 90,
+          "name": "validateTranslation"
+        },
+        {
+          "path": "scripts/prompt-publisher/publish-global-prompt.mjs",
+          "line": 235,
+          "name": "translateWithCodex"
+        },
+        {
+          "path": "scripts/prompt-publisher/publish-global-prompt.mjs",
+          "line": 512,
+          "name": "publishGlobalPrompt"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "C:/Users/Administrator/.codex/prompts/global-every-turn.zh.md",
+          "line": 1
+        }
+      ],
+      "outputs": [
+        {
+          "path": "scripts/prompt-publisher/publish-global-prompt.mjs",
+          "line": 1
+        },
+        {
+          "path": "scripts/test-prompt-publisher.mjs",
+          "line": 1
+        }
+      ]
+    },
+    {
+      "title": "安装桌面保存监控入口",
+      "functions": [
+        {
+          "path": "scripts/prompt-publisher/edit-global-prompt.ps1",
+          "line": 66,
+          "name": "Invoke-Publisher"
+        },
+        {
+          "path": "scripts/prompt-publisher/install-global-prompt-publisher.ps1",
+          "line": 69,
+          "name": "CreateShortcut"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "C:/Users/Administrator/.codex/hooks.json",
+          "line": 1
+        }
+      ],
+      "outputs": [
+        {
+          "path": "scripts/prompt-publisher/README.zh.md",
+          "line": 1
+        },
+        {
+          "path": "C:/Users/Administrator/.codex/prompt-publisher/state.json",
+          "line": 1
+        }
+      ]
+    }
+  ]
+}

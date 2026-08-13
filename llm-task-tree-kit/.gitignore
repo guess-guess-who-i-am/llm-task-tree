@@ -1,0 +1,22 @@
+node_modules/
+.env
+*.log
+open-websearch-launcher.log
+open-websearch-launcher.err.log
+install.manifest.json
+.DS_Store
+Thumbs.db
+
+# Optional local daemon; clone separately or run setup-open-websearch after copying from upstream.
+open-webSearch/
+
+# Optional local daemon; clone separately or run setup-open-websearch after copying from upstream.
+open-webSearch/
+
+# Machine-local paths (created by install/deploy on each PC)
+task-tree.config.json
+setup-task-tree.kitpath
+
+# Machine-local project lists (each PC keeps its own; see *.example.txt)
+update-projects.txt
+update-search-roots.txt

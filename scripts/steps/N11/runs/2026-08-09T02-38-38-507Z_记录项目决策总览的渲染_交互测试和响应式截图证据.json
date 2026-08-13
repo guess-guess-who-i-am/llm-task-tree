@@ -1,0 +1,157 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N11",
+  "blockId": "",
+  "updatedAt": "2026-08-09T02:37:31.059Z",
+  "title": "多树上下文与 Agent 维护闭环",
+  "reportZh": "report.zh.md",
+  "substeps": [
+    {
+      "title": "修复代理槽位泄漏并缩短失败等待",
+      "functions": [
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/proxy.mjs",
+          "name": "Semaphore.acquire"
+        },
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/proxy.mjs",
+          "name": "Semaphore.release"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "task-tree.md"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/test_semaphore.mjs"
+        },
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/test_mcp_tool_recovery.mjs"
+        }
+      ]
+    },
+    {
+      "title": "验收 Windows 4000、远程 4152 与 Codex CLI",
+      "inputs": [
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/.env"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "scripts/steps/N11/latest/report.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "将两段式回顾重构为项目决策总览",
+      "functions": [
+        {
+          "path": "public/app.js",
+          "line": 677,
+          "name": "renderProjectOverview"
+        },
+        {
+          "path": "public/styles.css",
+          "line": 1674,
+          "name": "projectOverviewDialog"
+        },
+        {
+          "path": "public/index.html",
+          "line": 188,
+          "name": "projectOverviewDialog"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "task-tree.md",
+          "line": 5
+        }
+      ],
+      "outputs": [
+        {
+          "path": "artifacts/project-overview-desktop.png"
+        },
+        {
+          "path": "artifacts/project-overview-mobile.png"
+        },
+        {
+          "path": "scripts/test-project-overview-ui.mjs",
+          "line": 1
+        }
+      ]
+    },
+    {
+      "title": "修复 DeepSeek 历史工具参数格式错误",
+      "functions": [
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/proxy.mjs",
+          "line": 2388,
+          "name": "normalizeHistoricalToolCallArguments"
+        },
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/proxy.mjs",
+          "line": 2417,
+          "name": "sanitizeResponsesInputItem"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "task-tree.md"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/test_history_tool_arguments.mjs"
+        },
+        {
+          "path": "scripts/steps/N11/latest/report.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "修复 Prompt 监测与翻译瞬时失败并隐藏终端",
+      "functions": [
+        {
+          "path": "scripts/prompt-publisher/edit-global-prompt.ps1",
+          "name": "Get-SourceHash"
+        },
+        {
+          "path": "scripts/prompt-publisher/publish-global-prompt.mjs",
+          "name": "retryOperation"
+        },
+        {
+          "path": "scripts/prompt-publisher/launch-global-prompt-editor.vbs",
+          "name": "WScript.Shell.Run"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "C:/Users/Administrator/.codex/prompts/global-every-turn.zh.md"
+        },
+        {
+          "path": "C:/Users/Administrator/.codex/prompt-publisher/targets.json"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "scripts/test-prompt-editor-watcher.ps1"
+        },
+        {
+          "path": "scripts/test-prompt-publisher-retry.mjs"
+        },
+        {
+          "path": "scripts/test-prompt-publisher-hidden-launcher.ps1"
+        },
+        {
+          "path": "C:/Users/Administrator/.codex/prompt-publisher/state.json"
+        },
+        {
+          "path": "C:/Users/Administrator/.codex/prompts/global-every-turn.en.md"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,574 @@
+.ttvc-host {
+  min-width: 0;
+}
+
+.ttvc {
+  --ink: #17343c;
+  --muted: #5e777a;
+  --faint: #8aa0a0;
+  --paper: #edf5f3;
+  --paper-deep: #dceae6;
+  --river: #26788a;
+  --river-light: #81b4bc;
+  --current: #c75c3a;
+  --next: #7456a5;
+  --branch: #6f8c84;
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 640px;
+  overflow: hidden;
+  color: var(--ink);
+  background:
+    radial-gradient(ellipse at 8% 14%, transparent 0 64px, rgba(60, 113, 107, 0.11) 65px 66px, transparent 67px 84px, rgba(60, 113, 107, 0.08) 85px 86px, transparent 87px),
+    radial-gradient(ellipse at 91% 74%, transparent 0 110px, rgba(60, 113, 107, 0.09) 111px 112px, transparent 113px 142px, rgba(60, 113, 107, 0.07) 143px 144px, transparent 145px),
+    linear-gradient(135deg, #f4f9f8 0%, var(--paper) 44%, #e6f0ed 100%);
+  border: 1px solid rgba(23, 52, 60, 0.12);
+  border-radius: 22px;
+  box-shadow: 0 24px 70px rgba(32, 72, 75, 0.12);
+  font-family: "Noto Sans SC", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+}
+
+.ttvc *,
+.ttvc *::before,
+.ttvc *::after {
+  box-sizing: border-box;
+}
+
+.ttvc-topbar {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 30px;
+  padding: 26px 32px 22px;
+  border-bottom: 1px solid rgba(23, 52, 60, 0.13);
+  background: rgba(239, 247, 245, 0.84);
+  backdrop-filter: blur(16px);
+}
+
+.ttvc-identity {
+  max-width: 710px;
+}
+
+.ttvc-kicker,
+.ttvc-branch-eyebrow,
+.ttvc-source-label {
+  display: block;
+  color: var(--river);
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.ttvc-heading {
+  margin: 5px 0 0;
+  font-family: "Noto Serif SC", "Songti SC", SimSun, serif;
+  font-size: clamp(22px, 2.7vw, 34px);
+  font-weight: 650;
+  letter-spacing: -0.035em;
+  line-height: 1.18;
+}
+
+.ttvc-helper {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.ttvc-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px 15px;
+  padding-bottom: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ttvc-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ttvc-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--branch);
+  box-shadow: 0 0 0 3px rgba(111, 140, 132, 0.14);
+}
+
+.ttvc-legend-item.is-current .ttvc-legend-dot {
+  background: var(--current);
+  box-shadow: 0 0 0 3px rgba(199, 92, 58, 0.14);
+}
+
+.ttvc-legend-item.is-next .ttvc-legend-dot {
+  background: var(--next);
+  box-shadow: 0 0 0 3px rgba(116, 86, 165, 0.14);
+}
+
+.ttvc-viewport {
+  position: relative;
+  min-height: 550px;
+  max-height: min(76vh, 920px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: rgba(38, 120, 138, 0.35) transparent;
+}
+
+.ttvc-viewport:focus-visible {
+  outline: 3px solid rgba(38, 120, 138, 0.32);
+  outline-offset: -4px;
+}
+
+.ttvc-terrain {
+  position: relative;
+  width: min(100%, 1180px);
+  min-width: 720px;
+  min-height: 560px;
+  margin: 0 auto;
+  padding: 46px 58px 80px;
+}
+
+.ttvc-terrain::before,
+.ttvc-terrain::after {
+  position: absolute;
+  z-index: 0;
+  content: "";
+  pointer-events: none;
+  border: 1px solid rgba(38, 120, 138, 0.1);
+  border-radius: 49% 51% 41% 59% / 59% 40% 60% 41%;
+  transform: rotate(-8deg);
+}
+
+.ttvc-terrain::before {
+  inset: 26px 12% 42% 7%;
+  box-shadow: 0 0 0 18px rgba(38, 120, 138, 0.025), 0 0 0 36px rgba(38, 120, 138, 0.018);
+}
+
+.ttvc-terrain::after {
+  inset: 44% 4% 5% 49%;
+  transform: rotate(14deg);
+  box-shadow: 0 0 0 24px rgba(38, 120, 138, 0.022), 0 0 0 48px rgba(38, 120, 138, 0.014);
+}
+
+.ttvc-source {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  align-items: center;
+  width: min(760px, 78%);
+  margin: 0 auto 25px;
+}
+
+.ttvc-source-marker {
+  position: relative;
+  width: 58px;
+  height: 58px;
+}
+
+.ttvc-source-ring,
+.ttvc-source-core {
+  position: absolute;
+  border-radius: 50%;
+}
+
+.ttvc-source-ring {
+  inset: 0;
+  border: 1px solid rgba(38, 120, 138, 0.45);
+  box-shadow: 0 0 0 8px rgba(38, 120, 138, 0.07), 0 0 0 16px rgba(38, 120, 138, 0.035);
+}
+
+.ttvc-source-core {
+  inset: 17px;
+  background: var(--river);
+  box-shadow: 0 5px 15px rgba(38, 120, 138, 0.35);
+}
+
+.ttvc-source-copy {
+  min-width: 0;
+  padding: 4px 0 8px;
+}
+
+.ttvc-source-title {
+  margin: 4px 0 0;
+  font-family: "Noto Serif SC", "Songti SC", SimSun, serif;
+  font-size: clamp(24px, 3.2vw, 42px);
+  font-weight: 650;
+  letter-spacing: -0.045em;
+  line-height: 1.18;
+}
+
+.ttvc-source-purpose {
+  max-width: 660px;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.ttvc-tributaries {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 11px;
+  margin: 0;
+  padding: 0 0 0 43px;
+  list-style: none;
+}
+
+.ttvc-first-tributaries {
+  width: min(870px, 88%);
+  margin: 0 auto;
+  padding-left: 38px;
+}
+
+.ttvc-tributaries::before {
+  position: absolute;
+  top: -16px;
+  bottom: 26px;
+  left: 16px;
+  width: 3px;
+  content: "";
+  border-radius: 999px;
+  background: linear-gradient(to bottom, var(--river), rgba(129, 180, 188, 0.5));
+  box-shadow: 0 0 0 5px rgba(38, 120, 138, 0.045);
+}
+
+.ttvc-branch {
+  position: relative;
+  min-width: 0;
+}
+
+.ttvc-branch::before {
+  position: absolute;
+  top: 25px;
+  left: -27px;
+  width: 29px;
+  height: 16px;
+  content: "";
+  border-top: 2px solid var(--river-light);
+  border-radius: 58% 42% 0 0;
+  transform: rotate(8deg);
+  transform-origin: left center;
+}
+
+.ttvc-branch:nth-child(even)::before {
+  border-radius: 35% 65% 0 0;
+  transform: rotate(-7deg);
+}
+
+.ttvc-stem {
+  min-width: 0;
+}
+
+.ttvc-branch-trigger {
+  display: grid;
+  grid-template-columns: 34px minmax(180px, 1fr) auto;
+  align-items: center;
+  width: 100%;
+  min-height: 58px;
+  padding: 8px 12px 8px 8px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: rgba(247, 251, 250, 0.58);
+  border: 1px solid rgba(23, 52, 60, 0.1);
+  border-radius: 10px 18px 18px 10px;
+  box-shadow: 0 4px 14px rgba(37, 75, 76, 0.045);
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+
+.ttvc-branch-trigger:hover {
+  background: rgba(255, 255, 255, 0.84);
+  border-color: rgba(38, 120, 138, 0.32);
+  box-shadow: 0 8px 20px rgba(37, 75, 76, 0.08);
+  transform: translateX(3px);
+}
+
+.ttvc-branch-trigger:focus-visible {
+  outline: 3px solid rgba(38, 120, 138, 0.28);
+  outline-offset: 3px;
+}
+
+.ttvc-fork-glyph {
+  position: relative;
+  width: 26px;
+  height: 32px;
+}
+
+.ttvc-glyph-line {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 11px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--branch);
+}
+
+.ttvc-glyph-tip {
+  position: absolute;
+  top: 10px;
+  left: 11px;
+  width: 10px;
+  height: 10px;
+  border-top: 2px solid var(--branch);
+  border-right: 2px solid var(--branch);
+  border-radius: 0 7px 0 0;
+  transform: rotate(45deg);
+  transition: transform 180ms ease, top 180ms ease;
+}
+
+.ttvc-branch.is-expanded > .ttvc-stem > .ttvc-branch-trigger .ttvc-glyph-tip {
+  top: 13px;
+  transform: rotate(135deg);
+}
+
+.ttvc-branch-heading {
+  display: block;
+  min-width: 0;
+}
+
+.ttvc-branch-title {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  font-size: 15px;
+  font-weight: 680;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ttvc-branch-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  padding-left: 12px;
+  color: var(--muted);
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.ttvc-completion,
+.ttvc-descendants {
+  padding: 3px 6px;
+  border: 1px solid rgba(23, 52, 60, 0.1);
+  border-radius: 999px;
+}
+
+.ttvc-toggle-word {
+  min-width: 28px;
+  color: var(--river);
+  font-family: "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
+}
+
+.ttvc-branch.is-active-route > .ttvc-stem > .ttvc-branch-trigger {
+  background: rgba(255, 255, 255, 0.76);
+  border-color: rgba(38, 120, 138, 0.3);
+}
+
+.ttvc-branch.is-current > .ttvc-stem > .ttvc-branch-trigger {
+  border-left: 5px solid var(--current);
+}
+
+.ttvc-branch.is-current > .ttvc-stem > .ttvc-branch-trigger .ttvc-branch-eyebrow {
+  color: var(--current);
+}
+
+.ttvc-branch.is-next > .ttvc-stem > .ttvc-branch-trigger {
+  border-left: 5px solid var(--next);
+}
+
+.ttvc-branch.is-next > .ttvc-stem > .ttvc-branch-trigger .ttvc-branch-eyebrow {
+  color: var(--next);
+}
+
+.ttvc-node-detail {
+  position: relative;
+  margin: 6px 20px 12px 42px;
+  padding: 13px 15px 14px;
+  border-left: 2px solid rgba(38, 120, 138, 0.34);
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.64), rgba(255, 255, 255, 0.18));
+}
+
+.ttvc-node-detail[hidden],
+.ttvc-tributaries[hidden] {
+  display: none;
+}
+
+.ttvc-direction {
+  margin: 0;
+  color: var(--ink);
+  font-family: "Noto Serif SC", "Songti SC", SimSun, serif;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.65;
+}
+
+.ttvc-facts {
+  display: grid;
+  gap: 7px;
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(23, 52, 60, 0.14);
+}
+
+.ttvc-fact {
+  display: grid;
+  grid-template-columns: 106px minmax(0, 1fr);
+  gap: 10px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.ttvc-fact dt {
+  color: var(--faint);
+}
+
+.ttvc-fact dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+.ttvc-leaf-note {
+  position: relative;
+  z-index: 1;
+  margin: 50px auto;
+  color: var(--muted);
+  text-align: center;
+}
+
+.ttvc--empty {
+  display: grid;
+  min-height: 460px;
+  place-content: center;
+  padding: 40px;
+  text-align: center;
+}
+
+.ttvc--empty h2 {
+  margin: 8px 0;
+  font-family: "Noto Serif SC", "Songti SC", serif;
+}
+
+.ttvc--empty p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.ttvc-empty-mark {
+  color: var(--river);
+  font-size: 48px;
+}
+
+@media (max-width: 760px) {
+  .ttvc {
+    min-height: 560px;
+    border-radius: 16px;
+  }
+
+  .ttvc-topbar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 14px;
+    padding: 20px;
+  }
+
+  .ttvc-legend {
+    justify-content: flex-start;
+  }
+
+  .ttvc-viewport {
+    max-height: 72vh;
+  }
+
+  .ttvc-terrain {
+    min-width: 0;
+    padding: 34px 15px 60px;
+  }
+
+  .ttvc-source {
+    grid-template-columns: 52px minmax(0, 1fr);
+    width: 100%;
+    padding: 0 8px;
+  }
+
+  .ttvc-source-marker {
+    width: 42px;
+    height: 42px;
+  }
+
+  .ttvc-source-core {
+    inset: 13px;
+  }
+
+  .ttvc-first-tributaries {
+    width: 100%;
+    padding-left: 28px;
+  }
+
+  .ttvc-tributaries {
+    padding-left: 27px;
+  }
+
+  .ttvc-tributaries::before {
+    left: 8px;
+  }
+
+  .ttvc-branch::before {
+    left: -19px;
+    width: 21px;
+  }
+
+  .ttvc-branch-trigger {
+    grid-template-columns: 27px minmax(0, 1fr);
+    padding-right: 9px;
+  }
+
+  .ttvc-branch-meta {
+    grid-column: 2;
+    justify-content: flex-start;
+    padding: 3px 0 0;
+  }
+
+  .ttvc-node-detail {
+    margin-right: 4px;
+    margin-left: 26px;
+  }
+
+  .ttvc-fact {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ttvc *,
+  .ttvc *::before,
+  .ttvc *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .ttvc-branch-trigger,
+  .ttvc-source-ring,
+  .ttvc-node-detail {
+    border: 1px solid CanvasText;
+  }
+}

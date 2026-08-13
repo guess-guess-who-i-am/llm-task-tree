@@ -1,0 +1,2032 @@
+{
+  "source": "docs/agent-context-research/prompt-audit/AGENTS.original.20260710.md",
+  "sha256": "35321a6c153bb583598bea778e488fa08cc9ab2f99e500e7b21692adc20a4608",
+  "totalLines": 555,
+  "nonBlankLines": 400,
+  "statementUnits": 468,
+  "functionCounts": {
+    "F00": 6,
+    "F01": 21,
+    "F02": 10,
+    "F03": 7,
+    "F04": 8,
+    "F13": 16,
+    "F05": 13,
+    "F16": 19,
+    "F06": 7,
+    "F07": 14,
+    "F08": 14,
+    "F09": 21,
+    "F10": 5,
+    "F12": 104,
+    "F11": 76,
+    "F14": 16,
+    "F15": 7,
+    "F17": 15,
+    "F18": 12,
+    "F19": 45,
+    "F20": 32
+  },
+  "lineCoverage": [
+    {
+      "lineNo": 1,
+      "functionId": "F00",
+      "units": 1
+    },
+    {
+      "lineNo": 3,
+      "functionId": "F00",
+      "units": 4
+    },
+    {
+      "lineNo": 5,
+      "functionId": "F00",
+      "units": 1
+    },
+    {
+      "lineNo": 7,
+      "functionId": "F01",
+      "units": 1
+    },
+    {
+      "lineNo": 9,
+      "functionId": "F01",
+      "units": 2
+    },
+    {
+      "lineNo": 11,
+      "functionId": "F01",
+      "units": 1
+    },
+    {
+      "lineNo": 13,
+      "functionId": "F01",
+      "units": 1
+    },
+    {
+      "lineNo": 14,
+      "functionId": "F01",
+      "units": 1
+    },
+    {
+      "lineNo": 15,
+      "functionId": "F01",
+      "units": 1
+    },
+    {
+      "lineNo": 16,
+      "functionId": "F01",
+      "units": 2
+    },
+    {
+      "lineNo": 17,
+      "functionId": "F02",
+      "units": 1
+    },
+    {
+      "lineNo": 18,
+      "functionId": "F02",
+      "units": 1
+    },
+    {
+      "lineNo": 19,
+      "functionId": "F02",
+      "units": 1
+    },
+    {
+      "lineNo": 20,
+      "functionId": "F02",
+      "units": 1
+    },
+    {
+      "lineNo": 21,
+      "functionId": "F02",
+      "units": 1
+    },
+    {
+      "lineNo": 22,
+      "functionId": "F02",
+      "units": 1
+    },
+    {
+      "lineNo": 23,
+      "functionId": "F02",
+      "units": 1
+    },
+    {
+      "lineNo": 24,
+      "functionId": "F02",
+      "units": 1
+    },
+    {
+      "lineNo": 25,
+      "functionId": "F02",
+      "units": 1
+    },
+    {
+      "lineNo": 26,
+      "functionId": "F02",
+      "units": 1
+    },
+    {
+      "lineNo": 27,
+      "functionId": "F03",
+      "units": 1
+    },
+    {
+      "lineNo": 28,
+      "functionId": "F03",
+      "units": 1
+    },
+    {
+      "lineNo": 29,
+      "functionId": "F03",
+      "units": 2
+    },
+    {
+      "lineNo": 30,
+      "functionId": "F03",
+      "units": 2
+    },
+    {
+      "lineNo": 31,
+      "functionId": "F03",
+      "units": 1
+    },
+    {
+      "lineNo": 32,
+      "functionId": "F04",
+      "units": 2
+    },
+    {
+      "lineNo": 33,
+      "functionId": "F04",
+      "units": 2
+    },
+    {
+      "lineNo": 34,
+      "functionId": "F04",
+      "units": 2
+    },
+    {
+      "lineNo": 35,
+      "functionId": "F04",
+      "units": 2
+    },
+    {
+      "lineNo": 36,
+      "functionId": "F13",
+      "units": 2
+    },
+    {
+      "lineNo": 38,
+      "functionId": "F01",
+      "units": 1
+    },
+    {
+      "lineNo": 40,
+      "functionId": "F01",
+      "units": 2
+    },
+    {
+      "lineNo": 41,
+      "functionId": "F01",
+      "units": 2
+    },
+    {
+      "lineNo": 42,
+      "functionId": "F01",
+      "units": 1
+    },
+    {
+      "lineNo": 43,
+      "functionId": "F01",
+      "units": 1
+    },
+    {
+      "lineNo": 44,
+      "functionId": "F01",
+      "units": 2
+    },
+    {
+      "lineNo": 45,
+      "functionId": "F01",
+      "units": 2
+    },
+    {
+      "lineNo": 47,
+      "functionId": "F01",
+      "units": 1
+    },
+    {
+      "lineNo": 49,
+      "functionId": "F05",
+      "units": 1
+    },
+    {
+      "lineNo": 51,
+      "functionId": "F05",
+      "units": 1
+    },
+    {
+      "lineNo": 53,
+      "functionId": "F05",
+      "units": 1
+    },
+    {
+      "lineNo": 54,
+      "functionId": "F05",
+      "units": 2
+    },
+    {
+      "lineNo": 55,
+      "functionId": "F05",
+      "units": 2
+    },
+    {
+      "lineNo": 56,
+      "functionId": "F16",
+      "units": 1
+    },
+    {
+      "lineNo": 57,
+      "functionId": "F16",
+      "units": 1
+    },
+    {
+      "lineNo": 58,
+      "functionId": "F16",
+      "units": 2
+    },
+    {
+      "lineNo": 59,
+      "functionId": "F16",
+      "units": 2
+    },
+    {
+      "lineNo": 60,
+      "functionId": "F16",
+      "units": 1
+    },
+    {
+      "lineNo": 61,
+      "functionId": "F05",
+      "units": 1
+    },
+    {
+      "lineNo": 62,
+      "functionId": "F05",
+      "units": 1
+    },
+    {
+      "lineNo": 63,
+      "functionId": "F05",
+      "units": 2
+    },
+    {
+      "lineNo": 64,
+      "functionId": "F05",
+      "units": 2
+    },
+    {
+      "lineNo": 65,
+      "functionId": "F06",
+      "units": 1
+    },
+    {
+      "lineNo": 66,
+      "functionId": "F06",
+      "units": 1
+    },
+    {
+      "lineNo": 67,
+      "functionId": "F06",
+      "units": 2
+    },
+    {
+      "lineNo": 68,
+      "functionId": "F06",
+      "units": 1
+    },
+    {
+      "lineNo": 69,
+      "functionId": "F06",
+      "units": 1
+    },
+    {
+      "lineNo": 71,
+      "functionId": "F06",
+      "units": 1
+    },
+    {
+      "lineNo": 73,
+      "functionId": "F07",
+      "units": 1
+    },
+    {
+      "lineNo": 75,
+      "functionId": "F07",
+      "units": 1
+    },
+    {
+      "lineNo": 77,
+      "functionId": "F07",
+      "units": 1
+    },
+    {
+      "lineNo": 79,
+      "functionId": "F07",
+      "units": 1
+    },
+    {
+      "lineNo": 80,
+      "functionId": "F07",
+      "units": 1
+    },
+    {
+      "lineNo": 81,
+      "functionId": "F07",
+      "units": 1
+    },
+    {
+      "lineNo": 83,
+      "functionId": "F07",
+      "units": 2
+    },
+    {
+      "lineNo": 85,
+      "functionId": "F07",
+      "units": 1
+    },
+    {
+      "lineNo": 87,
+      "functionId": "F07",
+      "units": 2
+    },
+    {
+      "lineNo": 89,
+      "functionId": "F07",
+      "units": 2
+    },
+    {
+      "lineNo": 91,
+      "functionId": "F07",
+      "units": 1
+    },
+    {
+      "lineNo": 93,
+      "functionId": "F08",
+      "units": 1
+    },
+    {
+      "lineNo": 95,
+      "functionId": "F08",
+      "units": 1
+    },
+    {
+      "lineNo": 97,
+      "functionId": "F08",
+      "units": 1
+    },
+    {
+      "lineNo": 99,
+      "functionId": "F08",
+      "units": 1
+    },
+    {
+      "lineNo": 100,
+      "functionId": "F08",
+      "units": 1
+    },
+    {
+      "lineNo": 101,
+      "functionId": "F08",
+      "units": 1
+    },
+    {
+      "lineNo": 103,
+      "functionId": "F08",
+      "units": 1
+    },
+    {
+      "lineNo": 105,
+      "functionId": "F08",
+      "units": 2
+    },
+    {
+      "lineNo": 107,
+      "functionId": "F08",
+      "units": 1
+    },
+    {
+      "lineNo": 109,
+      "functionId": "F08",
+      "units": 2
+    },
+    {
+      "lineNo": 111,
+      "functionId": "F08",
+      "units": 1
+    },
+    {
+      "lineNo": 113,
+      "functionId": "F08",
+      "units": 1
+    },
+    {
+      "lineNo": 115,
+      "functionId": "F09",
+      "units": 1
+    },
+    {
+      "lineNo": 117,
+      "functionId": "F09",
+      "units": 1
+    },
+    {
+      "lineNo": 119,
+      "functionId": "F09",
+      "units": 1
+    },
+    {
+      "lineNo": 120,
+      "functionId": "F09",
+      "units": 1
+    },
+    {
+      "lineNo": 121,
+      "functionId": "F09",
+      "units": 1
+    },
+    {
+      "lineNo": 122,
+      "functionId": "F09",
+      "units": 3
+    },
+    {
+      "lineNo": 123,
+      "functionId": "F09",
+      "units": 1
+    },
+    {
+      "lineNo": 125,
+      "functionId": "F09",
+      "units": 1
+    },
+    {
+      "lineNo": 126,
+      "functionId": "F09",
+      "units": 1
+    },
+    {
+      "lineNo": 127,
+      "functionId": "F09",
+      "units": 1
+    },
+    {
+      "lineNo": 128,
+      "functionId": "F09",
+      "units": 1
+    },
+    {
+      "lineNo": 129,
+      "functionId": "F09",
+      "units": 1
+    },
+    {
+      "lineNo": 130,
+      "functionId": "F09",
+      "units": 1
+    },
+    {
+      "lineNo": 131,
+      "functionId": "F09",
+      "units": 1
+    },
+    {
+      "lineNo": 132,
+      "functionId": "F09",
+      "units": 1
+    },
+    {
+      "lineNo": 133,
+      "functionId": "F09",
+      "units": 1
+    },
+    {
+      "lineNo": 134,
+      "functionId": "F09",
+      "units": 1
+    },
+    {
+      "lineNo": 136,
+      "functionId": "F10",
+      "units": 1
+    },
+    {
+      "lineNo": 137,
+      "functionId": "F10",
+      "units": 1
+    },
+    {
+      "lineNo": 138,
+      "functionId": "F10",
+      "units": 1
+    },
+    {
+      "lineNo": 139,
+      "functionId": "F10",
+      "units": 1
+    },
+    {
+      "lineNo": 140,
+      "functionId": "F10",
+      "units": 1
+    },
+    {
+      "lineNo": 142,
+      "functionId": "F12",
+      "units": 4
+    },
+    {
+      "lineNo": 144,
+      "functionId": "F13",
+      "units": 2
+    },
+    {
+      "lineNo": 146,
+      "functionId": "F09",
+      "units": 1
+    },
+    {
+      "lineNo": 148,
+      "functionId": "F09",
+      "units": 1
+    },
+    {
+      "lineNo": 150,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 152,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 154,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 155,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 156,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 157,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 159,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 161,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 163,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 164,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 165,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 166,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 167,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 169,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 171,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 172,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 173,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 174,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 175,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 176,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 177,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 179,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 181,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 182,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 183,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 184,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 186,
+      "functionId": "F11",
+      "units": 2
+    },
+    {
+      "lineNo": 188,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 190,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 191,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 192,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 193,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 194,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 195,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 196,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 197,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 199,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 200,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 201,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 202,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 203,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 204,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 206,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 207,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 208,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 209,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 211,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 212,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 213,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 214,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 215,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 217,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 218,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 219,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 220,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 222,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 224,
+      "functionId": "F11",
+      "units": 3
+    },
+    {
+      "lineNo": 226,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 228,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 230,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 231,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 232,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 233,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 234,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 235,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 236,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 237,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 239,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 240,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 241,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 242,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 243,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 245,
+      "functionId": "F11",
+      "units": 1
+    },
+    {
+      "lineNo": 247,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 249,
+      "functionId": "F12",
+      "units": 2
+    },
+    {
+      "lineNo": 250,
+      "functionId": "F12",
+      "units": 3
+    },
+    {
+      "lineNo": 251,
+      "functionId": "F12",
+      "units": 2
+    },
+    {
+      "lineNo": 252,
+      "functionId": "F12",
+      "units": 2
+    },
+    {
+      "lineNo": 253,
+      "functionId": "F12",
+      "units": 2
+    },
+    {
+      "lineNo": 254,
+      "functionId": "F12",
+      "units": 2
+    },
+    {
+      "lineNo": 255,
+      "functionId": "F12",
+      "units": 2
+    },
+    {
+      "lineNo": 257,
+      "functionId": "F13",
+      "units": 1
+    },
+    {
+      "lineNo": 259,
+      "functionId": "F13",
+      "units": 1
+    },
+    {
+      "lineNo": 260,
+      "functionId": "F13",
+      "units": 1
+    },
+    {
+      "lineNo": 261,
+      "functionId": "F13",
+      "units": 2
+    },
+    {
+      "lineNo": 262,
+      "functionId": "F13",
+      "units": 1
+    },
+    {
+      "lineNo": 263,
+      "functionId": "F13",
+      "units": 3
+    },
+    {
+      "lineNo": 264,
+      "functionId": "F13",
+      "units": 1
+    },
+    {
+      "lineNo": 265,
+      "functionId": "F13",
+      "units": 1
+    },
+    {
+      "lineNo": 266,
+      "functionId": "F13",
+      "units": 1
+    },
+    {
+      "lineNo": 268,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 270,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 272,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 273,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 275,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 277,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 279,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 280,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 281,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 282,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 283,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 284,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 285,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 286,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 287,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 288,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 289,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 290,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 291,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 292,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 294,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 296,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 297,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 298,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 299,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 300,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 301,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 302,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 303,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 304,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 305,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 306,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 307,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 308,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 309,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 311,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 313,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 314,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 315,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 316,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 317,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 318,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 320,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 322,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 324,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 325,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 326,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 327,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 328,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 330,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 332,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 333,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 334,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 335,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 336,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 337,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 338,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 339,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 340,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 341,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 342,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 343,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 344,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 345,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 346,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 347,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 348,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 350,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 352,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 353,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 354,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 355,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 356,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 357,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 359,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 361,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 362,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 363,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 364,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 365,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 366,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 367,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 368,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 370,
+      "functionId": "F12",
+      "units": 1
+    },
+    {
+      "lineNo": 372,
+      "functionId": "F14",
+      "units": 1
+    },
+    {
+      "lineNo": 374,
+      "functionId": "F14",
+      "units": 2
+    },
+    {
+      "lineNo": 376,
+      "functionId": "F14",
+      "units": 2
+    },
+    {
+      "lineNo": 378,
+      "functionId": "F14",
+      "units": 1
+    },
+    {
+      "lineNo": 379,
+      "functionId": "F14",
+      "units": 1
+    },
+    {
+      "lineNo": 381,
+      "functionId": "F14",
+      "units": 1
+    },
+    {
+      "lineNo": 382,
+      "functionId": "F14",
+      "units": 1
+    },
+    {
+      "lineNo": 383,
+      "functionId": "F14",
+      "units": 1
+    },
+    {
+      "lineNo": 384,
+      "functionId": "F14",
+      "units": 1
+    },
+    {
+      "lineNo": 385,
+      "functionId": "F14",
+      "units": 1
+    },
+    {
+      "lineNo": 386,
+      "functionId": "F14",
+      "units": 1
+    },
+    {
+      "lineNo": 388,
+      "functionId": "F14",
+      "units": 2
+    },
+    {
+      "lineNo": 390,
+      "functionId": "F14",
+      "units": 1
+    },
+    {
+      "lineNo": 392,
+      "functionId": "F15",
+      "units": 1
+    },
+    {
+      "lineNo": 394,
+      "functionId": "F15",
+      "units": 1
+    },
+    {
+      "lineNo": 395,
+      "functionId": "F15",
+      "units": 2
+    },
+    {
+      "lineNo": 396,
+      "functionId": "F15",
+      "units": 1
+    },
+    {
+      "lineNo": 397,
+      "functionId": "F15",
+      "units": 1
+    },
+    {
+      "lineNo": 399,
+      "functionId": "F15",
+      "units": 1
+    },
+    {
+      "lineNo": 401,
+      "functionId": "F16",
+      "units": 1
+    },
+    {
+      "lineNo": 403,
+      "functionId": "F16",
+      "units": 2
+    },
+    {
+      "lineNo": 405,
+      "functionId": "F16",
+      "units": 1
+    },
+    {
+      "lineNo": 406,
+      "functionId": "F16",
+      "units": 1
+    },
+    {
+      "lineNo": 407,
+      "functionId": "F16",
+      "units": 2
+    },
+    {
+      "lineNo": 408,
+      "functionId": "F16",
+      "units": 2
+    },
+    {
+      "lineNo": 409,
+      "functionId": "F16",
+      "units": 1
+    },
+    {
+      "lineNo": 410,
+      "functionId": "F16",
+      "units": 1
+    },
+    {
+      "lineNo": 412,
+      "functionId": "F16",
+      "units": 1
+    },
+    {
+      "lineNo": 414,
+      "functionId": "F17",
+      "units": 1
+    },
+    {
+      "lineNo": 416,
+      "functionId": "F17",
+      "units": 1
+    },
+    {
+      "lineNo": 418,
+      "functionId": "F17",
+      "units": 1
+    },
+    {
+      "lineNo": 419,
+      "functionId": "F17",
+      "units": 1
+    },
+    {
+      "lineNo": 420,
+      "functionId": "F17",
+      "units": 1
+    },
+    {
+      "lineNo": 421,
+      "functionId": "F17",
+      "units": 1
+    },
+    {
+      "lineNo": 422,
+      "functionId": "F17",
+      "units": 1
+    },
+    {
+      "lineNo": 423,
+      "functionId": "F17",
+      "units": 1
+    },
+    {
+      "lineNo": 424,
+      "functionId": "F17",
+      "units": 1
+    },
+    {
+      "lineNo": 425,
+      "functionId": "F17",
+      "units": 1
+    },
+    {
+      "lineNo": 426,
+      "functionId": "F17",
+      "units": 1
+    },
+    {
+      "lineNo": 427,
+      "functionId": "F17",
+      "units": 1
+    },
+    {
+      "lineNo": 428,
+      "functionId": "F17",
+      "units": 1
+    },
+    {
+      "lineNo": 429,
+      "functionId": "F17",
+      "units": 1
+    },
+    {
+      "lineNo": 431,
+      "functionId": "F17",
+      "units": 1
+    },
+    {
+      "lineNo": 433,
+      "functionId": "F18",
+      "units": 1
+    },
+    {
+      "lineNo": 435,
+      "functionId": "F18",
+      "units": 2
+    },
+    {
+      "lineNo": 437,
+      "functionId": "F18",
+      "units": 1
+    },
+    {
+      "lineNo": 439,
+      "functionId": "F18",
+      "units": 1
+    },
+    {
+      "lineNo": 441,
+      "functionId": "F18",
+      "units": 1
+    },
+    {
+      "lineNo": 442,
+      "functionId": "F18",
+      "units": 1
+    },
+    {
+      "lineNo": 443,
+      "functionId": "F18",
+      "units": 3
+    },
+    {
+      "lineNo": 445,
+      "functionId": "F18",
+      "units": 1
+    },
+    {
+      "lineNo": 447,
+      "functionId": "F18",
+      "units": 1
+    },
+    {
+      "lineNo": 449,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 450,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 452,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 454,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 456,
+      "functionId": "F19",
+      "units": 2
+    },
+    {
+      "lineNo": 458,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 459,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 460,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 461,
+      "functionId": "F19",
+      "units": 2
+    },
+    {
+      "lineNo": 462,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 463,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 464,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 465,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 466,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 467,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 469,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 471,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 472,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 473,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 475,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 477,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 479,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 480,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 481,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 483,
+      "functionId": "F19",
+      "units": 2
+    },
+    {
+      "lineNo": 485,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 487,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 489,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 491,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 492,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 493,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 495,
+      "functionId": "F19",
+      "units": 2
+    },
+    {
+      "lineNo": 497,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 499,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 501,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 502,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 503,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 505,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 507,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 509,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 510,
+      "functionId": "F19",
+      "units": 1
+    },
+    {
+      "lineNo": 512,
+      "functionId": "F20",
+      "units": 1
+    },
+    {
+      "lineNo": 513,
+      "functionId": "F20",
+      "units": 1
+    },
+    {
+      "lineNo": 515,
+      "functionId": "F20",
+      "units": 2
+    },
+    {
+      "lineNo": 517,
+      "functionId": "F20",
+      "units": 1
+    },
+    {
+      "lineNo": 519,
+      "functionId": "F20",
+      "units": 2
+    },
+    {
+      "lineNo": 521,
+      "functionId": "F20",
+      "units": 1
+    },
+    {
+      "lineNo": 522,
+      "functionId": "F20",
+      "units": 1
+    },
+    {
+      "lineNo": 523,
+      "functionId": "F20",
+      "units": 1
+    },
+    {
+      "lineNo": 524,
+      "functionId": "F20",
+      "units": 1
+    },
+    {
+      "lineNo": 526,
+      "functionId": "F20",
+      "units": 1
+    },
+    {
+      "lineNo": 528,
+      "functionId": "F20",
+      "units": 2
+    },
+    {
+      "lineNo": 530,
+      "functionId": "F20",
+      "units": 1
+    },
+    {
+      "lineNo": 532,
+      "functionId": "F20",
+      "units": 1
+    },
+    {
+      "lineNo": 534,
+      "functionId": "F20",
+      "units": 1
+    },
+    {
+      "lineNo": 535,
+      "functionId": "F20",
+      "units": 1
+    },
+    {
+      "lineNo": 536,
+      "functionId": "F20",
+      "units": 1
+    },
+    {
+      "lineNo": 537,
+      "functionId": "F20",
+      "units": 1
+    },
+    {
+      "lineNo": 539,
+      "functionId": "F20",
+      "units": 1
+    },
+    {
+      "lineNo": 541,
+      "functionId": "F20",
+      "units": 1
+    },
+    {
+      "lineNo": 543,
+      "functionId": "F20",
+      "units": 1
+    },
+    {
+      "lineNo": 545,
+      "functionId": "F20",
+      "units": 1
+    },
+    {
+      "lineNo": 547,
+      "functionId": "F20",
+      "units": 2
+    },
+    {
+      "lineNo": 549,
+      "functionId": "F20",
+      "units": 2
+    },
+    {
+      "lineNo": 551,
+      "functionId": "F20",
+      "units": 1
+    },
+    {
+      "lineNo": 553,
+      "functionId": "F20",
+      "units": 2
+    },
+    {
+      "lineNo": 554,
+      "functionId": "F20",
+      "units": 1
+    }
+  ]
+}

@@ -1,0 +1,89 @@
+:root {
+  color-scheme: light;
+  font-family: "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  background: #f4f6f8;
+  color: #17202b;
+}
+
+* { box-sizing: border-box; }
+
+html, body { min-height: 100%; margin: 0; }
+
+body { background: #f4f6f8; }
+
+button, a { font: inherit; }
+
+button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
+  outline: 3px solid #377dff;
+  outline-offset: 3px;
+}
+
+.prototypeHeader {
+  min-height: 76px;
+  padding: 14px clamp(18px, 4vw, 54px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 1px solid rgba(22, 35, 50, .12);
+  background: rgba(250, 251, 252, .94);
+}
+
+.prototypeHeader h1 { margin: 3px 0 0; font-size: clamp(18px, 2vw, 27px); letter-spacing: -.03em; }
+.prototypeKicker { color: #667485; font-size: 12px; letter-spacing: .08em; }
+.prototypeBack { color: #263648; text-decoration: none; font-size: 13px; white-space: nowrap; }
+
+.prototypeRoot { min-height: calc(100vh - 76px); }
+
+.prototypeError {
+  max-width: 720px;
+  margin: 12vh auto;
+  padding: 24px;
+  border: 1px solid #d65d5d;
+  border-radius: 12px;
+  background: #fff;
+  color: #7b2323;
+}
+
+.prototypeSwitcher {
+  position: fixed;
+  z-index: 1000;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: 42px minmax(150px, auto) 42px;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 999px;
+  background: #17202b;
+  color: #fff;
+  box-shadow: 0 14px 42px rgba(10, 20, 33, .28);
+}
+
+.prototypeSwitcher button {
+  align-self: stretch;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  font-size: 20px;
+}
+
+.prototypeSwitcher button:hover { background: rgba(255,255,255,.1); }
+.prototypeSwitcher div { padding: 8px 14px; display: flex; gap: 8px; justify-content: center; align-items: baseline; text-align: center; }
+.prototypeSwitcher strong { font-size: 13px; letter-spacing: .08em; }
+.prototypeSwitcher span { color: #c9d1db; font-size: 12px; }
+
+@media (max-width: 680px) {
+  .prototypeHeader { min-height: 64px; padding: 10px 14px; }
+  .prototypeHeader h1 { font-size: 17px; }
+  .prototypeKicker { display: none; }
+  .prototypeRoot { min-height: calc(100vh - 64px); }
+  .prototypeBack { font-size: 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}

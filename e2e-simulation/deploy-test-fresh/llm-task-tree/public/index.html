@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LLM Task Tree</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div>
+          <h1>LLM Task Tree</h1>
+          <p id="subtitle">Markdown-backed shared task memory</p>
+        </div>
+        <div class="toolbar">
+          <button id="addChildBtn" title="Add child node">＋</button>
+          <button id="layoutTreeBtn" title="Layout as tree">⇲</button>
+          <button id="saveBtn" title="Save to task-tree.md">💾</button>
+          <button id="reloadBtn" title="Reload Markdown">↻</button>
+          <button id="shutdownBtn" title="关闭后台服务">⏻</button>
+        </div>
+      </header>
+
+      <main class="layout">
+        <aside class="knowledgePane" aria-label="Knowledge base">
+          <div class="paneHeader">
+            <strong>知识库</strong>
+            <span id="knowledgeState">未配置</span>
+          </div>
+          <div class="knowledgeBody">
+            <details class="knowledgeSection" open>
+              <summary>环境配置</summary>
+              <div id="kbEnvInfo" class="knowledgeMeta"></div>
+              <div class="knowledgeActions">
+                <button id="kbReindexBtn" type="button">重建索引</button>
+              </div>
+              <div id="kbIndexInfo" class="knowledgeMeta"></div>
+            </details>
+            <section class="knowledgeSection">
+              <div class="knowledgeTitle">检索 / 问答</div>
+              <textarea id="kbQuestion" placeholder="基于 Markdown 知识库提问"></textarea>
+              <label class="knowledgeToggle">
+                <input id="kbUseForModels" type="checkbox" checked>
+                <span>多模型协作时允许模型检索知识库</span>
+              </label>
+              <label class="knowledgeToggle">
+                <input id="kbUseWebSearch" type="checkbox" checked>
+                <span>检索和问答时同时联网搜索</span>
+              </label>
+              <div class="knowledgeActions">
+                <button id="kbSearchBtn" type="button">检索</button>
+                <button id="kbAskBtn" type="button">问模型</button>
+              </div>
+              <div id="kbAnswer" class="knowledgeAnswer"></div>
+              <div id="kbResults" class="knowledgeResults"></div>
+            </section>
+          </div>
+        </aside>
+        <section class="graphPane" aria-label="Task graph">
+          <div class="paneHeader">
+            <strong>任务图谱</strong>
+            <span>
+              <span id="nodeCount"></span>
+              <span id="linkState"></span>
+              <span id="saveState">已加载</span>
+            </span>
+          </div>
+          <div id="graphViewport" class="graphViewport">
+            <div id="graphCanvas" class="graphCanvas">
+              <svg id="edges" class="edges" aria-hidden="true"></svg>
+              <div id="edgeLabels" class="edgeLabels"></div>
+              <div id="nodesLayer" class="nodesLayer"></div>
+            </div>
+          </div>
+        </section>
+        <aside class="versionPane" aria-label="Version history">
+          <div class="paneHeader">
+            <strong>版本树</strong>
+            <span id="versionState">已加载</span>
+          </div>
+          <div id="versionList" class="versionList"></div>
+        </aside>
+      </main>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>

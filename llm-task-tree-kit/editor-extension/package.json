@@ -1,0 +1,42 @@
+{
+  "name": "llm-task-tree-panel",
+  "displayName": "任务图面板",
+  "description": "状态栏一个按钮：拉起本项目的任务图服务，并在编辑器标签页里打开，不弹外部浏览器。",
+  "version": "0.1.0",
+  "publisher": "llm-task-tree",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "llmTaskTree.open",
+        "title": "任务图: 打开面板",
+        "category": "Task Tree"
+      },
+      {
+        "command": "llmTaskTree.openExternal",
+        "title": "任务图: 在系统浏览器打开",
+        "category": "Task Tree"
+      }
+    ],
+    "configuration": {
+      "title": "任务图面板",
+      "properties": {
+        "llmTaskTree.showStatusBarButton": {
+          "type": "boolean",
+          "default": true,
+          "description": "在状态栏显示「任务图」按钮。"
+        }
+      }
+    }
+  }
+}

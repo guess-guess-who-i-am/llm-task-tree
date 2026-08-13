@@ -1,0 +1,105 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N11",
+  "blockId": "",
+  "updatedAt": "2026-08-07T10:38:27.874Z",
+  "title": "多树上下文与 Agent 维护闭环",
+  "reportZh": "report.zh.md",
+  "substeps": [
+    {
+      "title": "修复代理槽位泄漏并缩短失败等待",
+      "functions": [
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/proxy.mjs",
+          "name": "Semaphore.acquire"
+        },
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/proxy.mjs",
+          "name": "Semaphore.release"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "task-tree.md"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/test_semaphore.mjs"
+        },
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/test_mcp_tool_recovery.mjs"
+        }
+      ]
+    },
+    {
+      "title": "验收 Windows 4000、远程 4152 与 Codex CLI",
+      "inputs": [
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/.env"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "scripts/steps/N11/latest/report.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "将项目回顾精简为根本目的与当前进度",
+      "functions": [
+        {
+          "path": "public/app.js",
+          "line": 677,
+          "name": "renderProjectOverview"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "task-tree.md",
+          "line": 5
+        }
+      ],
+      "outputs": [
+        {
+          "path": "artifacts/project-overview-desktop.png"
+        },
+        {
+          "path": "artifacts/project-overview-mobile.png"
+        },
+        {
+          "path": "scripts/test-project-overview-ui.mjs",
+          "line": 1
+        }
+      ]
+    },
+    {
+      "title": "修复 DeepSeek 历史工具参数格式错误",
+      "functions": [
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/proxy.mjs",
+          "line": 2388,
+          "name": "normalizeHistoricalToolCallArguments"
+        },
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/proxy.mjs",
+          "line": 2417,
+          "name": "sanitizeResponsesInputItem"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "task-tree.md"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/test_history_tool_arguments.mjs"
+        },
+        {
+          "path": "scripts/steps/N11/latest/report.zh.md"
+        }
+      ]
+    }
+  ]
+}

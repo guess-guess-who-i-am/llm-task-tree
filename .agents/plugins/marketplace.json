@@ -1,0 +1,21 @@
+{
+  "name": "llm-task-tree",
+  "interface": {
+    "displayName": "任务图（llm-task-tree）",
+    "description": "把项目的任务图变成 Agent 可直接调用的工具：在对话里直接打开可交互的任务图界面、读焦点、按字段写树、链式推进、检索知识库、自动排版。"
+  },
+  "plugins": [
+    {
+      "name": "task-tree",
+      "source": {
+        "source": "local",
+        "path": "./marketplace/plugins/task-tree"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

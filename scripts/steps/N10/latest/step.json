@@ -1,0 +1,37 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N10",
+  "title": "执行顺序视图（Scratch 模块流原型）",
+  "reportZh": "report.zh.md",
+  "updatedAt": "2026-07-08T08:20:00.000Z",
+  "substeps": [
+    {
+      "title": "执行流程 UI 与步骤详情侧栏",
+      "functions": [
+        { "path": "public/flow-view.js", "line": 435, "name": "flowStepInspector" },
+        { "path": "public/flow-view.js", "line": 1489, "name": "selectStepNode" },
+        { "path": "public/flow-view.js", "line": 1510, "name": "renderStepInspectorContent" }
+      ],
+      "promptZh": "prompts/01.zh.md",
+      "promptEn": "prompts/01.en.md",
+      "inputs": [{ "path": "scripts/README.md", "line": 52 }],
+      "outputs": [{ "path": "scripts/steps/README.md", "line": 1 }]
+    },
+    {
+      "title": "流程漂移检测 API",
+      "functions": [
+        { "path": "server/flow-script.js", "line": 503, "name": "computeFlowDrift" },
+        { "path": "server.js", "line": 3100, "name": "GET /api/flow-script/drift" }
+      ],
+      "outputs": [{ "path": "public/flow-view.js", "line": 518, "name": "fetchFlowDrift" }]
+    },
+    {
+      "title": "步骤审计包读写 API",
+      "functions": [
+        { "path": "server/flow-step.js", "line": 43, "name": "getFlowStep" },
+        { "path": "server.js", "line": 3148, "name": "GET /api/flow-step" }
+      ],
+      "outputs": [{ "path": "scripts/project.json", "line": 1 }]
+    }
+  ]
+}

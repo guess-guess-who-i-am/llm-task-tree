@@ -1,0 +1,115 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N3",
+  "blockId": "",
+  "updatedAt": "2026-08-09T16:36:36.168Z",
+  "title": "让 Codex 同步维护任务图",
+  "reportZh": "report.zh.md",
+  "substeps": [
+    {
+      "title": "把进度定义为用户目标的可声明状态",
+      "functions": [
+        {
+          "path": "AGENTS.md",
+          "line": 16,
+          "name": "F23"
+        },
+        {
+          "path": "llm-task-tree/AGENTS.node-writing.md",
+          "line": 19,
+          "name": "Goal-Relative CurrentResult"
+        },
+        {
+          "path": "server/turn-context.js",
+          "line": 61,
+          "name": "buildTaskTreeCheckpointContext"
+        },
+        {
+          "path": "server/codex-prompts.js",
+          "line": 50,
+          "name": "buildNextStepPrompt"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "task-tree.md"
+        },
+        {
+          "path": "C:/Users/Administrator/.codex/prompts/global-every-turn.zh.md",
+          "line": 45
+        }
+      ],
+      "outputs": [
+        {
+          "path": "llm-task-tree-kit/templates/AGENTS.merge.md"
+        },
+        {
+          "path": "llm-task-tree/skills/task-tree-grill/references/schema-template.md"
+        }
+      ]
+    },
+    {
+      "title": "总览优先呈现当前阶段的目标达成状态",
+      "functions": [
+        {
+          "path": "public/app.js",
+          "line": 698,
+          "name": "renderProjectOverview"
+        },
+        {
+          "path": "public/app.js",
+          "line": 708,
+          "name": "renderProjectOverview"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "public/app.js",
+          "line": 727
+        },
+        {
+          "path": "public/task-tree-prototype/variant-a.js",
+          "line": 295
+        }
+      ]
+    },
+    {
+      "title": "发布到本机项目与 huangyu",
+      "functions": [
+        {
+          "path": "scripts/prompt-publisher/publish-global-prompt.mjs",
+          "name": "main"
+        },
+        {
+          "path": "scripts/build-kit.ps1"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "C:/Users/Administrator/.codex/prompt-publisher/state.json"
+        },
+        {
+          "path": "C:/Users/Administrator/.codex/prompts/global-every-turn.en.md",
+          "line": 43
+        }
+      ]
+    },
+    {
+      "title": "回归验证",
+      "functions": [
+        {
+          "path": "scripts/test-multitree-maintenance.mjs"
+        },
+        {
+          "path": "scripts/test-mcp-server.mjs"
+        },
+        {
+          "path": "scripts/test-project-overview-ui.mjs"
+        },
+        {
+          "path": "scripts/verify-agent-prompt-coverage.mjs"
+        }
+      ]
+    }
+  ]
+}

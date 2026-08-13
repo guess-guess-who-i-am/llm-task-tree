@@ -1,0 +1,13 @@
+.task-tree-port
+.task-tree-ports
+.env
+model-agents.json
+model-agent-history.json
+model-agents/
+knowledge-config.json
+knowledge-index.json
+knowledge/
+web-search-config.json
+open-websearch-launcher.log
+open-websearch-launcher.err.log
+skill-routing-log.md

@@ -1,0 +1,86 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N3",
+  "blockId": "",
+  "updatedAt": "2026-08-11T06:09:47.142Z",
+  "title": "让 Codex 同步维护任务图",
+  "reportZh": "report.zh.md",
+  "substeps": [
+    {
+      "title": "生成实际落盘差异并向用户逐项回执",
+      "functions": [
+        {
+          "path": "server/tree-diff.js",
+          "name": "diffTreeMarkdown"
+        },
+        {
+          "path": "server.js",
+          "name": "PUT /api/tree 与子树写入端点"
+        },
+        {
+          "path": "scripts/mcp-server.mjs",
+          "name": "toolWrite"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "AGENTS.md",
+          "name": "F24 回执覆盖规则"
+        },
+        {
+          "path": "C:/Users/Administrator/.codex/prompts/global-every-turn.zh.md",
+          "name": "TT10 全局逐轮规则"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "scripts/test-share-install.mjs",
+          "name": "共享安装与真实差异端到端测试"
+        },
+        {
+          "path": "llm-task-tree-kit/templates/AGENTS.merge.md",
+          "name": "所有项目安装模板"
+        }
+      ],
+      "result": "服务端返回实际节点字段旧值→新值；31 个有效本机项目完成入口与 Prompt 同步，本机和 huangyu 全局 Prompt 哈希一致；端到端安装测试通过。"
+    },
+    {
+      "title": "缩短 Codex 会话选择与执行入口等待",
+      "functions": [
+        {
+          "path": "server.js",
+          "name": "readCodexThreadsFast"
+        },
+        {
+          "path": "server/codex-run.js",
+          "name": "startCodexTurn"
+        },
+        {
+          "path": "public/app.js",
+          "name": "loadCodexThreadMenu"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/codex-run.js",
+          "name": "原同步会话扫描与 15 秒观察窗口"
+        },
+        {
+          "path": "public/app.js",
+          "name": "小三角会话菜单入口"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "server/codex-run.test.js",
+          "name": "turn 接受后立即返回测试"
+        },
+        {
+          "path": "llm-task-tree-kit/server.js",
+          "name": "共享 kit 同步实现"
+        }
+      ],
+      "result": "会话接口由 5.7–8.5 秒降至冷启动立即响应、连续请求 4–9 毫秒；模拟 turn 接受后约 12 毫秒返回，2 项测试通过。"
+    }
+  ]
+}

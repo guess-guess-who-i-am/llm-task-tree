@@ -1,0 +1,535 @@
+IEEE TRANSACTIONS ON VISUALIZATION AND COMPUTER GRAPHICS, VOL. 15, NO. 6, NOVEMBER/DECEMBER 2009                                                    953
+
+
+
+
+     Search, Show Context, Expand on Demand: Supporting
+                Large Graph Exploration with Degree-of-Interest
+                                                    Frank van Ham and Adam Perer
+
+        AbstractA common goal in graph visualization research is the design of novel techniques for displaying an overview of an
+        entire graph. However, there are many situations where such an overview is not relevant or practical for users, as analyzing the
+        global structure may not be related to the main task of the users that have semi-specific information needs. Furthermore, users
+        accessing large graph databases through an online connection or users running on less powerful (mobile) hardware simply do not
+        have the resources needed to compute these overviews. In this paper, we advocate an interaction model that allows users to
+        remotely browse the immediate context graph around a specific node of interest. We show how Furnas original degree of interest
+        function can be adapted from trees to graphs and how we can use this metric to extract useful contextual subgraphs, control the
+        complexity of the generated visualization and direct users to interesting datapoints in the context. We demonstrate the
+        effectiveness of our approach with an exploration of a dense online database containing over 3 million legal citations.
+        Index TermsGraph visualization, network visualization, degree of interest, legal citation networks, focus+context.
+
+
+
+
+1      INTRODUCTION
+Visualizations of very large graph datasets typically aspire to present         centralized location. Many of these graph datasets are huge even by
+the user with an overview of the entire graph, so no information is             todays standards, and transferring them from a centralized server to
+missing and the data can speak for itself. However, this lofty goal             multiple client machines is not an option. Apart from that, even the
+often results in visualizations that focus exclusively on providing a           visualization designers might not have access to the full data because
+global view of the structure of the graph. While topology-based                 of privacy reasons or other access restrictions, making it impossible
+graph visualizations ideally may allow analysts to deduce central               to pre-compute overviews for these giant graphs.
+actors or clusters in a graph, in practice the density and sheer size of            For these two reasons, we explore an alternative to the traditional
+many graphs make it hard to create an effective visual representation           overview, zoom, details on demand browsing model [18], which
+of the whole graph. Visualizations that faithfully try to render all the        can be loosely characterized as search, show context, expand on
+data often suffer from cluttering and make it difficult for users to            demand. In this model, users pick a particular datapoint as a focus
+accomplish even very basic tasks such as following edges or                     for analysis and the system then computes and displays an optimal
+counting in-degree of nodes [19]. Structural clustering techniques              relevant context given the users current interests. Users can then
+can reduce the complexity of the data under analysis, but often result          direct the visualization system to expand this context in a direction
+in abstract high-level diagrams in which the semantics of the clusters          he or she deems interesting. This model is somewhat similar to the
+are not always clear.                                                           idea of Plant a seed and watch it grow [12]. However, whereas that
+    Users that wish to obtain overviews of very large graphs are                model relied solely on topology for context, our approach is
+typically trying to learn something about a particular dataset. For             extensible to include other types of relevant context based on
+example, a social scientist may want to identify cliques in a very              inherent attributes, associated content, and user interactions.
+large social graph and see how they interact, while a software                      To determine this relevant context, we extend the well-known
+architect may want to deduce the decomposition of a program from                concept of degree of interest (DOI) [4] from trees to general graphs.
+its call graph. These use cases typically deal with global patterns like        By using a DOI function to assign a measure of relevance to each
+clusters and outliers. However, there is also a very large class of             node in the graph, we can extract a maximal interest subgraph
+users that frequently deal with large network data but are not                  around the point of interest. Users can then interact with this initial
+interested in global patterns in this data. Instead they are trying to          subgraph and expand it in any direction. Our degree of interest
+learn something more about a particular datapoint in the dataset and            functions use both embedded attributes and topology of the graph, as
+how this point relates to the rest of the data. As a concrete example,          well as recorded actions of users. As user tasks are often exploratory
+financial fraud analysts typically try to understand the pattern of             and not well-defined, users have full control over the interest sources
+connections associated with a specific fraudulent bank account,                 and can adapt them during exploration. We demonstrate our
+while programmers need to understand the dependencies of a                      approach on approximately 15 gigabytes of legal documents
+specific piece of code if they want to understand the impact of                 containing information on all US federal and Supreme Court cases to
+potential changes.                                                              date, resulting in a citation graph of over 300,000 nodes and 3.3
+    A second argument against presenting users with global                      million edges. Our system allows multiple analysts to simultaneously
+overviews is of a more practical nature. Typically, multiple analysts           explore this online citation graph through an interactive web-based
+look at a single large dataset that is being maintained at a single             client. Concretely, we claim the following contributions:
+                                                                                  x An adaptation of DOI from tree to graph datasets.
+x Frank van Ham is at IBM-ILOG Research in Gentilly, France and can be            x An augmentation of DOI to include inferred interest from the
+    reached by e-mail at frankvanham@fr.ibm.com                                     users search process.
+x Adam Perer is at IBM Research in Haifa, Israel and can be reached by e-         x Methods for diffusing interest over an entire graph to mitigate
+    mail at adamp@il.ibm.com                                                        local minima.
+                                                                                  x Novel visualization and interaction techniques that use DOI
+Manuscript received 31 March 2009; accepted 27 July 2009; posted online             functions to reduce complexity of very high degree nodes and to
+11 October 2009; mailed on 5 October 2009.                                          provide visual clues to help guide users to hidden, yet interesting
+For information on obtaining reprints of this article, please send                  results.
+email to: tvcg@computer.org .
+
+
+                                              1077-2626/09/$25.00 © 2009 IEEE   Published by the IEEE Computer Society
+954                IEEE TRANSACTIONS ON VISUALIZATION AND COMPUTER GRAPHICS, VOL. 15, NO. 6, NOVEMBER/DECEMBER 2009
+
+
+Our paper begins with a reflection on related work, where we                by rolling up nodes into metanodes if they have the same attribute
+categorize and discuss Degree of Interest based research as well as         value for a particular dimensions. Semantic substrates [19] use node
+current approaches to large graph visualization. In Section 3 we            attributes to provide a basic layout of the graph based on space
+explain our methods for adapting DOI to graphs and our resulting            subdivision and then superimpose the edges. Approaches in this
+implementation. Section 4 demonstrates our system on a legal corpus         category have the advantage that one can more easily make
+of documents and highlights a few examples of how our approach              statements on higher level features as these relate directly to the
+succeeds. Finally, we discuss the positive and negative aspects of          application area. Unfortunately they generally do not provide
+DOI graphs and suggest future work in Section 5, while we conclude          detailed information on the particular connections of a single node.
+in Section 6.
+                                                                            2.2.2     Contextual views
+2     RELATED WORK                                                              Closest to our proposed approach, contextual views allow the
+                                                                            user to pick a point of interest in the graph, and show the immediate
+This section discusses previous work in the area of degree of interest      context around that point. Both Touchgraph [22] and Palantir [14]
+visualization and summarizes the state of current large graph               offer commercial graph visualization components that allow users to
+visualization techniques that do not focus on displaying a structural       select a focal node and explore the surrounding subgraph. TreePlus
+overview.                                                                   [12] allows users to explore graphs using an enhanced tree layout,
+                                                                            which users often find more comprehensible than a graph layout.
+2.1      Degree of Interest functions in Visualization
+                                                                            These approaches perform relatively well when the average degree
+Furnas first introduced the concept of Degree of Interest (DOI) in          of nodes in a graph is small, but struggle with very high degree
+[4], realizing that information items have different levels of              nodes.
+importance to different observers, depending on their viewpoint.
+Instead, an observers initial point of interest (or focus) can be used     2.2.3      Computational approaches
+to compute a numerical value for each data item that indicates its              By first computing network metrics on the graph, we can
+degree of interest. These values can then be used to create compact         compute relevant subgraphs or detect outliers in the graph, without
+elided or abstracted views of the full data, by only displaying             having to visualize it first. SocialAction [15] uses attribute ranking
+information items above a certain interestingness threshold.              and coordinated statistical views to allow users to use metrics from
+Furnas original paper showed how these ideas can be applied to             social network analysis to isolate important nodes, clusters and
+trees or calendars and he later revisits them in [5] offering theories of   outliers in graphs. NodeXL [20] also follows this approach by
+the importance of DOI for real users tasks.                                integrating the statistical and visual capabilities of Excel with graph
+    Card and Nation used this concept to implement DOITrees, a tree         visualizations. Although these type of approaches allow the user to
+visualization that uses DOI calculations and focus+context                  target specific features when exploring, the computational
+interaction techniques [1]. Heer and Card [9] extends this work with        complexity of the metrics involved prohibits application to truly
+an efficient, space-constrained, multi-focal tree layout.                   large graphs.
+    Although DOI functions are well established to display trees,
+applications to general graphs are limited. Two notable techniques          3     DEGREE-OF-INTEREST GRAPHS
+[7][8] use an explicit degree of interest function to create multilevel
+abstractions of a whole graph by more aggressively clustering nodes             In this section we show how we can extend the well-known
+further away from a focal node. In practice however, they tend to           concept of Degree of Interest (DOI) from trees to graphs. In Section
+generate very abstract views where the meaning of a cluster of nodes        3.1 we will outline our proposed interest function and in Section 3.2
+to the user is not always clear and the actual clustering structure         we show how we can use this interest function to both compute
+changes substantially with adjustment of the focus.                         interesting subgraphs and control the complexity of the visualization.
+    Graphical distortion techniques are related to the concept of           Finally, in Section 3.3 we explain how we can use these algorithmic
+degree of interest, but instead of explicitly assigning an interest value   pieces to set up a system that lets us browse massive graphs from a
+to nodes they perform information compression in screen space. That         remote client.
+is, nodes further away from a predefined focus are assigned less
+screen space, resulting in a graphical fisheye [17]. Other approaches       3.1      Extending DOI to graphs
+do not necessarily assign additional screen space, but use visual cues      In his seminal paper [4], Furnas defined a generalized degree of
+such as font size and color to focus user attention on interesting          interest function for data items by discerning two components: An a
+items [2]. Although graphical information compression techniques            priori interest function that defines the general importance of a data
+can be useful in some cases, they still require access to and rendering     item x irrespective of the users current interest and a distance
+of the entire graph, which is impractical for our case.                     function in which the interest of an item depends on the currently
+                                                                            selected focus node y. This results in a two part interest function that
+2.2      Large graph visualization                                          can be expressed as:
+    As mentioned in the introduction, many graph visualization
+techniques try to present the user with a holistic view of the entire            DOI(x | y) = DAPI(x) + ED(x,y)
+graph. This typically involves very efficient layouts, multiscale
+clustering techniques or matrix representations. Although providing             In other words, the total interest of a point x given a focus point y
+a structural overview of the graph is a laudable goal, there are many       is a linear combination of an a priori interest function API and a
+cases where the user is simply not interested in a global view of the       distance function D. Furnas showed that for many types of data both
+whole graph, but wants to solve a particular concrete task on the           functions have natural definitions. As an example, for trees API(x)
+graph instead. Thus, we focus the discussion here to related work           can be defined in terms of the distance to the root. Distance can then
+that does not focus on showing the overall graph topology. We               be directly mapped to graph distance in the tree. By effectively
+discern three basic categories that all use different approaches to         eliding nodes below a certain interest threshold from screen we can
+reduce the complexity                                                       create comprehensive displays of potentially very large information
+                                                                            structures.
+2.2.1     Attribute based abstractions                                          There exists a natural way to adapt these basic definitions to
+    The first category of approaches proposes to use the node               general graphs: API(x) can be computed in terms of structural graph
+attributes in multivariate graphs as parameters for abstraction.            properties or node attributes, such as node degree or the value of a
+PivotGraph [23] compresses multivariate graph in two dimensions             particular node attribute. D(x,y) can be directly mapped to minimal
+VAN HAM AND PERER: “SEARCH, SHOW CONTEXT, EXPAND ON DEMAND”: SUPPORTING LARGE GRAPH…                                                               955
+
+
+graph distance. Note that the distance between two nodes can again
+depend on multiple factors such as edge weight or other edge
+attributes. Thus, it is necessary to define a separate disinterest
+function EI(e,x,y) > 0 for each edge, where higher values indicate
+less interest in following a link e between nodes x and y. This
+function can be used to define the path length between two arbitrary
+nodes in the graph. In theory, we can then use this adapted DOI
+function to extract a maximal interest subgraph from a very large
+graph given an initial focal node y. In practice, however, two
+problems remain.
+    The first is how users actually pick an initial focal node y in a
+potentially very large graph if users do not know a nodes exact
+name or identifier. Although this process is largely ignored in
+                                                                               Fig. 1. By diffusing interest values over the network, we can use
+previous work on degree of interest based visualizations, we
+                                                                               a greedy local search heuristic to find maximal interest
+emphasize it as the Search component of our Search, Show
+                                                                               subgraphs (dark grey) when starting from the focal node
+Context, Expand on Demand model.
+                                                                               (circled)
+    Traditional information visualizations typically rely on
+opportunistic browsing of high level (visual) overviews of the data
+to identify potentially interesting starting points for analysis. In the   of interest diffusion based on the interestingness of the connecting
+absence of such a full data representation, users must search the          edge. We can compute this recursive function by recomputing the
+entire node set for items of interest that satisfy certain parameters      API for nodes in N(x) only when API(x) changes; the max quantifier
+and then select one node from the result as focus. Note that this can      limits the number of recomputations needed to a small number in
+be realized in different (visual and textual) ways. In a simple case,      practice, depending on the value of G. An analogous definition can be
+the user specifies a textual search term and the system returns a list     used for UIdiff(x).
+of nodes matching the term. A search interface that supports faceted           Our final resulting interest function for a node x then captures the
+search is another option, if structured attribute information is           a priori interest, the parameters the user has specified in their search
+available. Another approach is a visual search interface that presents     z for a focus node y and the distance of x from that focus:
+users with a simplified graphical representation (e.g. a scatterplot) of
+all items and allows a selection of results graphically.                   DOI(x | y,z ) = DAPIdiff(x) + EUIdiff(x,z) + JD(x,y)
+    In fact, the actual search parameters z that users specified give
+important hints on the interest a user assigns to particular nodes. We     As defined, API needs to be computed only once, the UI needs to be
+therefore propose an inclusion of a third term in the DOI function         recomputed whenever the initial search terms z change and D needs
+that captures this fact. The so-called User Interest (UI) function can     to be recomputed whenever the focal node y changes. In the next
+be expressed as the interest information that is known before the user     section, we show how we can use this interest function to allow users
+picks a focal node. Examples of this information include the search        to interactively navigate very large graphs using a remote client.
+score of a node for a particular textual query or the facets used in a
+faceted search. More explicitly, if users performed a faceted search       3.2      Extracting contextual subgraphs
+for items that, for example, are in a particular price range and have a    The second step of our proposed interaction model is Show Context.
+particular feature, the DOI algorithm needs to assign higher               Given a giant graph G and an initial node of interest y, a challenge
+relevance to items that match one or more of those criteria. This          still remains on how to compute a subgraph F of G that is small
+results in the following function definition:                              enough to transmit to a client, but also captures as much of the
+                                                                           relevant context around y as possible. More formally, we need to
+DOInaive(x | y,z ) = DAPI (x) + EUI (x,z) + JD(x,y)                     efficiently compute a connected subgraph F of size at most S that
+                                                                           contains y and has maximal total interest.
+A second problem is that the interest function over graphs has many            It is possible to perform an exhaustive search of the solution
+local maxima. That is, there are many potentially interesting nodes,       space since there are only a limited number of connected subgraphs
+surrounded by non-interesting nodes. Typically, in previous work on        around y of size S, but such a search is too expensive. Instead, we use
+trees, DOI functions are strictly nested, that is, DOI(x) of any node x    a greedy optimization algorithm that provides a good tradeoff
+in a subtree of r will never be larger than DOI(r). This allows for fast   between speed and interest optimization. Starting from an empty
+recomputation of DOI values [9] and guarantees connected trees             nodeset F and a list of potential candidates {y}, we remove the
+when thresholding on DOI. However, there is no such guarantee in           candidate x with the highest DOI from the list, add it to F and then
+graphs. Applying a simple DOI threshold function to the data will          add the immediate neighbors N(x) of that candidate to the list of
+then yield a potentially large number of disconnected subgraphs,           potential candidates. This process continues until the list of potential
+while a local search algorithm starting from the focal node will not       candidates is empty or until the size of F is S. The resulting
+be able to reach the high interest node because it has no global           algorithm runs in time O(S log S), as it is necessary to maintain a
+knowledge of the surrounding structure (see Fig. 1).                       sorted heap of potential candidates. The computed subgraph is then
+    We can address this problem by slightly modifying the API and          transmitted to the client along with graph meta-data such as labels,
+UI functions, such that the final interest value for a node x not only     current interest levels and edge weights. Layout of this subgraph can
+depends on its intrinsic interest, but also on the intrinsic interest      then either be done client side or server side, depending on the type
+values of its neighbors N(x):                                              of client. This flexibility opens up many new possibilities for graph
+                                                                           exploration. For example, one can easily imagine users browsing the
+APIdiff(x) = max(API(x),G  max(nN(x) : 1/EI(e,x,n)  APIdiff(n)))        graph over a mobile phone, a device that generally does not have the
+                                                                           processing power needed to compute layouts for larger graphs in
+In other words, the interest of a node depends on the maximum of its       interactive time. In these situations, the server is responsible for
+own interest values and a fraction of its highest interest neighbour. In   computing the layout.
+a sense, we are diffusing the interest values over the entire graph.
+The parameter G (0 d G < 1) determines the diffusion factor, where
+values closer to 1 increase the diffusion. By including the Edge
+Interest function we can optionally control the direction and amount
+956               IEEE TRANSACTIONS ON VISUALIZATION AND COMPUTER GRAPHICS, VOL. 15, NO. 6, NOVEMBER/DECEMBER 2009
+
+
+3.3      Expanding a subgraph
+The final step of our interaction model is Expand-on-Demand. Once           RAM
+the local context for a node is available, users can decide to expand
+this context by bringing in more information. We have implemented
+a simple mechanism that allows users to click on a node x in the
+                                                                                                                         Data
+current context to bring in more contextual information for that                       Graph Server
+                                                                                     x API interest values               server
+particular node. This allows a user to direct the expansion of the                   x Node attributes
+current subgraph based on their current information need.                            x Edge attributes                Search
+    A naive solution would then bring in all the neighbors of x when                                                  index
+the user indicates a need for more context. However, the system
+                                                                                                 Session 1                          Client 1
+cannot make any guarantees on the degree of the node in question.                              x Search terms                     x Current subgraph
+This may result in users inadvertently increasing the size of the                              x UI interest values
+                                                                                               x Current Subgraph
+                                                                                                                                  x Layout
+                                                                                                                                  x DOI interest values
+subgraph with hundreds of nodes resulting in potentially unreadable
+graphs and putting significant strain on the display and layout
+subroutines. While indicating that a node has a very high degree (for
+example, by visually labeling the number of neighbors on each                                    Session n                          Client n
+node) is useful, users need a way to limit the number of new items                             x Search terms
+                                                                                               x UI Interest values
+                                                                                                                                  x Current subgraph
+                                                                                                                                  x Layout
+to ensure the visualization does not get too complex.                                          x Current subgraph                 x DOI interest values
+
+    The interest function defined in the previous section can be
+reused so the system can make judgment on which nodes in the set           Fig. 2. Basic client-server architecture. The server maintains a copy of
+of adjacent nodes are most important. We can then limit the number         the entire network in RAM with the API values. Client interaction is
+of new nodes added to the current view by only adding the top N            handled from separate session threads, which keep track of session
+most interesting nodes. In combination with visual indicators on the       specific information, such as the currently visible subgraph and UI
+size of the context, the amount of new information added to the            values.
+current context can be controlled. If users wish to see more than N
+connected nodes, they can simple click the node multiple times, with       APIdiff(x) for all nodes and stores the result with each node. Finally,
+each click bringing in N additional nodes.                                 it waits for connection requests from any clients. Since the full
+    An important unsolved problem in information visualization is          interest function is dependent on the users search terms and focal
+how to direct the users to potentially interesting items in the            point, we cannot store the results of the DOI computation with each
+visualization. Without some sort of guide, visualizations of large         node.
+datasets can quickly degrade into massive graphical representations            Data that is specific to a users session is therefore stored with a
+that still require the user to click through or drill down on many         session object. Every session object runs in a separate thread inside
+different items to find something interesting. To address this problem     the graph server and is responsible for maintaining information that
+we can reuse our DOI function, which tells us how interesting a            pertains to a users current browsing session. The node layout is
+particular node is, to guide the user to interesting parts of the graph    computed using a force directed algorithm. In past experiments, we
+that are currently hidden. We therefore visually highlight the n most      generally found the classic gradient descent method unreliable and
+interesting directions for expansion. Typically, n should be small         prone to local minima and oscillations. Instead, we opted to use the
+(n<5) to avoid overloading the user with choices. In most cases this       stress majorization optimization method [6] that provides far better
+top n will be stable as nodes further away from the focus will have        layout stability and is sufficiently fast for medium sized graphs.
+lower interest. That is, if the user expands a node that is not in the
+                                                                           3.4.2      Visualization Client
+top n, the interest of the new node will most likely be lower than the
+interest of the top n nodes because its distance from the focal node is    The clients main responsibility is to visually present the current
+greater. Using these visual indicators, users are guided toward            subgraph to the user and handle all display and interaction tasks. Due
+interesting parts of the graph, preventing them from having to             to our extensible framework, the actual functionality of the client
+needlessly expand dozens of items before hitting potentially               might depend on the capabilities of the platform on which it runs.
+interesting ones.                                                          For our use case, we implemented a client that runs in a standard
+                                                                           web browser using Adobes Flash framework. Our client consists of
+3.4     Implementation                                                     four basic sections (see Fig. 3): A searchbox (a), a list of search
+We have implemented the above ideas in a client-server system that         results (b), the main canvas (c) and a panel (d) that allows users to
+allows users to browse arbitrary graphs over an Internet connection.       adjust the DOI settings to the task at hand. The searchbox in the
+The only hardware constraint is on the server, which requires enough       upper right allows the user to perform a textual search on the full
+physical memory to cache the entire graph data in RAM for                  dataset, as the client makes a Search request to the server. The
+performance reasons. If not enough RAM is available we can always          results of that search are then displayed in a tabular search result list.
+use a disk based graph storage, but this will notably impact               We opted to include basic node properties relevant to the application
+performance. There are no hardware constraints on the client. In this      area, as well as an indication on the size of the surrounding
+section we will give a brief description of some of the practical          subgraph. The latter immediately gives an indication as to what the
+implementation issues. Afterwards, in Section 4, we show how we            size of the display will be when that node is picked as a focal node,
+can apply this general setup to a specific dataset.                        and prevents the user from selecting uninteresting singleton nodes.
+                                                                           To avoid excessive computational overhead on the server we do not
+3.4.1      Graph Server                                                    display the exact size if it is over a fixed threshold.
+The graph server is responsible for maintaining an in-memory                   The user can then pick any node x from this list of search results
+representation of the entire graph and serving that data out to            and drag it over to the main canvas to view its context. The client
+different clients connecting to the server. Our full database resides in   makes a request to receive a subgraph around x from the server. This
+an RDBMS on a separate database server. On startup, our graph              subgraph is then displayed on the main canvas with the focal node
+server connects to the database and reads the full graph into RAM          highlighted. The sizes of nodes correspond to their (normalized)
+along with any node attributes needed to compute interest functions.       degree of interest to give more visual attention to nodes with high
+Other attributes are fetched from the database server on demand, to        DOI. Node color is used to map a node attribute that is revelant to
+conserve memory. After reading the data, the server computes               the application area. Furthermore, nodes that match the users initial
+                                                                           search query are surrounded with a blue halo.
+VAN HAM AND PERER: “SEARCH, SHOW CONTEXT, EXPAND ON DEMAND”: SUPPORTING LARGE GRAPH…                                                              957
+
+
+
+
+    Fig. 3. Basic user interface layout. A user types a query in the searchbox (a) which yields a number of hits presented in tabular form (b).
+    One of these hits can then be dragged to the main screen (c) which shows the subgraph centered on that node. Other nodes that matched
+    the users search are highlighted in blue. Users can adapt the balance between different components of the DOI function and the size of the
+    subgraph in a separate panel (d).
+    Users can click a node to send an expand request to the server to      context of cited documents typically requires manually clicking
+return its most interesting hidden connections. In the client              through a potentially large number of related cases, which are each
+visualization, fading edges emanate from nodes to show the user that       visible in their own separate windows. This type of interaction model
+more connections are available. Although the endpoints of these            makes it hard to find relevant cases more than one step out, as that
+edges are not visible, they are included in the layout. This means that    could possibly require manual inspection of hundreds of cases.
+different fading edges connecting to the same node will point a                The following case study is conducted on a set of over 15
+single point in space, giving the user a visual clue that they connect     gigabytes of legal documents containing every federal court case in
+to the same node. Not every non-visible connection is drawn because        US history, but does not include cases tried by state courts. Still,
+the degree of a single node might be too large to render, so we cap        these documents form a graph of over 300k documents and slightly
+the number of fading edges per node to a maximum. To give users a          over 3.3 million citations. The average number of citations to and
+more quantitative indication on the actual number of adjacent nodes,       from a node typically lies between 1 and 200 but there are a
+we also display the precise number on each node. After receiving a         substantial number of cases with thousands of citations. Fig. 5 shows
+new set of connections a new layout is computed based on the initial       the detailed degree distribution. We loaded this full dataset into our
+layout and the whole graph is then smoothly animated to its new            setup running on a Dual-Core 2.4Ghz laptop with 4GB RAM, which
+position.                                                                  took about 5 minutes of server startup time loading data and
+                                                                           computing API values, and ended up using 1.2GB of RAM. Queries
+4       EVALUATION: LEGAL CITATION NETWORK                                 from the browser client typically finish in a couple of seconds (about
+                                                                           15 seconds per search and UI recomputation and up to 3 seconds for
+To evaluate the initial benefits of our approach we applied it to a        subgraph computation)
+massive dataset of legal document citations. Legal practitioners               Here, we wanted to see if we could use DOI graphs to extract
+sometimes need to interpret this citation graph of cases in order to       relevant context around legal cases. We decided that relevant cases
+understand court decisions. In the United States, laws rely on the         would be oft-cited Supreme Court cases that match the initial
+concept of precedence, so lawyers must carefully study case citations      keyword search and are in close proximity to the focus. The a priori
+to understand how relevant issues were ruled in prior cases [24][21]       interest (API) function for our legal graph examines node attributes
+    Typically, searching for legal background information happens          and topology of the graph to assign higher interest to supreme court
+through a digital library platform such as LexisNexis or Westlaw           cases and cases with higher in-degree. The user interest (UI) function
+[13]. These platforms however, are mainly text-based and focused on        considers the score for that node on the search terms used when the
+providing powerful search, convenient overviews of single                  legal analyst searched for a focal node. Users may directly
+documents, as well as quick linking between documents. Obtaining a         manipulate the weights of the different components in the DOI
+958                IEEE TRANSACTIONS ON VISUALIZATION AND COMPUTER GRAPHICS, VOL. 15, NO. 6, NOVEMBER/DECEMBER 2009
+
+
+
+
+                             (a) Importance                                                              (b) Reasoning
+
+
+
+
+                               (c) Overview                                                              (d) Relevance
+
+
+  Fig. 4. Sample use cases and tasks. In (a) the user is looking for relevant cases on religion + discrimination that do not contain these search
+  terms and might not be cited directly by the focal node. Three relevant supreme court cases are returned (b) shows how seemingly unrelated
+  cases might connect two distinct clusters of relevant legal cases on abortion. (c) shows an overview of cases related to a search for
+  American flag. Relevant clusters of cases can be identified by examining case details. (d) shows how the structure of a network might give
+  clues on the relevance of a case. Here we selected a case containing the word evolution, but the actual cluster of cases related to evolution
+function by using sliders in the user interface. Finally, as no attribute    includes many other nodes that also feature the users searched
+information for edges exist, the edge interest function EI is constant.      keywords (nodes highlighted in blue). These user-matched nodes
+Even though none of the authors are legal experts, these choices for         surround three relevant Supreme Court decisions: Johnson v.
+interestingness seem reasonable as a first test, though further user         Railway Express (on the limitation period of filing a discrimination
+testing might lead to more refined DOI functions for this particular         suit), Griggs v. Duke Power (on indirect discrimination by aptitude
+domain. In the next sections we highlight four different potential           tests) and McDonnell Douglas v. Green. Especially this last case, an
+usage scenarios.                                                             early substantive ruling on employee discrimination according to
+                                                                             Wikipedia, is remarkable because this case is not directly connected
+4.1      Importance: Show me important cases related to                      to the original focus case, nor does this case match the users original
+         my case of interest.                                                keywords. Nonetheless, this case is brought to the users attention due
+DOI graphs are useful when analysts wish to find important nodes             to a priori interest function giving weight to often cited, high court
+that are related to a specific focal node. In a legal context, this can be   cases in the context of the focal node. Without DOI, the subgraph of
+particularly useful when analysts are looking for important, oft-cited,      all cases two hops out would contain 2345 nodes and 2847 edges,
+Supreme Court cases relevant to their selected case. In this particular      would have a diameter of at most 5, and would be impractical to
+scenario, a legal analyst searched for court decisions that matched          visualize using a node link diagram.
+the keywords religion AND discrimination. Out of the search                    Additionally, Fig. 4a shows how indicating high interest edges
+results, the analyst selected a decision from 1980, Miller v. Texas          gives us valuable clues as to the direction in which we want to
+State Board of Barber Examiners. (annotated Focus in Fig. 4a).             expand the graph. In Fig. 4a three edges are highlighted which all
+This case features a decision about whether or not an employee was           seem to point at a single position. After expanding the marked edges,
+fired due to discrimination on account of race, color, religion, sex,       we find two additional Supreme Court cases on discrimination.
+or national origin. As Fig. 4a illustrates, the contextual graph
+VAN HAM AND PERER: “SEARCH, SHOW CONTEXT, EXPAND ON DEMAND”: SUPPORTING LARGE GRAPH…                                                                                                                      959
+
+
+                                                           Log degree distribution
+                                                                                                                                    (constitutionality of flag burning) and Spence v. State of Washington
+                                                                                                                                    (constitutionality of displaying flags with superimposed images).
+               6
+                                                                                                                                    Second, the DOI graph highlights a variety of other lower court flag-
+               5
+                                                                                                                                    cases not necessarily connected to the source, which deal with
+                                                                                                                                    decisions that force students to salute flags, destroying flags for
+               4
+                                                                                                                                    commercial purposes, and other cases of flag mutilation. However,
+                                                                                                                                    on the other side of the graph, there are a variety of cases that have
+ Count (log)
+
+
+
+
+               3                                                                                                                    nothing to do with flags, but do revolve around the theme of the
+                                                                                                                                    freedom to express oneself. So even though these decisions were not
+               2                                                                                                                    explicitly about flags, their arguments are critical to the flag cases.
+                                                                                                                                    Even though we told the server to return a small 25 node context we
+               1
+                                                                                                                                    can clearly group cases into relevant clusters.
+               0
+                   1   2   3 4   5   6 7   8   9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36   4.4      Relevance: Show me if this case is what I think it is
+                                                                     Degree (x100)
+                                                                                                                                    This last scenario is an example where DOI graphs can help you
+                                                                                                                                    understand the relevance, or lack thereof, of your selected search
+     Fig. 5. Log-degree distribution of the case citation graph. Citation                                                           node. A legal analyst conducted a search using the term evolution
+     count includes both in and out citations.                                                                                      to discover decisions dealing with this biological theory. Similar to
+                                                                                                                                    the previous scenario, the analyst adjusted the interest sliders to give
+4.2      Reasoning: Show me why this cited case is                                                                                  more preference to matched keywords (UI), as the user was
+         relevant to my case                                                                                                        interested in cases about evolution. At the same time, less weight
+                                                                                                                                    was given to the distance component of the DOI function. The
+One complexity of interpreting the citation graph is that decisions                                                                 analyst sorted the search results by date, and selects a recent case that
+often cite other decisions that may seemingly have nothing to do                                                                    is in the result list (Rockstead v. Crystal Lake). The resulting graph is
+with the semantic content. Consider this case study example of an                                                                   quite peculiar, as the DOI graph brings in a cluster of evolution-
+analyst searching for decisions involving the keywords, abortion.                                                                 matched decisions (labeled Evolution vs Creationism Cluster in
+He arrives upon a potentially interesting case (Zhong v. US Dept of                                                                 Fig. 4d), but they are 7 degrees away. Upon closer inspection, it
+Justice; the focus in Fig. 4b) of a person attempting to receive                                                                    seems the original source node has nothing to with the biological
+asylum in the US due to the practice of forced abortion in his home                                                                 theory of Evolution, but instead the evolution of common law. The
+country. The decision curiously cites a case about illegal stock                                                                    resulting picture made the analyst realize that the selected case had
+manipulation (Chenery vs SEC, annotated Financial Case), which                                                                    no evolution-based context in the legal graph, and that perhaps the
+initially seems to have very little to do with a decision about                                                                     selected case was not what the analyst was seeking after all.
+abortion. This case, which never mentions the word abortion, is
+inside the DOI graph since it is the source nodes indirect neighbor                                                                We have presented several stories of how DOI graphs allow analysts
+and is a heavily cited Supreme Court case, while some of its                                                                        to dig through very large and dense citation graphs. Although this
+neighbors matched the initial search term. Upon reading the full text                                                               anecdotal evidence should obviously be confirmed through more
+of the document, a feature available in our system, the analyst reads                                                               rigorous evaluation techniques such as long-term field studies (e.g.
+the description of why this particular citation exists ("a judicial                                                                 [16]) with a broad field of actual experts, these initial explorations
+judgment cannot be made to do service for an administrative                                                                         were encouraging. Without the use of interest functions to make
+judgment). However, this cryptic statement does not resolve the                                                                    these otherwise dense graphs legible, or using only the currently
+analysts concerns and he wants to figure out why this case is cited.                                                                available textural search tools it is doubtful the analyst would have
+    Fortunately, DOI graphs are able to utilize this seemingly                                                                      made some of the observations above.
+unrelated hub to search outward for additional abortion cases. In fact,
+two different decisions that match the users search of abortion also
+cite the stock manipulation case (in the group labelled main abortion                                                              5     DISCUSSION & FUTURE WORK
+cluster in Fig. 4b). These new abortion cases are inside the DOI                                                                    We have demonstrated how degree of interest can be used to
+graph because they both matched the analysts keywords and have a                                                                   effectively navigate large and highly connected graphs. However,
+highly cited Supreme Court case (the financial case) as neighbour.                                                                  there are still many outstanding challenges to support the analytical
+By examining the rulings of these new abortion cases in detail the                                                                  needs of users. Although we have chosen legal citations as data
+analyst is able to conclude that the context for this citation is the                                                               domain, there are many other data domains where this approach
+extent to which government entities can interpret law and                                                                           might be useful. In social network visualization, ego-centric views of
+retroactively set rules. As an added bonus the analyst has discovered                                                               the network are common and this approach fits well with that
+a separate cluster of rulings on abortion cases that are not directly                                                               paradigm. Internet browsing could be enhanced by providing a user a
+connected to the main cluster.                                                                                                      local map around the visited page, using the users current
+                                                                                                                                    information needs as input to an interest function.
+4.3      Overview: Show me an overview of this subfield                                                                                 We assumed that the user selects a single node as the focus, but
+DOI graphs can also be used to provide an overview of the context                                                                   we can very well generalize these ideas to multiple foci. That is, if a
+surrounding a node of interest. In this example, the legal analyst                                                                  user selects multiple nodes in the graph, can we show a fixed size
+searched for all decisions involving the key words American Flag.                                                                 interesting (and connected) subgraph containing these nodes?
+Since the user is interested in seeing a range of cases involving                                                                   Running our localized greedy algorithm no longer guarantees
+American flags, the interest sliders are adjusted to give more                                                                      connectedness, but approaches like [3] and [11] use the graph
+preference to matched keywords and less interest to a priori                                                                        topology to generate network summaries that capture as much as
+attributes like in-degree and level of court. From the search results,                                                              much as possible of the basic proximity structure of the graph using
+the analyst selects a focus case (Troster v. Pennsylvania) about an                                                                 a fixed node budget. We can directly integrate these techniques in
+employee who refused to wear a flag on his uniform. The resulting                                                                   our setup, or enhance them by taking node interest into account.
+DOI graph (Fig. 4c), is a dense graph but by examining the cases in                                                                     In this paper, we have defined a general framework for interest
+detail we can still identify a number of conceptual clusters. First, it                                                             functions but have been deliberately vague about their precise
+clearly shows the source nodes connections to important Supreme                                                                    implementation. The actual choice of properties or metrics to use for
+Court decisions about American flags, including Texas v. Johnson                                                                    DOI computation should depend on the task and data domain for
+960               IEEE TRANSACTIONS ON VISUALIZATION AND COMPUTER GRAPHICS, VOL. 15, NO. 6, NOVEMBER/DECEMBER 2009
+
+
+which the visualization is intended and it is unlikely that there is an    REFERENCES
+optimal function that performs well for all domains and tasks. In our      [1]  S.K. Card and D. Nation. Degree-of-Interest Trees: A Component of an
+sample scenario we have used simple measures like the values of                 Attention-Reactive User Interface. Proceedings Advanced Visual
+inherent attributes and local topology metrics for API and a keyword            Interfaces AVI 02, 2002.
+match percentage for UI. We could also choose an API function that         [2] T. d'Entremont and M.-A. Storey, Using a Degree-of-Interest Model for
+uses global topological measurements relevant to users tasks and               Adaptive Visualizations in Protégé, in Proceedings of the 9th
+domain. For instance, social network analysis metrics such as                   International Protégé Conference (extended abstract), 2006.
+betweenness centrality would allow users to find bridge nodes more         [3] C. Faloutsos, K.S. McCurley, and A. Tomkins. Fast discovery of
+easily. PageRank-like algorithms would allow users to find hub                  connection subgraphs. In Proc. 10th ACM SIGKDD conference, pp.
+nodes more easily. Although these metrics are generally expensive to            118127, 2004.
+compute, they only have to be computed once, at startup. In a similar      [4] G.W. Furnas. Generalized fisheye views, In Proceedings Human
+manner, UI can be enhanced by reusing the history of interactions a             Factors in Computing Systems CHI 86, pp. 16-23 ,1986
+user has performed on the current subgraph. Keeping track of               [5] G.W. Furnas. A fisheye follow-up: further reflections on focus +
+common parameters of nodes selected as foci and nodes selected for              context, In Proceedings Human Factors in Computing Systems CHI 06,
+expansion might help us make better decisions on the intent of the              pp. 999-1008, 2006.
+user, resulting in an adaptive DOI function and more relevant graphs.      [6] E. Gansner, Y. Koren, and S. North, Graph Drawing by Stress
+    Finally, in our visualization we are currently only showing the             Majorization, Proc. 12th Int.Symp. Graph Drawing (GD04), LNCS
+immediate context of a node at the lowest level. This makes it hard             3383, pp. 239250, 2004.
+for users to orient themselves in the full information space. One          [7] E. Gansner, Y. Koren, and S. North, Topological Fisheye Views for
+possible solution to explore is to annotate edges on the periphery of           Visualizing Large Graphs, IEEE Transactions on Visualization and
+the visible graph with distances to landmark cases in the graph, much           Computer Graphics. Vol. 11 No.4 pp. 457-468, 2005.
+like road signs in real life.                                              [8] F. van Ham and J.J. van Wijk, Interactive Visualization of Small World
+    On the downside of this approach, the decisions made by the DOI             Graphs. In Proceedings of the IEEE Symposium on Information
+based algorithms might seem abstract to the user at times. Looking              Visualization, pp. 199  206, 2004.a
+for a specific citation between two cases can be problematic, as cases     [9] J. Heer and S.K. Card. DOITrees revisited: Scalable, Space-constrained
+are brought in on a most-interesting basis. We can address this by            Visualization of Hierarchical Data. Proceedings of the Working
+including some of the textual approaches used in common legal                   Conference on Advanced Visual Iinterfaces AVI04, pp. 421-424, 2004.
+analysis tools, and allow the user to also search for and expand           [10] D. Holten. Hierarchical Edge Bundles: Visualization of Adjacency
+connections to particular cases.                                                Relations in Hierarchical Data, IEEE Transactions on Visualization and
+    Furthermore, with the most cited cases in the database having               Computer Graphics, Vol. 12, No. 5, Pages 741 - 748, 2006.
+over 3600 citations, some of the heavily cited procedural cases are        [11] Y. Koren, et al. Measuring and extracting proximity in networks. In
+often included in the extracted DOI graphs, even though they might              Proc 12th ACM SIGKDD conference, pages 245-255, 2006.
+not be that interesting from a legal perspective. Fine tuning of the       [12] B. Lee, et al. TreePlus: Interactive Exploration of Networks with
+API function might be helpful in that regard. For example based on              Enhanced Tree Layouts. IEEE Transactions on Visualization and
+an examination of the degree distribution (Fig. 5) we can state that            Computer Graphics, vol. 12 (6), pp. 1414-1426, 2006.
+citation counts over 1600 do not add much to the information value         [13] S. Makri. et al. Studying Law Students Information Seeking Behaviour
+and we cap the API interest level for those cases. Finally, our                 to Inform the Design of Digital Law Libraries, European Conference on
+approach helps ameliorate some of the issues with rendering node                Research and Advanced Technology for Digital Libraries, 2006.
+link diagrams for dense graphs, but does not solve them completely,        [14] Palantir, http://www.palantirtech.com, Accessed May 2009.
+as is witnessed by Fig. 4c. Individual edges are still hard to follow in   [15] A. Perer and B. Shneiderman, Balancing systematic and flexible
+dense clusters and node link representations simply do not do a very            exploration of social networks. IEEE Transactions on Visualization and
+good job in those cases. Possible solutions may include edge                    Computer Graphics, vol. 12 (5) pp. 693-700, 2007.
+bundling [10] or including constraints on the maximum number of            [16] A. Perer and B. Shneiderman, Integrating statistics and visualization:
+edges returned in the most interesting subgraph.                                case studies of gaining clarity during exploratory data analysis. In
+                                                                                Proceedings Human Factors in Computing Systems CHI 08, pp. 265-
+6     CONCLUSION                                                                274, 2008.
+In this paper, we have shown that an adaptation of degree-of-interest      [17] M. Sarkar and M.H. Brown. Graphical fisheye views of graphs. In
+functions to graphs helps manage the complexity of large and dense              Proceedings Human Factors in Computing Systems CHI 92 pp. 83-91,
+graphs. We advocate an additional term in the classic degree of                 1992.
+interest function that captures the search for a focal node. We also       [18] B. Shneiderman, The eyes have it: a task by data type taxonomy for
+introduced a method to diffuse interest over the entire graph to                information visualizations. In Proceedings of the IEEE Symposium on
+mitigate local minima. Concretely, we can use degree of interest to             Visual Languages, pp. 336-343, 1996.
+extract subgraphs from data residing on a centralized server and           [19] B. Shneiderman and Aris, A. Network Visualization by Semantic
+subsequently browse them on remote clients. On the interaction side             Substrates. IEEE Transactions. on Visualization and Computer
+we can use these same DOI functions to reduce the potential                     Graphics, Vol. 12, No. 5, pp. 733-740, 2006.
+complexity introduced by very high degree nodes in the graph and           [20] M.A. Smith et al. Analyzing (Social Media) Networks with NodeXL.
+simultaneously use it to visually indicate directions in which                  Community & Technologies, 2009.
+browsing might yield interesting results. In conclusion, we believe        [21] S.A. Sutton. The role of attorney mental models of law in case
+that an extension of the basic concept of degree of interest from tree          relevance determinations: An exploratory analysis. Journal of the
+to graphs offers promising ways to tackle the complexity of very                American Society for Information Science vol. 45 (3), 1994.
+large real world graphs and foresee a rich area for follow-up work.        [22] Touchgraph LLC.. http://www.touchgraph.com. Accessed March, 2009.
+                                                                           [23] M. Wattenberg, Visual exploration of multivariate graphs. In
+                                                                                Proceedings Human Factors in Computing Systems CHI 06, pp. 811-
+ACKNOWLEDGMENTS
+                                                                                819, 2006.
+The authors wish to thank Chris Collins for his efforts in processing      [24] P. Zhang and L. Koppaka. Semantics-based legal citation network.
+and formatting the raw data.                                                    Proceedings of the 11th international conference on Artificial
+                                                                                intelligence and law, pp. 123-130, 2007.
+

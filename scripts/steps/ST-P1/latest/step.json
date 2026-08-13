@@ -1,0 +1,18 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "ST-P1",
+  "title": "子树试点A chain-step 审计",
+  "reportZh": "report.zh.md",
+  "updatedAt": "2026-07-08T08:20:00.000Z",
+  "substeps": [
+    {
+      "title": "chain-step 泄露面审计",
+      "functions": [
+        { "path": "subtrees/ST-P1-subtree.md", "line": 6, "name": "ST-P1 problem" }
+      ],
+      "promptZh": "prompts/01.zh.md",
+      "inputs": [{ "path": "llm-task-tree-kit/server.js", "line": 1 }],
+      "outputs": [{ "path": "docs/subtree-parallel/findings-P1.md", "line": 1 }]
+    }
+  ]
+}

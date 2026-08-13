@@ -1,0 +1,56 @@
+[
+  {
+    "repo": "microsoft/LLMLingua",
+    "stars": 6438,
+    "forks": 400,
+    "updated": "2026-07-15T15:04:36Z",
+    "license": "MIT",
+    "description": "[EMNLP'23, ACL'24] To speed up LLMs' inference and enhance LLM's perceive of key information, compress the prompt and KV-Cache, which achieves up to 20x compression with minimal performance loss. ",
+    "url": "https://github.com/microsoft/LLMLingua"
+  },
+  {
+    "repo": "parthsarthi03/raptor",
+    "stars": 1723,
+    "forks": 231,
+    "updated": "2026-07-15T01:54:33Z",
+    "license": "MIT",
+    "description": "The official implementation of RAPTOR: Recursive Abstractive Processing for Tree-Organized Retrieval",
+    "url": "https://github.com/parthsarthi03/raptor"
+  },
+  {
+    "repo": "letta-ai/letta",
+    "stars": 23804,
+    "forks": 2521,
+    "updated": "2026-07-15T12:18:38Z",
+    "license": "Apache-2.0",
+    "description": "Platform for stateful agents: AI with advanced memory that can learn and self-improve over time.",
+    "url": "https://github.com/letta-ai/letta"
+  },
+  {
+    "repo": "mem0ai/mem0",
+    "stars": 60904,
+    "forks": 7093,
+    "updated": "2026-07-15T16:04:36Z",
+    "license": "Apache-2.0",
+    "description": "Universal memory layer for AI Agents",
+    "url": "https://github.com/mem0ai/mem0"
+  },
+  {
+    "repo": "getzep/graphiti",
+    "stars": 28756,
+    "forks": 2902,
+    "updated": "2026-07-15T15:56:40Z",
+    "license": "Apache-2.0",
+    "description": "Build Real-Time Knowledge Graphs for AI Agents",
+    "url": "https://github.com/getzep/graphiti"
+  },
+  {
+    "repo": "RUC-NLPIR/Arbor",
+    "stars": 933,
+    "forks": 118,
+    "updated": "2026-07-15T12:45:35Z",
+    "license": "Apache-2.0",
+    "description": "A generalist autonomous research agent — runs experiments, researches, and iteratively optimizes, autonomously.",
+    "url": "https://github.com/RUC-NLPIR/Arbor"
+  }
+]

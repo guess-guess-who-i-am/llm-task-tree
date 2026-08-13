@@ -1,0 +1,517 @@
+                                SpaceTree: Supporting Exploration in Large Node Link Tree,
+                                        Design Evolution and Empirical Evaluation
+                                            Catherine Plaisant, Jesse Grosjean, Benjamin B. Bederson
+                                                    Human-Computer Interaction Laboratory
+                                                             University of Maryland
+                                                   {plaisant, grosjean, bederson}@cs.umd.edu
+
+
+                                     Abstract
+          We present a novel tree browser that builds on the
+          conventional node link tree diagrams. It adds dynamic
+          rescaling of branches of the tree to best fit the available
+          screen space, optimized camera movement, and the use of
+          preview icons summarizing the topology of the branches                   Figure 1: The “traditional” node link representation of a tree.
+                                                                                     It has a favored direction (here top down). Drawing every
+          that cannot be expanded. In addition, it includes                        nodes makes very poor use of the available drawing space,
+          integrated search and filter functions. This paper reflects                   and would fill up a screen before reaching 100 nodes.
+          on the evolution of the design and highlights the
+          principles that emerged from it. A controlled experiment
+          showed benefits for navigation to already previously
+          visited nodes and estimation of overall tree topology.
+
+          1. Introduction
+
+               The browsing of hierarchies and trees has been
+          investigated extensively [1].           Designers have
+          demonstrated that many alternatives to the traditional
+          node link representation (Figure 1) are possible, but the
+          classic representation of trees remains the most familiar
+          mapping for users and still is universally used to draw
+                                                                                       Figure 2: SpaceTree allows large trees to be explored
+          simple trees. Our goal was to take another look at this                     dynamically. Branches that do not fit on the screen are
+          well-known tree representation and see how visualization                   summarized by a triangular preview. The number of levels
+          advances in zoomable user interfaces and improved                         opened is maximized. In this example, the 3 lower levels of
+          animation principles could lead to a better interactive tree                the hierarchy were opened at once as users clicked on
+                                                                                        “Drilling Manager” (the colored node in the middle.)
+          browser while preserving the classic tree representation.
+          Such a browser might encourage the adoption of
+          visualization by a wider range of users (e.g. families                   2. Related work
+          browsing genealogy trees or biology students browsing
+                                                                                        Two large categories of solutions have been proposed
+          taxonomies) or by more traditional work environments
+                                                                                   to display and manipulate trees: space-filling techniques
+          (organization charts for managers or personal office staff).
+                                                                                   and node link techniques. Space filling techniques (e.g.
+               We present SpaceTree, a novel interface that                        treemaps [2], information slices [3]) have been successful
+          combines the conventional layout of trees with a zooming                 at visualizing trees that have attributes values at the node
+          environment that dynamically lays out branches of the                    level. In particular, treemaps are seeing a rapid expansion
+          tree to best fit the available screen space. It also uses                of their use for monitoring, from stock market
+          preview icons to summarize the topology of the branches                  applications (e. g. www.smartmoney .com), to inventory
+          when there isn’t enough space to show them in full. This                 or network management, to production monitoring.
+          paper reflects on the evolution of the design and                        Space filling techniques shine when users care mostly
+          highlights the principles that emerged from it. A                        about leaf nodes and their attributes (e.g. outlier stocks)
+          controlled experiment compares SpaceTree to two other                    but do not need to focus on the topology of the tree, or the
+          interfaces and analyzes the impact of interface features on              topology of the tree is trivial (e.g. 2 or 3 fixed levels).
+          the time to perform navigation tasks to new and already                  Treemap users also require training because of the
+          visited nodes, and topology evaluation tasks.                            unfamiliar layout.
+
+
+
+Proceedings of the IEEE Symposium on Information Visualization 2002 (InfoVis’02)
+1522-404X/02 $17.00 © 2002 IEEE
+              Node link diagrams, on the other hand, have long been                navigate the web. The use of fisheye effects to display
+          the plague of information visualization designers because                branches at varying scales in the same display was also
+          they typically make inefficient use of screen space,                     explored [14] [15]. The just published Degree-of-Interest
+          leaving the root side of the tree completely empty –                     Tree developed by Card and Nation [16] uses fisheye
+          usually the top or left of the screen – and overcrowding                 views and shares many features with SpaceTrees.
+          the opposite side. Even trees of a hundred nodes often
+                                                                                       Expand and contract interfaces as exemplified by
+          need multiple screens to be completely displayed, or
+                                                                                   Microsoft Explorer allow the browsing of trees as well.
+          require scrolling since only part of the diagram is visible
+                                                                                   Similarly, WebTOC [17] shows how information about
+          at a given time. Specialized tools can help users manage
+                                                                                   size or type could be added to the expandable list of
+          the multiple pages needed to display those trees (e.g.
+                                                                                   nodes.
+          www.nakisa.com for organizational chart). Optimized
+          layout techniques can produce more compact displays by
+          slightly shifting branches or nodes (e.g. [4], or [5] ), but
+          those techniques only partially alleviate the problem and                3. Description of the interface
+          are often not appropriate for interactive applications.                      SpaceTree is our attempt to make the best possible use
+              The coupling of overview + detail views with pan and                 of the traditional node link tree representation for
+          zoom was proposed early by Beard & Walker [6] and                        interactive visualization. Figures 3 to 6 show a series of
+          found to be more effective than scrolling. Kumar et al.                  screen captures of the main display area, showing the
+          successfully combined the overview and detail technique                  progressive opening of branches as users refine their
+          with dynamic queries to facilitate the searching and                     focus of interest. Branches that cannot be fully opened
+          pruning of large trees [7]. The technique allows ranges of               because of lack of space are previewed with an icon. Here
+          depth dependant attribute values to be specified to prune                we describe an initial design using a preview icon in the
+          the tree dynamically.                                                    shape of an isosceles rectangle. The shading of the
+                                                                                   triangle is proportional to the total number of nodes in the
+              Another approach is to use 3D node link diagrams.                    subtree. The height of the triangle represents the depth of
+          Cone Trees [8] allow users to rotate a 3D representation                 the subtree and the base is proportional to the average
+          of the tree to reveal its hidden parts. Info-TV [9] allows               width (i.e. number of items divided by the depth). The
+          nodes and labels to be removed from sub trees (leaving                   preview icons can be chosen to be relative to the root (for
+          the links) to show a more compact view of branches. 3D                   ease of comparison between levels) or to the parent (for
+          representations are attractive but only marginally improve               ease of local comparison).
+          the screen space problem while increasing the complexity
+          of the interaction.                                                          Users can navigate the tree by clicking on nodes to
+                                                                                   open branches, or by using the arrow keys to navigate
+              A clever way to make better use of screen space is to                among siblings, ancestors and descendants. Figure 6
+          break loose from the traditional up-down or left-right                   illustrates how SpaceTree maximizes the number of lower
+          orientation and use circular layouts [10]. The best known                levels to be opened.
+          technique is the Hyperbolic tree browser [11] - now
+          available as StarTree from Inxight (www.inxight.com) -                       Several layout options allow adjustments of the
+          which uses hyperbolic geometry to place nodes around                     spacing between nodes, alignment, icon options etc. The
+          the root and provides smooth and continuous animation of                 choice of overall orientation of the tree layout, allows
+          the tree as users click or drag nodes to readjust the focus              designers or users to match the layout to the natural
+          point of the layout. The animation is striking but the                   orientation of the data. For example organizational charts
+          constant redrawing of the tree can be distracting. Labels                are often oriented top down (suggesting power), while the
+          are hard to browse because they are not aligned and                      evolution of species is more likely to be show left to right
+          sometimes overlap. In addition, the unconventional layout                (suggesting time) or bottom up (suggesting progress).
+          may not match the expectations of users (e.g. it is not                  Figures 7 and 8 show examples of a left to right
+          appropriate to present the organizational chart of a                     orientation. The choice of the most space efficient
+          conventional business.)                                                  orientation depends on the tree topology and the aspect
+                                                                                   ratios of the labels and the window.
+              Cheops [12] overlaps branches of the tree to provide a
+          very compact overview of large trees. Labeling is an                         SpaceTree also includes integrated support for search
+          issue and interpreting the diagram requires training.                    and filter. As users type a string, the location of results is
+          Constrained by limited screen space, WebBrain                            highlighted on the tree. Then users can navigate the tree,
+          (www.webbrain.com) chooses to prune the tree to show                     or click on the “prune” button to see a filtered view of the
+          only a very local view of children and parent of the                     tree showing only the paths to the matching nodes.
+          current selection – and some crosslinks. The nodes have                      We also implemented dynamic queries [18] to
+          to be reoriented at each selection. The benefits of pure                 illustrate how dynamic queries allow the rapid pruning of
+          zooming are illustrated by PadPrints [13], which                         the tree when attributes are available at the node level. As
+          automatically scales down a tree of visited pages as users               users manipulate a slider to limit the value of an attribute,
+
+
+Proceedings of the IEEE Symposium on Information Visualization 2002 (InfoVis’02)
+1522-404X/02 $17.00 © 2002 IEEE
+          leaves or branches of the tree are dynamically grayed out
+          to show the effect of the query. (Note that the current
+          version supports rudimentary dynamic queries with only
+          one attribute, but the principle applies to any number of
+          attributes such as income of employees, year in the
+          company, or language spoken, etc. for our organizational
+          chart example).
+
+
+
+                                                                                    Figure 6: Upon each refocusing, the maximum number of
+                                                                                   levels that fit is opened (here 3 levels could fit so they were
+                                                                                     opened at once when user selected “drilling manager”).
+
+
+
+
+           Figure 3: Top level overview. The triangular preview icons
+          summarize the branches that cannot be opened. When room
+            is available, two or more levels might be opened at once.
+          Darker icons correspond to branches with more nodes. Taller
+              icons (in this top-down layout) correspond to deeper
+           branches, and wider icons correspond to a higher average
+                                 branching factor.
+
+
+
+
+                                                                                    Figure 7: The tree shown in Figure 6 has been rotated to a
+                                                                                       different orientation, then a search for “scientist” was
+                                                                                   performed and the location of search results is shown in red.
+                                                                                               (not visible in a black and white prints
+
+           Figure 4: As users change the focus of the layout (i.e. click
+               on a node – shown darker), more detail is revealed.
+
+
+
+
+             Figure 5: The tree is animated to its new layout in tree
+          separate steps: trim, translate and expand (trim and translate
+                           is only done when needed).
+
+
+
+
+                                                                                    Figure 8: A click on the “Prune” button displays a filtered
+                                                                                     view of the tree, revealing only the branches that lead to
+                                                                                               scientists, opened as space permits.
+
+
+
+
+Proceedings of the IEEE Symposium on Information Visualization 2002 (InfoVis’02)
+1522-404X/02 $17.00 © 2002 IEEE
+              SpaceTree was developed in Java using TinyJazz, a                    in blue. The node under the cursor is gold, and its
+          new toolkit that is an optimized subset of Jazz [19], and                ancestor path is shown in gold up until it meets the blue
+          the tree layout is inspired from [20] and [21]                           one. When users click on a node, their eyes are already
+                                                                                   on the gold node, which remains gold as the tree is
+          4. Review of the early versions and emerging                             animated to a new layout, and then turns blue to reflect
+          design guidelines                                                        the new focus.
+              The SpaceTree was designed with continuous                              The constant relative position of siblings and the
+          feedback from our sponsors who had a particular need for                 overall shape of upper tree help maintain the larger
+          hierarchy browsing at the time of the project. This                      context up the tree (Webbrain.com illustrates how
+          included monthly discussions and exchange of prototypes.                 changing the reorientation of siblings can be disorienting).
+          Through progressive refinement (about 10 versions were
+          discussed) we learned lessons that we summarize here as
+          guidelines for designers.
+          Semantic zooming is preferred over geometric scaling
+          (i.e. “Make it readable or don’t bother showing the
+          nodes”.) Our first designs attempted to use fixed
+          progressive scaling down of the nodes – providing a nice
+          overview of the tree (Figure 9) and continuous
+          geometrical zooming to allow users to progressively
+          reveal details of lower levels of the tree. The result was a
+          smooth fly through of the tree (Figure 9 and 10) but was
+          rejected bluntly by our users who rightly noted that only                   Figure 9: Early prototype: overview of the continuously
+          one level of the tree was even readable at a time (lower                                          scaled tree.
+          levels were “visible” but never readable). Readability and
+          a good use of the screen space had not been optimized
+          enough. The conclusion was that instead of continuous
+          scaling, a step approach was needed: nodes should be
+          either readable or not, and once they are not readable they
+          could be seen as individuals or aggregated in an abstract
+          representation. This was made possible by the semantic
+          zooming afforded by Jazz. All scaling is therefore
+          calculated on the fly. Figure 11 shows an example of
+          alternative previews of a tree branches.
+          Maximize the number of levels opened at any time.
+          Feedback from users made it clear that they resented                     Figure 10: Early prototype: geometric zoom allowed users to
+          having to open the tree “one level at a time” when there                 fly through the tree but only made one new level readable at
+                                                                                             a time, and poorly used the screen space.
+          was room to open more levels at once. This is illustrated
+          in Figure 6.
+          Decompose the tree animation. We experimented
+          with several animations of the layout to reflect the change
+          of focus and found that we received our most positive
+          feedback with a decomposed animation following 3 main
+                                                                                                 (a)              (b)               (c)
+          steps: trim, translate, and grow. When users select a new
+                                                                                      Figure 11: Current solution: semantic zooming on multiple
+          focus, SpaceTree evaluates how many levels of the new                    representations of the tree. Previews can consist of a miniature
+          branch can be opened to fit in the window, then 1) trims                     of the branch (a) when the number of nodes is small or an
+          the tree of the branches that would overlap the new                          abstract representation of the branch like the triangles of
+                                                                                        Figure 3 . Figure 11a(b) and 11(c) are alternatives to the
+          branch to be opened; 2) centers the trimmed tree so that
+                                                                                     triangle and provide more details on distribution of nodes in
+          the new branch will fit on the window, 3) grows the                                            the next level branches.
+          branch out of the new focus point.
+          Maintain landmarks. As the tree is trimmed, expanded or                  Take advantage of overviews and dynamic filtering.
+          translated it is crucial to maintain landmarks to help users             Search and dynamic query techniques are not new, but
+          remain oriented [22]. The obvious candidates for                         SpaceTree offers a good demonstration of their
+          landmarks are the focus points users selected, i.e. the                  application. One option we debated is whether to
+          current focus and the path up the tree, which usually                    dynamically trim the tree of the nodes that would “fall
+          matches the history of focus points as users traverse the                off” with the query, or just gray them out and give “on
+          tree. The ancestor path of the current focus is highlighted
+
+
+Proceedings of the IEEE Symposium on Information Visualization 2002 (InfoVis’02)
+1522-404X/02 $17.00 © 2002 IEEE
+          demand pruning” after the query. We chose the later
+          option that avoids constant and wild animation of the tree.
+          Use “data-aware” zooming controls. Another of the
+          lessons we learned was the need to provide data-aware
+          controls. Our initial browser permitted free zooming by
+          clicking anywhere in the data space (on node or outside of
+          nodes). This was the default control of Jazz but was only
+          usable by expert zooming users, others being rapidly lost
+          in the fog of empty information space. A second version
+          gave users a preview of the area of the screen that would
+          come to full view once they clicked (Figure 12). This
+          helped users to avoid empty areas, but users complained
+          that the area rarely matched the topology of the tree.
+          Therefore, the best results were attained by only allowing
+          users to zoom by clicking on nodes.                                          Figure 13: Microsoft Explorer, a classic expand and contract
+                                                                                       interface. The same window size was used for all interfaces
+                                                                                         (1024x768 pixels of display area – excluding menus and
+                                                                                                             control panels)
+
+
+
+
+          Figure 12: Early prototype: a rectangular cursor matching the
+              window aspect ratio gave a preview of the area to be
+             enlarged if users clicked, but didn’t necessarily match a
+                                branch of the tree.
+
+          4. Controlled experiment
+              We conducted an experiment comparing 3 tree-
+          browsing interfaces: Microsoft Explorer (Figure 13), a
+          Hyperbolic tree browser1 (Figure 14), and SpaceTree
+          (Figure 15).      Our goal was not to pit the interfaces
+          against each other (as they are clearly at different stages                     Figure 14: The hyperbolic viewer spreads the branches
+          of refinement and of different familiarity to users) but to                  around the root making 2 or 3 levels of the tree visible. Users
+          understand what feature seemed to help users perform                           can click or drag a node to dynamically and continuously
+                                                                                          update the layout of the tree and quickly explore deeper
+          certain tasks. We used a 3x7 (3 interfaces by 7 tasks)                                              levels of the tree.
+          repeated measure within subject design.          To control
+          learning effects, the order of presentation of the interfaces
+          and the task sets were counterbalanced.
+              Eighteen subjects participated, and each session lasted
+          a maximum of 40 minutes. Subjects each received $10
+          for their participation. To provide the motivation to
+          perform the tasks quickly and accurately, an additional $5
+          was given to the fastest user within each interface (with
+          no errors). We chose to use computer science students
+          that could be assumed to have a homogeneous level of
+          comfort with computers and tree structures.
+
+
+
+          1
+            We attempted to use the downloadable version from inxight.com but              Figure 15: The SpaceTree opened to “mammals” and
+          could not transform the test data into the required format. Instead we                showing nodes seven levels down the tree.
+          used an older prototype, and asked three colleagues to compare the 2
+          versions. The old version was found similar to the current version in
+          term of the features used in the experiment (e.g. we didn’t use color,
+          attribute values, graphics or database access in the test tree). Obviously
+          the current commercial version has many more features that make it a
+          useful product but that we were not comparing here.
+
+
+
+Proceedings of the IEEE Symposium on Information Visualization 2002 (InfoVis’02)
+1522-404X/02 $17.00 © 2002 IEEE
+              Subjects were given a maximum of 2 minutes of                        5.1 First-time node finding
+          training with each interface. In order to see what
+          problems users would encounter without any training, the                     For finding nodes that had never been seen before, we
+          experimenter gave no initial demonstration, but after                    hypothesized that SpaceTree and Hyperbolic would be
+          about 30 seconds of self-exploration, the experimenter                   similar in term of speed and faster than Explorer because
+          made sure that users had discovered everything properly.                 they both provide access to more than one level at a time,
+          Hyperbolic users were told that they could continuously                  which enables users to select categories further down the
+          drag nodes, and the meaning of the triangle icons was                    tree. Explorer uses smaller fonts and the size of the
+          explained to SpaceTree users (misunderstanding were                      targets is smaller than the 2 other interfaces, but the
+          first recorded, and then clarified).                                     distances to travel are also smaller and users are
+                                                                                   extremely familiar with the interface. An advantage might
+              We used a tree of more than 7,000 nodes from the                     be seen for the SpaceTree because of the alignment of the
+          CHI’97 BrowseOff [23].           The three task sets used                labels, allowing faster scanning of the items, but this
+          different branches of the tree and were carefully chosen to              advantage may not compensate for the advantage of the
+          be equivalent in terms of number of levels traversed and                 fast continuous update of the tree layout in Hyperbolic,
+          semantic complexity of the data explored. Three types                    which allows rapid exploration of neighborhoods.
+          of tasks were used. Node searches (e.g. find kangaroo,
+          find planaria), search of previously visited nodes (return               Results: Only two of the 3 node finding tasks showed
+          to kangaroo) and topology questions (e.g. read the path up               significant differences, Explorer being faster than
+          the tree, find in this branch 3 nodes with more than 10                  Hyperbolic in the 1st task where learning may have been
+          direct descendants, and which of the three branches of this              a factor (in seconds: E=10.5, H=13.2, S=11.1), and
+          node contain more nodes). To avoid measuring users’                      SpaceTree being faster than explorer in the third task
+          knowledge about the nodes they were asked to find (e.g.                  (E=11.3, H=5.6, S=4.7). Observations confirmed that
+          kangaroos) we provided hints to users (e.g. kangaroos are                most users took advantage of the ability of Hyperbolic
+          mammals and marsupials) without giving them the entire                   and SpaceTree to show multiple levels of the tree by
+          path to follow (e.g. we didn’t give out the well known                   clicking down often more than one level at a time. The
+          steps such as animals). Those hints were also kept similar               faster users did continuously drag nodes to reveal details
+          in the three sets of tasks. The terminology of the                       with Hyperbolic, while with SpaceTree they still had to
+          questions was explained in the initial training.                         select and animate the tree in steps when going deep in
+                                                                                   the tree. Explorer users showed their experience by
+              The size of the window was the same for each                         avoiding using the small icon and clicked on the labels
+          interface (1024x768 pixels for the usable display area).                 to expand the hierarchy in the folder view.
+          The focus of the tree layout was initialized at the top of
+          the tree at the beginning of tasks but was not reset                     5.2 Returning to previously visited nodes
+          between tasks to match a normal work session. The entire                     We had predicted that the SpaceTree would be faster
+          explorer hierarchy was re-contracted in between users.                   than the hyperbolic tree because the layout remains more
+          After the short training, users were asked to conduct 7                  consistent, allowing users to remember where the nodes
+          tasks with each interface, after which they filled a                     they had already clicked on were going to appear, while
+          questionnaire and gave open-ended feedback about the 3                   in the hyperbolic browser, a node could appear anywhere,
+          interfaces. The dependant variables were the time to                     depending on the location of the focus point. Figure 16
+          complete each task, the presence of errors (only relevant                shows 2 examples of different locations for kangaroo.
+          for 2 questions), and subjective ratings on a 9-point                    We predicted that Explorer would be faster than both
+          Likert-type scale.                                                       TreeBrowser and Hyperbolic when the start and end point
+                                                                                   were next to each other because Explorer allows multiple
+                                                                                   branches to remain open therefore making it very easy to
+          5. Results                                                               go back and forth between 2 neighboring branches. On
+             For each speed and preference dependant variable we                   the other hand, if the start and end point are separated by
+                                                                                   many other branches that remained opened (resulting
+          performed a one-way ANOVA followed by a post hoc
+                                                                                   from other tasks), scrolling will be required and finding
+          Bonferroni analysis. The confidence interval is set at
+                                                                                   the beginning and end points will be much more difficult
+          95% for all ANOVA and post-hoc analysis.
+                                                                                   and frustrating, overweighing the advantage of seeing
+             For conciseness our hypotheses are described for each                 multiple open branches.
+          type of task, followed by a brief summary of the results.
+                                                                                   Results: One of the two tasks (the longer one involving a
+          We report mean times in seconds in the following order:
+                                                                                   return trip between 2 known locations) showed significant
+          (E) for Explorer, (H) for Hyperbolic and (S) for
+                                                                                   differences. SpaceTree was significantly faster than
+          SpaceTree.
+                                                                                   Hyperbolic, and Explorer was significantly faster than the
+
+
+
+
+Proceedings of the IEEE Symposium on Information Visualization 2002 (InfoVis’02)
+1522-404X/02 $17.00 © 2002 IEEE
+          two other interfaces (E=6.5, H=22.7, S=15). Explorer was                 it more usable for local comparisons, but also more
+          favorably helped by the ability to keep several branches                 confusing as its meaning appeared to change with the
+          opened. The other very short returning task did not show                 depth in the tree.    Icons relative to the root would
+          any significant differences. Explorer lost its advantage                 probably be more easily understood.
+          because other open branches now separated the target
+          nodes.                                                                   5.5 Topology overview task (example: Which of
+                                                                                   the 3 branches of “measurements” contains a larger
+                                                                                   number of nodes).
+                                                                                       We hypothesized that SpaceTree would lead to fewer
+                                                                                   errors in the estimation of size because of the icon
+                                                                                   representation of the branches. We had first measured the
+                                                                                   time to complete the task, but pilot test users spent so
+            Figure 16: with Hyperbolic the layout changes between visits.          much time with Explorer and Hyperbolic trying to open
+            Kangaroo was on the right of screen (a), now on the left (b).          every branch of the tree – without great success – that we
+               With SpaceTree the relative location of nodes is more               gave a time limit and compared error rates.
+                                   consistent.
+                                                                                   Results: Users made 12 errors with Explorer (out of 18),
+          For topology tasks:                                                      10 with Hyperbolic and only 2 with SpaceTree. Explorer
+          5.3 Listing all the ancestors of a node                                  users mostly made wild guesses or used “properties”.
+                                                                                   Hyperbolic users were able to review the tree quickly but
+              We had predicted that the SpaceTree would perform                    still made many errors, often deciding for a branch that
+          better than both Explorer and Hyperbolic as all ancestors                was less than half the size of the correct answer (150
+          are clearly visible and highlighted. Hyperbolic gives                    nodes versus 300). SpaceTree users seemed to have made
+          more screen real estate to the local lower levels therefore              errors when the small differences in the shading of the
+          often hiding the ancestors, while Explorer keeps the path                icons were confounded by size differences.
+          visible but the small offset makes it hard to separate
+          siblings from parents.                                                   5.6 User preferences
+          Results: SpaceTree was significantly faster than Explorer                   Our hypotheses were that users would find the
+          (E=11.4, H=9.3; S=6.8). Two users made errors with                       Hyperbolic Browser more “cool” than Explorer and
+          Explorer (alignment problems) and one user made an                       SpaceTree, but would prefer to use the SpaceTree.
+          error with Hyperbolic (skipped a level). Two users                       Results: Users significantly found Explorer less “cool”
+          commented that they liked the clear highlight of                         than the other interfaces, and no significant difference
+          SpaceTree along the path, in this path task as well as                   were found between SpaceTree and Hyperbolic (mean
+          during other tasks.                                                      ratings on the 9 point scale with 9 being “very cool” were
+          5.4 Local topology (example: find 3 nodes that                           E=3.9. H=7.7, S=6.6.)         There were no significant
+          have more than 10 direct descendants):                                   differences between interfaces in term of future use
+                                                                                   preference (E=5.9, H=5.1; S=6.2 with 9 being “much
+              We predicted that Hyperbolic would be faster that the                prefer to use”).
+          SpaceTree, which would be itself faster than Explorer.
+          With Hyperbolic users would be able to estimate the                      5.7 Summary of results
+          number of children by looking at the number of rods                          Our hypotheses were only partly supported, but the
+          radiating from a node, and navigate through the leaf nodes               careful observation of users during the experiment was
+          by continuously fanning the tree at a varying depth level.               very helpful to understand differences in user behavior.
+          Results: Hyperbolic was significantly faster than the                    There were wide differences between subjects in terms of
+          SpaceTree, but not significantly faster than Explorer                    speed, leading to only a limited number of statistically
+          (E=61.4, H=46.8, S=98.3). Hyperbolic users interpreted                   significant results. There were also wide differences in
+          correctly the fans of lines, and Explorer users mostly                   preferences, confirming the general need for providing
+          chance. This task showed that SpaceTree users had not                    interface options to users. During training, we observed
+          understood the width coding of the triangles (or didn’t                  that users did not guess the 3-attribute-coding of the
+          trust their understanding). Users could be seen intuitively              triangle that always had to be clarified. Users could guess
+          following wider and darker triangles, but would give up                  that the icon represented the branch below and was linked
+          after following 2 or 3 level down, even though the answer                to the number of nodes in the branch, but often
+          was often one click away because large fans were usually                 misinterpreted the width of the triangle to be proportional
+          at leaf level. A wide base triangle only suggests that                   to the number of direct descendants.                   This
+          “somewhere” down the tree there are large fans.                          miscomprehension of the meaning of the icons had a
+          Obviously better coding is needed. The experiment was                    particularly strong effect on the task that asked users to
+          run with the icon size being relative to the parent, making              find nodes with more than ten descendants. Future
+                                                                                   research will focus on the design of a simpler preview for
+
+
+Proceedings of the IEEE Symposium on Information Visualization 2002 (InfoVis’02)
+1522-404X/02 $17.00 © 2002 IEEE
+          novice users, as well as a set of options for expert users               [8] Robertson, G. G. Mackinlay, J. D. Card, S. K. Cone Trees:
+          who should be able to adapt the icon to their tasks.                         animated 3D visualizations of hierarchical information,
+                                                                                       Proc. Human factors in computing systems conference,
+          6. Conclusions                                                               March 1991, 189-194
+          SpaceTree illustrates that interactive visualization of node             [9] Chignell, M, Poblete F., Zuberec, S. (1993) Exploration in
+          link diagrams can still be improved. It was found more                       the Design Space of Three-Dimensional Hierarchies
+                                                                                       Proceedings of the Human Factors and Ergonomics
+          attractive than Explorer, and performed relatively well for                  Society 37th Annual Meeting, v.1, 333-337
+          both navigation and topology tasks, even though no
+          extreme performance differences were found between the                   [10] Bertin, J. (1983) Semiology of Graphics, Diagrams,
+                                                                                        Networks, Maps, University of Wisconsin Press, Madison,
+          interfaces. SpaceTree’s consistent layout allowed users to
+                                                                                        WI.
+          quickly return to nodes they had visited before, making it
+          more appropriate for trees that are used regularly. An                   [11] Lamping, J., Rao, R., Pirolli; P. (1995) A focus+context
+          example of this would be an organization chart used by a                      technique based on hyperbolic geometry for visualizing
+                                                                                        large hierarchies Conference proceedings on Human
+          personal staff. SpaceTree preview icons are unique in                         factors in computing systems, 1995, 401-408
+          helping users estimate the topology of the tree, and we
+          will continue improving their design.                                    [12] Beaudoin, L. , Parent, M-A, Vroomen, L. (1996) Cheops: a
+                                                                                        compact explorer for complex hierarchies, Symposium on
+          7. Acknowledgements                                                           Volume Visualization - Proc. of the conference on
+                                                                                        Visualization '96, 87-92 + color p. 471, ACM, New York
+          We appreciate the feedback and suggestions to improve
+                                                                                   [13] . Hightower, R. R., Ring, L., Helfman, J., Bederson, B. B.,
+          SpaceTree from Cheryl Lukehart and Don Schiro from                            & Hollan, J. D. (1998). Graphical Multiscale Web
+          Chevron-Texaco and from Jean-Daniel Fekete and Ben                            Histories: A Study of PadPrints. In Proceedings of ACM
+          Shneiderman from HCIL. Partial support for this research                      Conference on Hypertext (Hypertext 98) ACM Press, 58-
+          was provided by Chevron-Texaco and DARPA.                                     65.
+                                                                                   [14] Noik; E. (1993) Exploring large hyperdocuments: fisheye
+                                                                                        views of nested networks, Proceedings of the fifth ACM
+          For more information see:                                                     conference on Hypertext, 192-205
+          www.cs.umd.edu/hcil/spacetree                                            [15] Hopkins, D. (1989), The Shape of PSIBER Space:
+                                                                                        PostScript Interactive Bug Eradication Routines.. Proc.
+                                                                                        1989 Usenix Graphics Conference, Monterey California.
+          8. References                                                                 www.catalog.com/hopkins/psiber/psiber.html
+          [1] Card, S. K., MacKinlay, J. D., Shneiderman, B., (1999)               [16] Card, S., Nation, D., Degree-of-Interest Trees: a component
+              Readings in Information Visualization: Using Vision to                    of attention-reactive user interface. Proc. of Advanced
+              Think, Morgan Kaufmann Publishers.                                        Visual Interface ‘02, May 22-24, 2002., ACM
+          [2] Bederson, B., Shneiderman, B., Wattenberg, M. (2002).                [17] Nation, D.A., Plaisant, C., Marchionini, G., Komlodi, A.
+              Ordered and Quantum Treemaps: Making Effective Use of                     (1997) Visualizing websites using a hierarchical table of
+              2D Space to Display Hierarchies, To appear in ACM                         contents browser: WebTOC, Proc. of 3rd Conference on
+              Transactions on Computer Graphics.                                        Human Factors and the Web, 1997, Denver, CO, June 12
+          [3] Andrews, K., Heidegger, H. (1998) Information Slices:                [18] Shneiderman, B. (1994). Dynamic queries for visual
+              Visualising and exploring large hierarchies using                         information seeking. IEEE Software, 11, (6), 70-77.
+              cascading, semicircular disks. Proc of IEEE Infovis’98 late
+              breaking         Hot        Topics       IEEE,       9-11.           [19] Bederson, B. B., Meyer, J., & Good, L. (2000). Jazz: An
+              ftp://ftp.iicm.edu/pub/papers/ivis98.pdf                                  Extensible Zoomable User Interface Graphics Toolkit in
+                                                                                        Java. UIST 2000, ACM Symposium on User Interface
+          [4] Ellson, J., Gansner, E., Koutsofios, E., Mocenigo, J., North,             Software and Technology, CHI Letters, 2(2), 171-180.
+              S. , Woodhull, G., Graphviz, open source graph drawing
+              software, http://www.research.att.com/sw/tools/graphviz/             [20] Walker II., J. Q. (1990) A node-positioning algorithm for
+                                                                                        general trees. Softw. Pract. Exp., 20(7): 685-705
+          [5] Herman, I., Delest, M., Melançon, G (1998) Tree
+              Visualisation and Navigation Clues for Information                   [21] Furnas, G. (1981) The FISHEYE view: a new look at
+              Visualisation Computer Graphics Forum, 17(2), 153-165.                    structured files, 1981 Bell Lab. Tech. Report, (also in [1])
+          [6] Beard, D. V., Walker II, J. Q. (1990). Navigational                  [22] Jul, S., & Furnas, G. W. (1998). Critical Zones in Desert
+              Techniques to Improve the Display of Large Two-                           Fog: Aids to Multiscale Navigation. In Proceedings of User
+              Dimensional Spaces. Behavior & Information Technology.                    Interface and Software Technology UIST 98, 97-106, ACM
+              9 (6), 451-466                                                       [23] Mullet, K., Fry, C., Schiano, D. (1997) On your marks, get
+          [7] Kumar, H.P., Plaisant, C., Shneiderman, B. (1997)                         set, browse! (the great CHI’97 Browse Off), Panel
+              Browsing hierarchical data with multi-level dynamic                       description in ACM CHI’97 extended abstracts, ACM,
+              queries and pruning International Journal of Human-                       New York, 113-114
+              Computer Studies, Volume 46, No. 1, 103-124
+
+
+
+
+Proceedings of the IEEE Symposium on Information Visualization 2002 (InfoVis’02)
+1522-404X/02 $17.00 © 2002 IEEE
+

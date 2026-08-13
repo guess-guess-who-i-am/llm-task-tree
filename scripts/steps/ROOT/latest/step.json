@@ -1,0 +1,27 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "ROOT",
+  "title": "建立可共享的大模型任务上下文",
+  "reportZh": "report.zh.md",
+  "updatedAt": "2026-07-08T08:20:00.000Z",
+  "substeps": [
+    {
+      "title": "定义共享任务图协议",
+      "functions": [
+        { "path": "AGENTS.md", "line": 7, "name": "Compact Current-State Rule" }
+      ],
+      "promptZh": "prompts/01.zh.md",
+      "promptEn": "prompts/01.en.md",
+      "inputs": [{ "path": "task-tree.md", "line": 5 }],
+      "outputs": [{ "path": "task-tree.md", "line": 276 }]
+    },
+    {
+      "title": "维护 GraphState 焦点",
+      "functions": [
+        { "path": "public/app.js", "line": 4093, "name": "saveTree" }
+      ],
+      "inputs": [{ "path": "task-tree.md", "line": 277 }],
+      "outputs": [{ "path": "scripts/project.json", "line": 4 }]
+    }
+  ]
+}

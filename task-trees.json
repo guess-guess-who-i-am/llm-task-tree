@@ -1,0 +1,33 @@
+{
+  "schema": "task-tree-registry/v1",
+  "activeMethod": "method",
+  "trees": [
+    {
+      "id": "method",
+      "title": "方法迭代",
+      "role": "method",
+      "path": "task-tree.md",
+      "description": "当前默认加载、持续迭代并与执行流程关联的方法任务树",
+      "editable": true,
+      "flowEnabled": true
+    },
+    {
+      "id": "background",
+      "title": "项目背景支撑",
+      "role": "background",
+      "path": "trees/background.md",
+      "description": "稳定问题背景、用户痛点、设计约束与长期证据；按需读取，不进入项目执行流程",
+      "editable": true,
+      "flowEnabled": false
+    },
+    {
+      "id": "architecture",
+      "title": "任务图系统架构",
+      "role": "architecture",
+      "path": "trees/architecture.md",
+      "description": "Markdown schema、图编辑器、可移植 kit 与执行流程的稳定实现；按需读取，不进入项目执行流程",
+      "editable": true,
+      "flowEnabled": false
+    }
+  ]
+}

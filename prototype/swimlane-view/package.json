@@ -1,0 +1,8 @@
+{
+  "name": "swimlane-view-prototype",
+  "private": true,
+  "description": "PROTOTYPE — throwaway swimlane execution-order view for task-tree merge preview",
+  "scripts": {
+    "start": "npx --yes serve . -p 5200 --no-port-switching"
+  }
+}

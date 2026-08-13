@@ -1,0 +1,80 @@
+{
+  "created_at": "2026-07-04T13:21:50",
+  "papers": [
+    {
+      "file": "2025_ieee-comsoc-best-survey_terahertz-band-communication_arxiv-2112.13187.pdf",
+      "title": "TeraHertz Band Communication: An Old Problem Revisited and Research Directions for the Next Decade",
+      "award": "IEEE Communications Society Best Survey Paper Award sample (official award page lists the IEEE journal version)",
+      "venue": "IEEE Transactions on Communications / arXiv open version",
+      "source": "https://arxiv.org/pdf/2112.13187",
+      "landing": "https://arxiv.org/abs/2112.13187",
+      "doi": "10.1109/TCOMM.2022.3171800 / 10.48550/arXiv.2112.13187",
+      "license_note": "Downloaded from arXiv open access PDF.",
+      "path": "E:\\解决跟不上大模型思路问题\\docs\\review-exemplars\\award-winning-surveys\\2025_ieee-comsoc-best-survey_terahertz-band-communication_arxiv-2112.13187.pdf",
+      "downloaded_at": "2026-07-04T13:21:35",
+      "ok": true,
+      "bytes": 4528171,
+      "note": "downloaded"
+    },
+    {
+      "file": "2024_ieee-comsoc-best-survey_threat-hunting-enterprise-networks_ieee-open-pdf.pdf",
+      "title": "A Survey on Threat Hunting in Enterprise Networks",
+      "award": "IEEE Communications Society Best Survey Paper Award sample",
+      "venue": "IEEE Communications Surveys & Tutorials",
+      "source": "https://ieeexplore.ieee.org/iel7/9739/10324457/10216378.pdf",
+      "landing": "https://doi.org/10.1109/COMST.2023.3299519",
+      "doi": "10.1109/COMST.2023.3299519",
+      "license_note": "Downloaded from publicly reachable IEEE Xplore PDF URL found by web search; keep for local review only if access is permitted in your environment.",
+      "path": "E:\\解决跟不上大模型思路问题\\docs\\review-exemplars\\award-winning-surveys\\2024_ieee-comsoc-best-survey_threat-hunting-enterprise-networks_ieee-open-pdf.pdf",
+      "downloaded_at": "2026-07-04T13:21:40",
+      "ok": false,
+      "bytes": 0,
+      "note": "response did not look like a PDF"
+    },
+    {
+      "file": "2022_ieee-comsoc-best-survey_indoor-localization_arxiv-1709.01015.pdf",
+      "title": "A Survey of Indoor Localization Systems and Technologies",
+      "award": "IEEE Communications Society Best Survey Paper Award sample",
+      "venue": "IEEE Communications Surveys & Tutorials / arXiv open version",
+      "source": "https://arxiv.org/pdf/1709.01015",
+      "landing": "https://arxiv.org/abs/1709.01015",
+      "doi": "10.1109/COMST.2019.2911558 / 10.48550/arXiv.1709.01015",
+      "license_note": "Downloaded from arXiv open access PDF.",
+      "path": "E:\\解决跟不上大模型思路问题\\docs\\review-exemplars\\award-winning-surveys\\2022_ieee-comsoc-best-survey_indoor-localization_arxiv-1709.01015.pdf",
+      "downloaded_at": "2026-07-04T13:21:44",
+      "ok": true,
+      "bytes": 7877676,
+      "note": "downloaded"
+    },
+    {
+      "file": "2020_ieee-comsoc-best-survey_mobile-edge-computing_arxiv-1701.01090.pdf",
+      "title": "A Survey on Mobile Edge Computing: The Communication Perspective",
+      "award": "IEEE Communications Society Best Survey Paper Award sample",
+      "venue": "IEEE Communications Surveys & Tutorials / arXiv open version",
+      "source": "https://arxiv.org/pdf/1701.01090",
+      "landing": "https://arxiv.org/abs/1701.01090",
+      "doi": "10.1109/COMST.2017.2745201 / 10.48550/arXiv.1701.01090",
+      "license_note": "Downloaded from arXiv open access PDF.",
+      "path": "E:\\解决跟不上大模型思路问题\\docs\\review-exemplars\\award-winning-surveys\\2020_ieee-comsoc-best-survey_mobile-edge-computing_arxiv-1701.01090.pdf",
+      "downloaded_at": "2026-07-04T13:21:46",
+      "ok": true,
+      "bytes": 4607229,
+      "note": "downloaded"
+    },
+    {
+      "file": "2017_ieee-comsoc-best-survey_fifty-years-mimo-detection_arxiv-1507.05138.pdf",
+      "title": "Fifty Years of MIMO Detection: The Road to Large-Scale MIMOs",
+      "award": "IEEE Communications Society Best Survey Paper Award sample",
+      "venue": "IEEE Communications Surveys & Tutorials / arXiv open version",
+      "source": "https://arxiv.org/pdf/1507.05138",
+      "landing": "https://arxiv.org/abs/1507.05138",
+      "doi": "10.1109/COMST.2015.2475242 / 10.48550/arXiv.1507.05138",
+      "license_note": "Downloaded from arXiv open access PDF.",
+      "path": "E:\\解决跟不上大模型思路问题\\docs\\review-exemplars\\award-winning-surveys\\2017_ieee-comsoc-best-survey_fifty-years-mimo-detection_arxiv-1507.05138.pdf",
+      "downloaded_at": "2026-07-04T13:21:48",
+      "ok": true,
+      "bytes": 2192966,
+      "note": "downloaded"
+    }
+  ]
+}

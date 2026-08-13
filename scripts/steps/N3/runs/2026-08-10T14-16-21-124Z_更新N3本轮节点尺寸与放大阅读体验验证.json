@@ -1,0 +1,48 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N3",
+  "blockId": "",
+  "updatedAt": "2026-08-10T13:36:40.311Z",
+  "title": "让 Codex 同步维护任务图",
+  "reportZh": "report.zh.md",
+  "substeps": [
+    {
+      "title": "统一问题、思路、结果三项核心摘要",
+      "functions": [
+        {
+          "path": "public/app.js",
+          "line": 2041,
+          "name": "coreNodeSummary"
+        },
+        {
+          "path": "public/styles.css",
+          "line": 2900,
+          "name": "coreNodeSummary 样式"
+        },
+        {
+          "path": "public/graph-export.js",
+          "line": 73,
+          "name": "getExportNodeRows"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "task-tree.md",
+          "line": 154,
+          "name": "N3 当前目标"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "scripts/test-node-core-summary-ui.mjs",
+          "name": "核心摘要与语义缩放回归测试"
+        },
+        {
+          "path": "artifacts/task-tree-core-summary-detail.png",
+          "name": "浏览器截图"
+        }
+      ],
+      "result": "14 个节点在细节层默认显示问题、思路、结果；宏观层仍只显示标题；共享 kit 与插件运行时已同步。"
+    }
+  ]
+}

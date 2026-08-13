@@ -1,0 +1,59 @@
+---
+description: llm-task-tree — 编辑 task-tree.md / 子树前必须先 Read 协议与 task-tree-grill（kit 托管，一键更新会覆盖）
+globs: task-tree.md,subtrees/**/*.md
+alwaysApply: false
+---
+
+# 编辑任务树前的强制 Read（仅改树时）
+
+本规则在涉及 **`task-tree.md`** 或 **`subtrees/*.md`** 写入时生效。只读树、写代码、跑测试、答问题时 **不要** 加载下列文件。
+
+## 触发条件（满足任一即视为「要改树」）
+
+- 将 Write / StrReplace / 手动编辑 `task-tree.md` 或 `subtrees/*.md`
+- 新建、重建、修复节点/边/GraphState
+- 链式推进后更新节点 `CurrentResult` 并写回树文件
+
+## 写入前必须按顺序 Read（同一轮、写文件之前）
+
+1. `llm-task-tree/AGENTS.task-tree.md`
+2. `llm-task-tree/skills/task-tree-grill/SKILL.md`
+3. `llm-task-tree/skills/task-tree-grill/references/schema-template.md`
+
+若 `SelectedSkills` 含 `task-tree-grill` 或 `kit:task-tree-grill`，仍须 Read 上述文件（skill 正文不代替 schema）。
+
+## 写入前必须备份
+
+- 复制 `task-tree.md` → `versions/<YYYYMMDD-HHmmss>_<原因>.md`（原因具体，见 AGENTS.task-tree.md §7）
+
+## 写入后必须通过精炼门禁
+
+每次写完 `task-tree.md` 或 `subtrees/*.md`，本轮结束前必须运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File llm-task-tree/check-tree-compact.ps1 task-tree.md
+```
+
+若本轮写了子树，把路径一起传入，例如：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File llm-task-tree/check-tree-compact.ps1 task-tree.md subtrees/N7-subtree.md
+```
+
+- exit code 非 0 = **禁止结束本轮**。根据输出的 `node.field chars>budget` 继续语义精炼，再重跑直到通过。
+- 精炼时保留当前结论、数字、未解决风险和用户决定；历史移到 `versions/`，原始证据移到文件。
+- 禁止用字符串截断、删尾或只保留前 N 字来“过门禁”；必须改写成短的当前状态。
+- Codex 的 Stop hook 也会检查本轮改过的树并自动打回；Cursor Agent 必须主动运行上面的命令。
+
+## 结构硬约束（schema-template）
+
+- 顺序：**全部 `## 节点` → `# GraphState` → `# Edges`**
+- 不要把 `# GraphState` 插在 ROOT 和子节点中间
+- 节点 ID 可用 `N2.1.5.1`、`N1_1` 等（含 `.` 与 `_`）
+- 每条边只有两个端点
+
+## 不触发本规则时
+
+- 只读 `task-tree.md` 查 GraphState / Next / NextIdea 后去改 `.py` / `.js` 等
+- 只读版本列表、不在本轮写树文件
+- UI 已保存、本轮只跑命令不写树

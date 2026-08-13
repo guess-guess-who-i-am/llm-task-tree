@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>任务树舒适版 · 前端原型</title>
+    <link rel="stylesheet" href="/task-tree-prototype/base.css">
+    <link rel="stylesheet" href="/task-tree-prototype/variant-a.css">
+    <link rel="stylesheet" href="/task-tree-prototype/variant-b.css">
+    <link rel="stylesheet" href="/task-tree-prototype/variant-c.css">
+  </head>
+  <body>
+    <header class="prototypeHeader">
+      <div>
+        <span class="prototypeKicker">只读前端原型 · 使用当前真实任务树</span>
+        <h1>怎样让人舒服地使用一棵任务树？</h1>
+      </div>
+      <a href="/" class="prototypeBack">返回现有界面</a>
+    </header>
+    <main id="prototypeRoot" class="prototypeRoot" aria-live="polite"></main>
+    <div id="prototypeError" class="prototypeError" hidden></div>
+    <nav class="prototypeSwitcher" aria-label="原型版本切换">
+      <button type="button" id="variantPrev" aria-label="上一个版本">←</button>
+      <div>
+        <strong id="variantLabel">A</strong>
+        <span id="variantHint">方向脊柱</span>
+      </div>
+      <button type="button" id="variantNext" aria-label="下一个版本">→</button>
+    </nav>
+    <script type="module" src="/task-tree-prototype/app.js"></script>
+  </body>
+</html>

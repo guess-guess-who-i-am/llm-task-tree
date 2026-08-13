@@ -1,0 +1,27 @@
+{
+  "schema": "flow-script/v1",
+  "mode": "run",
+  "focusId": "N9",
+  "updatedAt": "2026-06-28T12:27:38.382Z",
+  "blocks": [
+    {
+      "id": "b-s3xi8f5",
+      "type": "hat",
+      "title": "当本次运行开始"
+    },
+    {
+      "id": "b-el9g99h",
+      "type": "task",
+      "nodeId": "ROOT",
+      "title": "建立可共享的大模型任务上下文",
+      "status": "active"
+    },
+    {
+      "id": "b-utpp72l",
+      "type": "task",
+      "nodeId": "N9",
+      "title": "可移植任务树 Kit 打包",
+      "status": "done"
+    }
+  ]
+}

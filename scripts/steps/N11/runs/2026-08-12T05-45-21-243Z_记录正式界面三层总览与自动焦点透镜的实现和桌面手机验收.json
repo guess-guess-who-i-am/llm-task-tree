@@ -1,0 +1,473 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N11",
+  "blockId": "",
+  "updatedAt": "2026-08-12T12:32:46.3042506+08:00",
+  "title": "多树上下文与 Agent 维护闭环",
+  "reportZh": "report.zh.md",
+  "substeps": [
+    {
+      "title": "修复代理槽位泄漏并缩短失败等待",
+      "functions": [
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/proxy.mjs",
+          "name": "Semaphore.acquire"
+        },
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/proxy.mjs",
+          "name": "Semaphore.release"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "task-tree.md"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/test_semaphore.mjs"
+        },
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/test_mcp_tool_recovery.mjs"
+        }
+      ]
+    },
+    {
+      "title": "验收 Windows 4000、远程 4152 与 Codex CLI",
+      "inputs": [
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/.env"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "scripts/steps/N11/latest/report.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "将两段式回顾重构为项目决策总览",
+      "functions": [
+        {
+          "path": "public/app.js",
+          "line": 677,
+          "name": "renderProjectOverview"
+        },
+        {
+          "path": "public/styles.css",
+          "line": 1674,
+          "name": "projectOverviewDialog"
+        },
+        {
+          "path": "public/index.html",
+          "line": 188,
+          "name": "projectOverviewDialog"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "task-tree.md",
+          "line": 5
+        }
+      ],
+      "outputs": [
+        {
+          "path": "artifacts/project-overview-desktop.png"
+        },
+        {
+          "path": "artifacts/project-overview-mobile.png"
+        },
+        {
+          "path": "scripts/test-project-overview-ui.mjs",
+          "line": 1
+        }
+      ]
+    },
+    {
+      "title": "修复 DeepSeek 历史工具参数格式错误",
+      "functions": [
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/proxy.mjs",
+          "line": 2388,
+          "name": "normalizeHistoricalToolCallArguments"
+        },
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/proxy.mjs",
+          "line": 2417,
+          "name": "sanitizeResponsesInputItem"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "task-tree.md"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/test_history_tool_arguments.mjs"
+        },
+        {
+          "path": "scripts/steps/N11/latest/report.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "修复 Prompt 监测与翻译瞬时失败并隐藏终端",
+      "functions": [
+        {
+          "path": "scripts/prompt-publisher/edit-global-prompt.ps1",
+          "name": "Get-SourceHash"
+        },
+        {
+          "path": "scripts/prompt-publisher/publish-global-prompt.mjs",
+          "name": "retryOperation"
+        },
+        {
+          "path": "scripts/prompt-publisher/launch-global-prompt-editor.vbs",
+          "name": "WScript.Shell.Run"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "C:/Users/Administrator/.codex/prompts/global-every-turn.zh.md"
+        },
+        {
+          "path": "C:/Users/Administrator/.codex/prompt-publisher/targets.json"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "scripts/test-prompt-editor-watcher.ps1"
+        },
+        {
+          "path": "scripts/test-prompt-publisher-retry.mjs"
+        },
+        {
+          "path": "scripts/test-prompt-publisher-hidden-launcher.ps1"
+        },
+        {
+          "path": "C:/Users/Administrator/.codex/prompt-publisher/state.json"
+        },
+        {
+          "path": "C:/Users/Administrator/.codex/prompts/global-every-turn.en.md"
+        }
+      ]
+    },
+    {
+      "title": "调研 2026 Agent 技术版图并形成项目落点",
+      "inputs": [
+        {
+          "path": "C:/Users/Administrator/AppData/Local/Temp/codex-clipboard-fdd7ad09-4387-4230-8677-72a6fddff219.png"
+        },
+        {
+          "path": "task-tree.md"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/agent-context-research/technology-landscape-2026.md"
+        },
+        {
+          "path": "scripts/steps/N11/latest/report.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "用根本目的约束方向性总览与 Agent 完成声明",
+      "functions": [
+        {
+          "path": "public/app.js",
+          "line": 677,
+          "name": "renderProjectOverview"
+        },
+        {
+          "path": "server/turn-context.js",
+          "line": 8,
+          "name": "extractTaskTreeTurnFocus"
+        },
+        {
+          "path": "server/turn-context.js",
+          "line": 36,
+          "name": "buildTaskTreeCheckpointContext"
+        },
+        {
+          "path": "server/codex-prompts.js",
+          "line": 19,
+          "name": "buildNextStepPrompt"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "task-tree.md"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "scripts/test-project-overview-ui.mjs"
+        },
+        {
+          "path": "scripts/test-multitree-maintenance.mjs"
+        },
+        {
+          "path": "scripts/test-mcp-server.mjs"
+        },
+        {
+          "path": "artifacts/project-overview-desktop.png"
+        },
+        {
+          "path": "artifacts/project-overview-mobile.png"
+        }
+      ]
+    },
+    {
+      "title": "从能力边界转向人类舒适协作条件",
+      "inputs": [
+        {
+          "path": "task-tree.md"
+        },
+        {
+          "path": "docs/agent-context-research/README.md"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/agent-context-research/human-capability-comfort.md"
+        },
+        {
+          "path": "docs/agent-context-research/papers/human-capability/eyes-have-it.pdf"
+        },
+        {
+          "path": "docs/agent-context-research/papers/human-capability/thinking-with-external-representations.pdf"
+        },
+        {
+          "path": "docs/agent-context-research/papers/human-capability/cognitive-dimensions.pdf"
+        },
+        {
+          "path": "docs/agent-context-research/papers/human-capability/nature-human-ai-meta-analysis.pdf"
+        },
+        {
+          "path": "docs/agent-context-research/papers/human-capability/nature-ai-learning.pdf"
+        }
+      ]
+    },
+    {
+      "title": "对照主流进度管理产品的信息与视图分层",
+      "inputs": [
+        {
+          "path": "docs/agent-context-research/human-capability-comfort.md"
+        },
+        {
+          "path": "task-tree.md"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/agent-context-research/progress-management-products.md"
+        }
+      ]
+    },
+    {
+      "title": "并行制作三个以任务树为核心的舒适版前端原型",
+      "inputs": [
+        {
+          "path": "task-tree.md"
+        },
+        {
+          "path": "docs/agent-context-research/human-capability-comfort.md"
+        },
+        {
+          "path": "docs/agent-context-research/progress-management-products.md"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "public/task-tree-prototype/index.html"
+        },
+        {
+          "path": "public/task-tree-prototype/variant-a.js"
+        },
+        {
+          "path": "public/task-tree-prototype/variant-b.js"
+        },
+        {
+          "path": "public/task-tree-prototype/variant-c.js"
+        },
+        {
+          "path": "scripts/test-task-tree-comfort-prototype.py"
+        },
+        {
+          "path": "artifacts/task-tree-prototype-a-desktop.png"
+        },
+        {
+          "path": "artifacts/task-tree-prototype-b-desktop.png"
+        },
+        {
+          "path": "artifacts/task-tree-prototype-c-desktop.png"
+        }
+      ]
+    },
+    {
+      "title": "把方向脊柱原型落入正式任务树",
+      "functions": [
+        {
+          "path": "public/app.js",
+          "line": 678,
+          "name": "renderMacroNodeSummary"
+        },
+        {
+          "path": "public/app.js",
+          "line": 3313,
+          "name": "prioritizeFocusSpine"
+        },
+        {
+          "path": "public/app.js",
+          "line": 5314,
+          "name": "applyGraphTransform"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "task-tree.md"
+        },
+        {
+          "path": "public/task-tree-prototype/variant-a.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "public/app.js"
+        },
+        {
+          "path": "public/styles.css"
+        },
+        {
+          "path": "scripts/test-task-tree-semantic-zoom.py"
+        },
+        {
+          "path": "artifacts/task-tree-semantic-zoom-macro.png"
+        },
+        {
+          "path": "artifacts/task-tree-semantic-zoom-detail.png"
+        }
+      ]
+    },
+    {
+      "title": "制作四种差异化任务树浏览原型并统一验收",
+      "functions": [
+        {
+          "path": "llm-task-tree-kit/public/task-tree-prototype-v2/app.js",
+          "name": "renderDirectionView"
+        },
+        {
+          "path": "llm-task-tree-kit/public/task-tree-prototype-v2/app.js",
+          "name": "renderSwimlaneView"
+        },
+        {
+          "path": "llm-task-tree-kit/public/task-tree-prototype-v2/app.js",
+          "name": "renderFocusView"
+        },
+        {
+          "path": "llm-task-tree-kit/public/task-tree-prototype-v2/app.js",
+          "name": "renderMapView"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "task-tree.md"
+        },
+        {
+          "path": "docs/agent-context-research/human-capability-comfort.md"
+        },
+        {
+          "path": "docs/agent-context-research/progress-management-products.md"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "llm-task-tree-kit/public/task-tree-prototype-v2/index.html"
+        },
+        {
+          "path": "llm-task-tree-kit/public/task-tree-prototype-v2/styles.css"
+        },
+        {
+          "path": "scripts/test-task-tree-prototype-v2.mjs"
+        },
+        {
+          "path": "artifacts/task-tree-prototype-v2/a-desktop.png"
+        },
+        {
+          "path": "artifacts/task-tree-prototype-v2/b-desktop.png"
+        },
+        {
+          "path": "artifacts/task-tree-prototype-v2/c-desktop.png"
+        },
+        {
+          "path": "artifacts/task-tree-prototype-v2/d-desktop.png"
+        },
+        {
+          "path": "artifacts/task-tree-prototype-v2/a-mobile.png"
+        },
+        {
+          "path": "artifacts/task-tree-prototype-v2/b-mobile.png"
+        },
+        {
+          "path": "artifacts/task-tree-prototype-v2/c-mobile.png"
+        },
+        {
+          "path": "artifacts/task-tree-prototype-v2/d-mobile.png"
+        }
+      ]
+    },
+    {
+      "title": "把项目总览与深度缩放焦点透镜接入正式界面",
+      "functions": [
+        {
+          "path": "public/app.js",
+          "line": 733,
+          "name": "renderFocusLens"
+        },
+        {
+          "path": "public/app.js",
+          "line": 6360,
+          "name": "graphViewport wheel handler"
+        },
+        {
+          "path": "public/styles.css",
+          "line": 1405,
+          "name": "focusLens"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "task-tree.md"
+        },
+        {
+          "path": "llm-task-tree-kit/public/task-tree-prototype-v2/app.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "public/index.html"
+        },
+        {
+          "path": "public/app.js"
+        },
+        {
+          "path": "public/styles.css"
+        },
+        {
+          "path": "scripts/test-project-overview-ui.mjs"
+        },
+        {
+          "path": "scripts/test-focus-lens-integration.mjs"
+        },
+        {
+          "path": "artifacts/focus-lens-desktop.png"
+        },
+        {
+          "path": "artifacts/focus-lens-mobile.png"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,441 @@
+Published in Human Factors in Computing Systems CHI ‘86 Conference Proceedings, 16-23. 1986.
+
+
+                                                           Generalized Fisheye Views
+                                                                    George W. Furnas
+
+                                                           Bell Communications Research
+                                                                   435 South St.
+                                                              Morristown, New Jersey
+                                                                   201-829-4289
+
+
+
+Abstract                                                                      Augmentation Workshop [2].)
+In many contexts, humans often represent their own                            We have been exploring a different viewing strategy, based
+"neighborhood" in great detail, yet only major landmarks                      on an analogy to a very wide angle, or "fisheye", lens. Such
+further away. This suggests that such views ("fisheye                         a lens can show places nearby in great detail while still
+views") might be useful for the computer display of large                     showing the whole world -- simply by showing the more
+information structures like programs, data bases, online                      remote regions in successively less detail. An instructive
+text, etc. This paper explores fisheye views presenting, in                   caricature of this appears in the "New Yorker's View of the
+turn, naturalistic studies, a general formalism, a specific                   United states", a poster by Steinberg and now much
+instantiation, a resulting computer program, example                          imitated for other cities. In the poster, midtown Manhattan
+displays and an evaluation.                                                   is shown street by street. To the west, New Jersey is a
+                                                                              patch of color on the other side of a blue-grey ribbon
+                                                                              labeled "Hudson." The rest of the country is reduced to a
+1. Introduction.                                                              few principal landmarks (Chicago, the Rocky Mountains,
+Computer programs, structured data bases, organizational                      California, etc.) disappearing in the distance. While this
+charts, on-line text, menu access systems and maps -- users                   representation is certainly a distorted view of the U.S., it is
+are forced to view all of these potentially huge structures                   a manageable abbreviation in which the most important
+through windows sometimes as small as a 24x80 character                       features of the New Yorker's world are preserved. The view
+video display. The problem is that there is too much to                       allows the New Yorker to answer local questions like,
+show, ranging from local details to global structural                         "Where is the closest mail box?", but also more global
+information. Currently the most common viewing interface                      questions like "To ski in the Rocky Mountains, does it
+is simply a small window for looking into the structure,                      make more sense to connect through LA or Chicago?". If
+centered at some point. For example, a simple editor                          New Yorkers' fisheye views allow them to answer such
+window might show a line in a program and a dozen                             questions, perhaps analogous views would be useful in
+consecutive lines before and after it. A menu based retrieval                 computer interfaces.
+system might show the set of choices available at the                         The fundamental motivation of a fisheye strategy is to
+current node. The user navigates through the structure by                     provide a balance of local detail and global context. Local
+moving the window around (by scrolling, traversing arcs,                      detail is needed for the local interactions with a structure,
+etc). As a result it is easy to get lost, i.e., to find oneself in            whether that means finding the nearest mailbox in midtown
+some incomprehensible wrong place with little idea how to                     or editing a particular line of a large program. The global
+get to the right one (e.g., [1]). Presumably this happens                     context is needed to tell the user what other parts of the
+because such views have little information about the global                   structure exist and where they are (e.g., the Rockies are out
+structure, and where the current view fits in. Several                        west, beyond Chicago but before LA; there is an if
+techniques have arisen to try to deal with this problem,                      construct above the else construct currently being edited).
+most notably variants on a Zoom Lens analogy -- making                        Global information may also be important even in the mere
+available both a global and detailed view of a structure,                     interpretation of local detail (e.g., the meaning of the else
+either side by side, as with paper road maps, or in sequence.                 statement in fact depends on the content of the associated,
+(One of the earliest examples was in Englebart's Knowledge                    but remote, if() statement).
+                                                                              By looking for an analogy to the New Yorker's abbreviated
+Permission to copy without fee all or part of this material is granted        view, i.e., a trade-off of detail with distance, it is possible
+provided that the copies are not made or distributed for direct
+commercial advantage, the ACM copyright notice and the title of the           to consider fisheye views in a suprising number of
+publication and its date appear, and notice is given that copying is by       domains. In this paper we look at naturally occurring
+permission of the Association for Computing Machinery. To copy
+otherwise, or to republish, requires a fee and/or specific permission.        fisheye views, and then turn to the question of creating
+                                                                              them for computer interfaces.
+©1986                 ACM 0-89791-180-6/86/0400 - 0016
+2. Naturally occurring fisheye views.                            3. Formalizing generalized fisheye views.
+We have undertaken studies of naturally occurring fisheye        In order to apply the fisheye concept to interface design, the
+views for several reasons. At one level, as cognitive            idea must be clarified formally. Fisheye views are an
+psychologists, we were simply interested in how humans           example of a more basic strategy for the display of a large
+represent large structures in their heads. More relevant here,   structures. This basic strategy uses a "Degree of Interest"
+we thought that if fisheye views were ubiquitous it might        (DOI) function which assigns to each point in the structure,
+be because they were "naturally" useful in human                 a number telling how interested the user is in seeing that
+interactions, and might therefore make effective interfaces.     point, given the current task. A display of any desired size,
+In addition we hoped to learn more about what such views         n, can then be made by simply showing the n "most
+might look like, anticipating that findings might suggest        interesting" points, as indicated by the DOI function.
+features for fisheye interface design.                           At this general level, successful display would depend on
+We conducted several experiments using a simple                  discovering appropriate DOI functions. One might, for
+production paradigm. Subjects were told to imagine that a        example, seek to understand and decompose them in terms
+young child of a newly immigrated neighbor family had            of more primitive aspects of the structure. Generalized
+asked to be told about X's (where X's are States, Presidents,    fisheye views arise by decomposing the DOI into two
+Events in History,...). The subject's task was simply to list    components: a priori importance and distance. In its
+10 examples of category X that they thought the child            simplest, additive form the generalized fisheye Degree of
+should know about. The empirical fisheye conjecture is           Interest function is,
+that, to be cited, exemplars would have to be either of great    DOIfisheye (x|.=y) = API(x) – D(x,y)
+a priori importance or "close to home". Such fisheye
+subsets were indeed listed. For states, subjects in both New     where DOIfisheye is, according to the fisheye model, the user's
+Jersey and Texas mention states of major a priori                Degree of Interest in a point, x, given that the current point
+importance (e.g., New York and California), and then show        of focus is y, API(x) is the global A Priori Importance of x
+geographic bias (e.g, Texans listed Arkansas, New                and D(x,y) is the Distance between x and the current point
+Jerseyans listed Connecticut). Similarly, subjects listed        y. That is, the interest increases with a priori importance
+presidents that were either pre-eminent (e.g., Washington,       and decreases with distance. (Presumably the usefulness of a
+Lincoln) or recent (e.g., Carter, Reagan).                       DOI so defined will depend at least on the suitable
+                                                                 definition of distance and a priori importance.)1
+Using other techniques, we have found that people in a
+large corporation know a fisheye subset of the management        This simple formulation allows fisheye views to be defined
+structure. Employees know local department heads, but            in any sort of structure where the necessary components can
+only the Vice Presidents of remote divisions.                    be defined. Rooted tree structures will be illustrated as a
+                                                                 straightforward example that is quite different from the New
+We have also looked at academicians' views of the academic       Yorker's map. They are of particular interest since many
+world and found that in similarity ratings, the disciplines      large structures on computers are trees: structured
+near one's own loom extra large: an experimental                 programming languages (e.g., like LISP, PASCAL and C),
+psychologist will judge the pair "management" and                hierarchically organized text (e.g., manuals, legal codes),
+"marketing" more similar than "experimental psychology"          various highly structured scientific and technological
+and "psychiatry," but people in the business school will         knowledge domains (e.g., biological taxonomies),
+make the opposite evaluation.                                    hierarchical file systems (e.g., UNIX), corporate
+By examining the patterns of stories in 12 newspapers from       management structures, hierarchical menu access systems,
+three geographic regions, we found news editors have             etc. The definition of fisheye DOI functions for trees would
+evolved a fisheye editorial strategy. The papers will contain    thus allow fisheye displays for these structures.
+local news stories (e.g., a continuing local garbage strike)     To define the necessary components for a tree, consider that
+and only more distant ones that are compensatingly greater       D(x,y) has as a natural instantiation as d tree(x,y), the path
+importance (e.g., the bombing of the U.S. embassy in             length distance between x and y in the tree. Similarly
+Beirut).                                                         API(x) can become –dtree(x,root), the distance of x from the
+While there may be many interesting processes behind these       root, under the approximating assumption that points at
+results, we draw the conclusion that many naturally              levels closer to the root are intrinisically more important.
+occurring views of the world do exhibit a fisheye character.     (The minus sign simply gives the correct "sense" to the
+This suggests that apropriately generalized fisheye views
+might provide a good viewing interface for large structures.
+                                                                 1 The strategy of using a DOI with a threshold to abbreviate a display
+                                                                   requires only ordinal properties. Thus, in the current discussion, the
+                                                                   DOI function is not required to be positive. In fact, the example given
+                                                                   below has only negative values. Extensions of this simple DOI strategy
+                                                                   can depend on more than ordinal relationships, but not discussed here.
+                           (a)     Distance from y:
+                           dtree(x,y)
+                             _____________________3_____________________
+                             |                    |                    |
+                      _______4_______      _______4_______      _______2_______
+                      |      |      |      |      |      |      |      |      |
+                    __5__ __5__ __5__ __5__ __5__ __5__ __1__ __3__ __3__
+                    | | | | | | | | | | | | | | | | | | | | | | | | | | |
+                    6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 0 2 2 4 4 4 4 4 4
+                                                              y
+                                                        "current focus"
+
+
+                           (b) A Priori Importance in the tree:
+                           Imp(x) = – dtree(x,root)
+                                                root
+                            _____________________0_____________________
+                            |                    |                    |
+                     ______-1_______      ______-1_______      ______-1_______
+                     |      |      |      |      |      |      |      |      |
+                   _-2__ _-2__ _-2__ _-2__ _-2__ _-2__ _-2__ _-2__ _-2__
+                   | | | | | | | | | | | | | | | | | | | | | | | | | | |
+                  -3-3-3 -3-3-3 -3-3-3 -3-3-3 -3-3-3 -3-3-3 -3-3-3 -3-3-3 -3-3-3
+                                                             y
+                                                       "current focus"
+
+
+                           (c) The Fisheye DOI:
+                           DOIfisheye(tree) (x|.=y) = API(x) – D(x,y)
+                                                    = –( dtree(x,y) + dtree(x,root) )
+
+
+                                                root
+                            ____________________-3_____________________
+                            |                    |                    |
+                     ______-5_______      ______-5_______      ______-3_______
+                     |      |      |      |      |      |      |      |      |
+                   _-7__ _-7__ _-7__ _-7__ _-7__ _-7__ _-3__ _-5__ _-5__
+                   | | | | | | | | | | | | | | | | | | | | | | | | | | |
+                  -9-9-9 -9-9-9 -9-9-9 -9-9-9 -9-9-9 -9-9-9 -3-5-5 -7-7-7 -7-7-7
+                                                             y
+                                                       "current focus"
+                            Figure 1. Distance, A Priori Importance and the Fisheye DOI for a rooted tree.
+
+arithmetic term -- further from the root means less                                     different sizes. For example, letting k=–3 selects only the
+importance.) This gives,                                                                most interesting subset which, by the fisheye DOI, turns
+DOIfisheye(tree) (x|.=y) = –(dtree(x,y) + dtree(x,root))                                out to be the direct ancestral lineage between y and the root
+                                                                                        of the tree ("Zero-order fisheye view", see figure 2a, and
+Figure 1 illustrates these two components, and how they                                 figure 1). This subset is "most interesting" basically
+add together point by point to form the fisheye DOI                                     because points on that lineage increase in a priori
+function for the tree. In the resulting DOI function, an                                importance in exact compensation for their corresponding
+arithmetically larger number means the corresponding point                              increase in distance. If the display threshold is lowered to
+is more interesting for interactions focused at y. Thus, the                            include the next most interesting subset ("First-order
+points with DOI=–3 form the most "interesting" subset,                                  fisheye view", at k=–5, Figure 2b), the ancestral line and its
+those with DOI=–5 form the next most "interesting"                                      "siblings" are included. At the next threshold value
+subset, etc.                                                                            ("Second-order fisheye view", at k=–7, Figure 2c) "cousins"
+Thus by choosing a threshold, k, and only displaying those                              would be added. Consistent with the original fisheye
+points with DOI(x) ≥ k, one can obtain fisheye views of                                 inspiration, at any choice of threshold, only higher level
+                      (a) Zero-order tree fisheye:
+
+
+                                                    root
+                                                    -3
+                                                     |
+                                                    -3
+                                                     |
+                                                    -3
+                                                     |
+                                                    -3
+                                                     y
+                                               "current focus"
+
+
+                      (b) First-order tree fisheye:
+
+
+                                                     root
+                           ____________________-3_____________________
+                           |                    |                    |
+                          -5                   -5             ______-3_______
+                                                              |      |      |
+                                                            _-3__   -5     -5
+                                                            | | |
+                                                           -3-5-5
+                                                            y
+                                                      "current focus"
+
+
+                      (c) Second-order tree fisheye:
+
+
+                                                     root
+                         ____________________-3_____________________
+                         |                    |                    |
+                  ______-5_______      ______-5_______      ______-3_______
+                  |      |      |      |      |      |      |      |      |
+                 -7     -7     -7     -7     -7     -7    _-3__ _-5__ _-5__
+                                                          | | | | | | | | |
+                                                         -3-5-5 -7-7-7 -7-7-7
+                                                          y
+                                                    "current focus"
+                           Figure 2. Zero-order, first-order and second-order fisheye views for a tree.
+
+points (i.e., by assumption, more major features) are shown         properties, among others, underscore the computational and
+for further regions of the tree.                                    interaction efficency possible with fisheye views.
+These views have a number of interesting properties. In a           4. Fisheye interfaces.
+regular tree, (1) the fisheye view achieves a logarithmically       The fisheye DOI function derived for trees in the previous
+compressed display of the original tree. (2) Because of the         section was used to develop a program for making first-
+convex, nested structure of the DOI sets, there exist fast          order fisheye views of tree structured text files. An example,
+algorithms for computing such views, in time proportional           showing views of a C-program, is presented in figures 3, 4
+to the size of the view, and not the size of the tree. (3) As       and 5. (This is a short calculator program which does
+the point of focus changes from y to some new y', the               reverse-Polish-notation integer addition and subtraction.)
+change in view is easily calculated, since the whole DOI            The simple flat window view of figure 3 shows lots of
+function above their common ancestor is unchanged. (4)              detail, some of which is not likely to be very useful when
+Users may move through the structure using such fisheye             working on the indicated line (marked by ">>"). The
+views in a number of steps proportional to the log of the           arithmetic details of the previous case intrude in the top of
+number of intervening leaves of the tree. These formal
+the picture, for example. Very little orienting information       hierarchical structure. The task was meant to compare
+is available.                                                     various views' ability to support a basic cognitive
+On the other hand, the fisheye view, seen in figure 4,            operation for moving from one (undesired) location in a
+shows that the programmer is at a short for loop, within          file to another (target) location. Specifically subjects were
+the e case of a switch in which there are also four other         asked to determine the relative positions ("Which comes
+cases +, -, q, and default. This switch is in the else block      first?") for two different parts of the hierarchical structure,
+of the indicated if statement, within a while loop, in            given various views of those parts. One sort of view was
+program main(), etc. It is conjectured that being able to         a 22-line standard "flat" view of the file, centered at a
+see their work focus together with such contextual                randomly chosen line of focus. The other sort of view was
+information will be of use to programmers working with            a first-order fisheye view centered at the line. Subjects
+structured code. Figure 5 compares the content of these           received either two flat views, two fisheye views, or one
+two views. The box indicates the standard window view of          of each on which to base their decision, and saw a total of
+figure 3 and the underlining shows the lines in the fisheye       16 pairs in all. In order to prevent subjects from
+view of figure 4. The main difference is that, while both         answering on the basis of prior knowledge, a very
+show detail at the center, some superfluous detail at the         unfamiliar structure was used -- a botanical taxonomy of
+edges of the flat view has been traded for some more              the Class of Dicotyledons, classified down to families.
+remote but higher-level, contextual information. Related          We found that people were only 52% correct with two flat
+program viewing schemes have been proposed recently for           views, 64% correct with one fisheye and one flat view,
+syntax-driven program editors [3] [4] [5]. These have made        and 75% correct with two fisheye views. That is, as
+use almost exclusively of the distance component,                 expected, fisheye views are far superior. This result is
+whereas we also emphasize a priori importance. Views              most certainly simply because the fisheye shows the
+that are effectively first order tree fisheye views have          necessary structural information, and the fact is not lost
+arisen in the browsers of the SMALLTALK [6] and                   on the subjects.
+INTERLISP-D environments.                                         In addition to implementing fisheye views for indent
+We conjectured that such fisheye views should be more             structured programs of figures 3-5 and the botanical
+useful, at least in for the tasks of navigating around or         taxonomies of our experiment, we have an interactive
+examining unfamiliar parts of a large file. To test this we       fisheye veiwer for part of the Texas Legal Codes, text
+ran an experiment in which 20 subjects were asked to
+perform a navigation-related task in a large unfamiliar
+
+             28                                        t[0] = (t[0] + 10000)
+             29                                             - x[0];
+             30                                        for(i=1;i<k;i++){
+             31                                             t[i] = (t[i] + 10000)
+             32                                                  - x[i]
+             33                                                  - (1 - t[i-1]/10000);
+             34                                             t[i-1] %= 10000;
+             35                                        }
+             36                                        t[k-1] %= 10000;
+             37                                        break;
+             38                                   case 'e':
+           >>39                                        for(i=0;i<k;i++) t[i] = x[i];
+             40                                        break;
+             41                                   case 'q':
+             42                                        exit(0);
+             43                                   default:
+             44                                        noprint = 1;
+             45                                        break;
+             46                           }
+             47                           if(!noprint){
+             48                                for(i=k - 1;t[i] <= 0 && i > 0;i--);
+             49                                printf("%d",t[i]);
+             50                                if(i > 0) {
+          Figure 3. Standard 'flat-window' view of a C program. Line numbers are in the left margin.
+outlines,2 a decision tree (identification key) for types of             semantic net and the output be a fisheye-structured
+trees, a directory of telephone area codes, our corporate                exposition in natural language text.
+directory, and UNIX file hierarchy listings. All of these                Even without formal treatment, fisheye-type views can be
+applications are based on the tree fisheye DOI function                  invented simply by analogy -- trading off distance and
+derived above.                                                           detail. One such example, with a rather different flavor, is
+5. Conclusions.                                                          presented in figure 6. It is a "fisheye calendar", showing
+This paper has described generalized fisheye views.                      the current day in "day-at-a-time" detail, the current week
+Fisheye views provide a balance of local detail and global               in "week-at-a-time" detail and the rest of the month in
+context by trading off a priori importance against distance.             "month-at-a-time" detail. The goal is to give the user
+They appear naturally in many human contexts and can be                  needed hour-by-hour information about today, but some
+implemented for a wide variety of computer information                   sense of the appointment structure for the rest of the week
+structures. The formal definition presented here allows                  and month. We are currently implementing an interactive
+interfaces to be defined and explored in any structure where             version of this calendar.4 A number of results from our
+distance and some display-relevant notion of a priori                    studies of natural fisheye representations suggested future
+importance can be defined. This is possible for lists, trees,            work in creating views. In particular some effects were not
+acyclic directed graphs (DAG's, such as ISA networks in                  consistent with a simple fisheye model: (1) In some cases,
+knowledge representations), general graphs and Euclidean                 the sphere of local interest was somewhat exaggerated
+spaces, among other structures.3 It is important to                      when compared to a simple immediate fisheye tradeoff --
+remember that, unlike the geographic example which                       suggesting a similar need in display design. For example
+inspired the metaphor (the New Yorker's View), the                       one might include just a few more local lines around the
+underlying stuctures need not be spatial nor the "output"                for loop line in figure 4. (2) Often there were cases of
+even graphic. For example, the stucture might be a                       "multi-focus" fisheye views, as in the geographic study
+                                                                         when the subject had lived in more than one state. In this
+                                                                         case detail occurred at both foci and fell off at points far
+2
+  Fisheye views of outlines and structured text like legal codes have
+  much in common with views generated by "outline processors", now       from either. This observation serves to remind that users
+  coming onto the market place, and the early hypertext ideas of         might need to see detail in more than one place at a time,
+  Nelson [7]
+3
+  We note that "A Priori Importance" need not be structurally defined,
+                                                                         4
+  like "level" in a tree. It may be independently specified for each         The layout of this calendar is very similar to some graphics work by
+  point, though often less efficient algorithms may result.                  Farrand [8].
+
+
+
+                 1 #define DIG 40
+                 2 #include <stdio.h>
+              ...4 main()
+                 5 {
+                 6      int c, i, x[DIG/4], t[DIG/4], k = DIG/4, noprint = 0;
+              ...8      while((c=getchar()) != EOF){
+                 9           if(c >= '0' && c <= '9'){
+             ...16           } else {
+                17                switch(c){
+                18                     case '+':
+             ...27                     case '-':
+             ...38                     case 'e':
+              >>39                           for(i=0;i<k;i++) t[i] = x[i];
+                40                           break;
+                41                     case 'q':
+             ...43                     default:
+             ...46                }
+                47                if(!noprint){
+             ...57                }
+                58           }
+                59           noprint = 0;
+                60      }
+                61 }
+           Figure 4. A fisheye view of the C program. Line numbers are in the left margin. "..." indicates missing
+           lines.
+    1 #define DIG 40
+    2 #include <stdio.h>
+    3
+    4 main()
+    5 {
+    6      int c, i, x[DIG/4], t[DIG/4], k = DIG/4, noprint = 0;
+    7
+    8      while((c=getchar()) != EOF){
+    9           if(c >= '0' && c <= '9'){
+   10                 x[0] = 10 * x[0] + (c-'0');
+   11                 for(i=1;i<k;i++){
+   12                      x[i] = 10 * x[i]
+   13                            + x[i-1]/10000;
+   14                      x[i-1] %= 10000;
+   15                }
+   16           } else {
+   17                switch(c){
+   18                      case '+':
+   19                            t[0] = t[0] + x[0];
+   20                             for(i=1;i<k;i++){
+   21                                  t[i] = t[i] + x[i]
+   22                                       + t[i-1]/10000;
+   23                                  t[i-1] %= 10000;
+   24                            }
+   25                            t[k-1] %= 10000;
+   26                            break;
+   27                      case '-':
+   28                             t[0] = (t[0] + 10000)
+   29                                  - x[0];
+   30                             for(i=1;i<k;i++){
+   31                                  t[i] = (t[i] + 10000)
+   32                                       - x[i]
+   33                                        - (1 - t[i-1]/10000);
+   34                                  t[i-1] %= 10000;
+   35                            }
+   36                            t[k-1] %= 10000;
+   37                            break;
+   38                      case 'e':
+   39                            for(i=0;i<k;i++) t[i] = x[i];
+   40                            break;
+   41                      case 'q':
+   42                            exit(0);
+   43                      default:
+   44                            noprint = 1;
+   45                            break;
+   46                }
+   47                if(!noprint){
+   48                       for(i=k - 1;t[i] <= 0 && i > 0;i--);
+   49                       printf("%d",t[i]);
+   50                      if(i > 0) {
+   51                             for(i-- ; i >= 0; i--){
+   52                                  printf("%04d",t[i]);
+   53                            }
+   54                      }
+   55                       putchar('\n');
+   56                       for(i=0; i > k;i++) x[i] = 0;
+   57                }
+   58           }
+   59           noprint = 0;
+   60      }
+   61 }
+
+Figure 5. Full view of the C program. Box shows lines in "flat" view. Underlines show
+lines in the fisheye view.
+ with a fisheye context around each. The fisheye calendar          Mikelsons and M. N. Wegman, A program development
+we are currently developing will explore this capability --        tool, IBM Research Report, Computer Science
+showing two days at higher detail, when desired. (3)               Department, IBM Thomas J. Watson Research Center,
+Finally, there were typically additional, non-fisheye effects      Yorktown Heights, New York,1979.
+(e.g., human-interest newspaper stories could have almost          [4] Horton, M. Design of a Multi Language Editor,
+any geographic origin). This is a good reminder that while         Doctoral Thesis, U. C. Berkeley Computer Science, 1981.
+perhaps useful, fisheye views do not capture everything.
+There may also have to be ad hoc, domain and task                  [5] Mikelsons, M., IBM Research Report, Computer
+dependent components of any display of a large structure.          Science Department, IBM Thomas J. Watson Research
+                                                                   Center, Yorktown Heights, New York.
+REFERENCES
+                                                                   [6] Teslar, L, The Smalltalk Environment, BYTE, 6,
+[1] Robertson, G., D. McCracken and A. Newell The                  1981, 90-147.
+ZOG approach to man- machine communication,
+Technical Report CMU-CS-97-148, Department of                      [7] Nelson, T. Computer Lib Hugo's Book Source:
+Computer Science, Carnegie Mellon University,                      Chicago, IL, 1974.
+Pittsburgh, PA, 1979.                                              [8] Farrand, W. A. Information Display in Interactive
+[2] D. C. Englebart and W. K. English, A research center           Design, Doctoral Thesis, Department of Engineering,
+for augmenting human intellect, AFIPS Conference                   University of California at Los Angeles, 1973.
+Proceedings, Vol. 33, 1968, 15ff. Also SRI-ARC Catalog
+item 3954.
+[3] Alberga, C. N., A. L. Brown, G. B. Leeman, M.
+
+
+
+
+                                                 Figure 6. A Fisheye Calendar.
+

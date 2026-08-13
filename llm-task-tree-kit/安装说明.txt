@@ -1,0 +1,45 @@
+LLM Task Tree 安装说明
+====================
+
+【发给别人试用】
+1. 发送 dist\LLMTaskTree-Setup.zip
+2. 对方解压到任意位置（如桌面）
+3. 双击 Setup.cmd
+4. 选择安装目录（任意盘符，如 D:\Apps\LLMTaskTree）
+5. 完成
+
+【安装后怎么用】
+在 Windows 文件资源管理器里（不是 Cursor 侧边栏）：
+- 右键文件夹 -> Install LLM Task Tree  （在该目录创建任务树）
+- 右键文件夹 -> Open Task Tree          （打开该目录的任务图）
+
+【要求】
+- Windows 10/11
+- 已安装 Node.js 18+  https://nodejs.org/
+
+【卸载】
+运行安装目录里的 Uninstall.cmd
+
+【重新修复右键菜单】
+再运行一次安装目录里的 Setup.cmd
+
+【一键更新（本机所有已装项目）】
+1. 把新版 kit 文件夹拷到任意位置（U 盘 / 桌面 / 网络共享均可）
+2. 双击文件夹里的 一键更新.cmd（或 Update.cmd）
+3. 首次会询问本机安装目录；之后自动识别
+4. 会自动：更新全局 kit → 刷新右键菜单 → 更新已登记项目 stub → 同步各项目 AGENTS.md 里的 agent 协议块
+   task-tree.md / versions / knowledge 内容不会自动改。
+
+Agent 会不会自动改 task-tree？
+- 会：Agent 下次对话能读到新 prompt（AGENTS.md + `AGENTS.node-writing.md`）
+- 不会：已有节点不会自动重写；触碰节点时让 Agent 改成简明中文，并把代码、原始样例和复杂英文术语移到证据文件
+
+可选 sidecar 列表（与 一键更新.cmd 同目录，UTF-8）：
+- update-projects.txt — 手动指定项目根目录，每行一个
+- update-search-roots.txt — 扫描这些父目录（深度 2）下含 task-tree.md 的文件夹
+还会自动扫描「已登记项目的同级目录」。打开任务图时会自动登记该项目。
+
+【自己打包 zip】
+在项目根目录执行：
+  powershell -File scripts\build-dist.ps1
+输出：dist\LLMTaskTree-Setup.zip

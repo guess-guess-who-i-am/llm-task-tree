@@ -1,0 +1,42 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N4",
+  "title": "分析本地 skill 仓库与自动调用机制",
+  "reportZh": "report.zh.md",
+  "updatedAt": "2026-07-23T03:30:00.000Z",
+  "substeps": [
+    {
+      "title": "全局 skill 索引与推荐 API",
+      "functions": [
+        { "path": "server.js", "line": 3458, "name": "POST /api/skills/recommend" }
+      ],
+      "promptZh": "prompts/01.zh.md",
+      "inputs": [{ "path": "task-tree.md", "line": 76 }],
+      "outputs": [{ "path": "skill-repos-analysis.md", "line": 1 }]
+    },
+    {
+      "title": "前端能力面板多选落盘",
+      "functions": [
+        { "path": "public/app.js", "line": 2662, "name": "fetch skills recommend" }
+      ],
+      "outputs": [{ "path": "task-tree.md", "line": 91 }]
+    },
+    {
+      "title": "意图筛选、跨来源去重与可读亮点",
+      "functions": [
+        { "path": "server.js", "name": "dedupeSkillsByIdentity" },
+        { "path": "server.js", "name": "skillMatchText" },
+        { "path": "public/app.js", "name": "renderSkillOptionItem" }
+      ],
+      "inputs": [
+        { "path": "task-tree.md", "line": 76 },
+        { "path": "skill-routing-log.md", "line": 1 }
+      ],
+      "outputs": [
+        { "path": "server.js" },
+        { "path": "public/app.js" },
+        { "path": "public/styles.css" }
+      ]
+    }
+  ]
+}

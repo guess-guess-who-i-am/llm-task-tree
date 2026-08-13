@@ -1,0 +1,49 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N11",
+  "blockId": "",
+  "updatedAt": "2026-08-07T08:52:21.283Z",
+  "title": "修复远程 Codex 持续思考",
+  "reportZh": "report.zh.md",
+  "substeps": [
+    {
+      "title": "修复代理槽位泄漏并缩短失败等待",
+      "functions": [
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/proxy.mjs",
+          "name": "Semaphore.acquire"
+        },
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/proxy.mjs",
+          "name": "Semaphore.release"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "task-tree.md"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/test_semaphore.mjs"
+        },
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/test_mcp_tool_recovery.mjs"
+        }
+      ]
+    },
+    {
+      "title": "验收 Windows 4000、远程 4152 与 Codex CLI",
+      "inputs": [
+        {
+          "path": "C:/Users/Administrator/Desktop/codex/codex-deepseek-v4-proxy/.env"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "scripts/steps/N11/latest/report.zh.md"
+        }
+      ]
+    }
+  ]
+}

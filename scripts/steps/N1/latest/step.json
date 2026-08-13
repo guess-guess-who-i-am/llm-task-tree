@@ -1,0 +1,25 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N1",
+  "title": "设计 Markdown 节点格式",
+  "reportZh": "report.zh.md",
+  "updatedAt": "2026-07-08T08:20:00.000Z",
+  "substeps": [
+    {
+      "title": "固定节点字段 schema",
+      "functions": [
+        { "path": "llm-task-tree/skills/task-tree-grill/references/schema-template.md", "line": 12, "name": "ROOT skeleton" }
+      ],
+      "promptZh": "prompts/01.zh.md",
+      "inputs": [{ "path": "task-tree.md", "line": 21 }],
+      "outputs": [{ "path": "llm-task-tree/skills/task-tree-grill/references/graph-quality.md", "line": 1 }]
+    },
+    {
+      "title": "推理图质量准则",
+      "functions": [
+        { "path": "AGENTS.md", "line": 277, "name": "Markdown Schema" }
+      ],
+      "outputs": [{ "path": "task-tree.md", "line": 32 }]
+    }
+  ]
+}

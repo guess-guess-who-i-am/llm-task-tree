@@ -1,0 +1,25 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N9",
+  "title": "可移植任务树 Kit 打包",
+  "reportZh": "report.zh.md",
+  "updatedAt": "2026-07-08T08:20:00.000Z",
+  "substeps": [
+    {
+      "title": "Kit 同步 build-kit",
+      "functions": [
+        { "path": "scripts/build-kit.ps1", "line": 3, "name": "Sync llm-task-tree-kit" }
+      ],
+      "promptZh": "prompts/01.zh.md",
+      "inputs": [{ "path": "task-tree.md", "line": 159 }],
+      "outputs": [{ "path": "llm-task-tree-kit/", "line": 1 }]
+    },
+    {
+      "title": "一键更新 17 项目",
+      "functions": [
+        { "path": "llm-task-tree-kit/one-click-update.ps1", "line": 1, "name": "discover projects" }
+      ],
+      "outputs": [{ "path": "task-tree.md", "line": 171 }]
+    }
+  ]
+}

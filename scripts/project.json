@@ -1,0 +1,97 @@
+{
+  "schema": "flow-script/v1",
+  "mode": "project",
+  "focusId": "N11",
+  "updatedAt": "2026-08-11T09:19:58.975Z",
+  "blocks": [
+    {
+      "id": "b-dg5hkl0",
+      "type": "hat",
+      "title": "当项目开始"
+    },
+    {
+      "id": "b-l87mq2i",
+      "type": "task",
+      "nodeId": "ROOT",
+      "title": "建立可共享的大模型任务上下文",
+      "status": "active"
+    },
+    {
+      "id": "b-864mbq9",
+      "type": "task",
+      "nodeId": "N1",
+      "title": "设计 Markdown 节点格式",
+      "status": "done"
+    },
+    {
+      "id": "b-m6wz8ir",
+      "type": "task",
+      "nodeId": "N2",
+      "title": "实现可视化图谱编辑器",
+      "status": "active"
+    },
+    {
+      "id": "b-o8z099y",
+      "type": "task",
+      "nodeId": "N3",
+      "title": "让 Codex 同步维护任务图",
+      "status": "active"
+    },
+    {
+      "id": "b-yxq17go",
+      "type": "task",
+      "nodeId": "N4",
+      "title": "分析本地 skill 仓库与自动调用机制",
+      "status": "done"
+    },
+    {
+      "id": "b-svmfyt3",
+      "type": "task",
+      "nodeId": "N5",
+      "title": "处理任务树回溯后的文件漂移",
+      "status": "done"
+    },
+    {
+      "id": "b-81r3qzb",
+      "type": "task",
+      "nodeId": "N6",
+      "title": "节点内多模型协作",
+      "status": "active"
+    },
+    {
+      "id": "b-y5c45t4",
+      "type": "task",
+      "nodeId": "N7",
+      "title": "集成 Markdown 知识库检索面板",
+      "status": "done"
+    },
+    {
+      "id": "b-klevexc",
+      "type": "task",
+      "nodeId": "N9",
+      "title": "可移植任务树 Kit 打包",
+      "status": "done"
+    },
+    {
+      "id": "b-ct23l6y",
+      "type": "task",
+      "nodeId": "N10",
+      "title": "执行顺序视图（Scratch 模块流原型）",
+      "status": "done"
+    },
+    {
+      "id": "b-c0b4n20",
+      "type": "task",
+      "nodeId": "N11",
+      "title": "重构多树上下文与 Agent 维护闭环",
+      "status": "active"
+    },
+    {
+      "id": "b-luad20b",
+      "type": "task",
+      "nodeId": "N12",
+      "title": "让 Agent 直接调用任务图（MCP 集成层）",
+      "status": "done"
+    }
+  ]
+}

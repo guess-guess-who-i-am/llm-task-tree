@@ -1,0 +1,41 @@
+---
+description: llm-task-tree — 编辑执行流程 scripts/*.json 前必须先 Read scripts/README.md（kit 托管）
+globs: scripts/project.json,scripts/run.json,scripts/**/*.json
+alwaysApply: false
+---
+
+# 编辑执行流程前的强制 Read（仅改流程时）
+
+本规则在写入 **`scripts/project.json`**、**`scripts/run.json`** 或调用 **`PUT /api/flow-script`** 时生效。只读流程、只改代码、只更新节点 CurrentResult 时 **不要** 加载下文。
+
+## 触发条件
+
+- 用户要求改执行顺序 / 流程图 / 模块流
+- 方法变更（Approach、Problem 结构、增删执行步骤）需同步 `scripts/`
+- 将新建或大幅调整 `blocks` 数组
+
+## 写入前必须 Read（同一轮、写 JSON 之前）
+
+1. **`scripts/README.md`** — 何时改/何时不改、schema、块类型、保存方式（权威写法）
+2. 当前 **`scripts/project.json`**（改 run 模式时再读 **`scripts/run.json`**）
+3. 核对 **`task-tree.md`**（+ 相关 `subtrees/*.md`）里存在的 **`nodeId`**
+
+## 写入前必须备份
+
+- 改 `project.json` → 备份到 `scripts/versions/project/<timestamp>_<原因>.json`
+- 改 `run.json` → 备份到 `scripts/versions/run/<timestamp>_<原因>.json`
+- 或用 `PUT /api/flow-script` 且 `backup: true`（默认会备份）
+
+## 硬约束（摘要，细节见 README）
+
+- **执行顺序以 `scripts/*.json` 为准**，不是节点 ID 排序、不是关系图画布位置
+- **`task-tree.md` = 语义与依赖边**；**`scripts/*.json` = Scratch 式执行块序列**
+- 任务块必须带 **`nodeId`**，且对应树里真实节点（`## Nx - 标题`）
+- Schema：**`flow-script/v1`**，`blocks` 数组；首块通常为 `type: "hat"`
+- 折叠子树 **不会** 自动改已保存脚本
+
+## 不触发本规则时
+
+- 只读 `scripts/project.json` 了解顺序
+- 只更新 `task-tree.md` 的 CurrentResult / Notes
+- 只在关系图拖节点位置

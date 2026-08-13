@@ -1,0 +1,60 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N3",
+  "blockId": "",
+  "updatedAt": "2026-08-13T04:02:18.273Z",
+  "title": "让 Codex 同步维护任务图",
+  "reportZh": "report.zh.md",
+  "substeps": [
+    {
+      "title": "隔离多 Agent 的执行目标与节点写入",
+      "functions": [
+        {
+          "path": "server/execution-scope.js",
+          "name": "createExecutionScopeStore"
+        },
+        {
+          "path": "server/tree-node-patch.js",
+          "name": "patchNodeFields"
+        },
+        {
+          "path": "server.js",
+          "name": "execution scope 与 node-patch endpoints"
+        },
+        {
+          "path": "scripts/mcp-server.mjs",
+          "name": "task_tree_scope/focus/write"
+        },
+        {
+          "path": "server/codex-coordinator.js",
+          "name": "scope injection"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "AGENTS.md",
+          "name": "F25 多 Agent 覆盖规则"
+        },
+        {
+          "path": "C:/Users/Administrator/.codex/prompts/global-every-turn.zh.md",
+          "name": "TT01-TT03 中文唯一源"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "scripts/test-execution-scopes.mjs",
+          "name": "目标隔离、越权拒绝、并发保留回归"
+        },
+        {
+          "path": "llm-task-tree-kit",
+          "name": "共享安装包与插件运行时"
+        },
+        {
+          "path": "subtrees/N3-subtree.md",
+          "name": "当前节点状态"
+        }
+      ],
+      "result": "两个执行范围分别绑定不同节点；越权写返回拒绝；并发写不同节点均保留。完整 MCP、协调器、多树、插件与安装测试通过，本机和 huangyu 全局 Prompt 已发布。"
+    }
+  ]
+}

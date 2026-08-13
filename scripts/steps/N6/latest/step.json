@@ -1,0 +1,26 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N6",
+  "title": "节点内多模型协作",
+  "reportZh": "report.zh.md",
+  "updatedAt": "2026-07-08T08:20:00.000Z",
+  "substeps": [
+    {
+      "title": "多模型配置与运行 API",
+      "functions": [
+        { "path": "server.js", "line": 3720, "name": "POST /api/model-agents/run" },
+        { "path": "server.js", "line": 3465, "name": "GET /api/model-agents" }
+      ],
+      "promptZh": "prompts/01.zh.md",
+      "inputs": [{ "path": "subtrees/N6-subtree.md", "line": 6 }],
+      "outputs": [{ "path": "docs/subtree-parallel/v2-N6-findings.md", "line": 1 }]
+    },
+    {
+      "title": "对话持久化与自动检索",
+      "functions": [
+        { "path": "task-tree.md", "line": 105, "name": "model-node-conversations" }
+      ],
+      "outputs": [{ "path": "model-node-conversations.json", "line": 1 }]
+    }
+  ]
+}

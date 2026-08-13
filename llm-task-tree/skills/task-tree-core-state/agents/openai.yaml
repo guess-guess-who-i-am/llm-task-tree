@@ -1,0 +1,4 @@
+interface:
+  display_name: "Task Tree Core State"
+  short_description: "Keep live task trees decision-relevant and compact"
+  default_prompt: "Use $task-tree-core-state to retain only decision-relevant live task state."

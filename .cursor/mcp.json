@@ -1,0 +1,11 @@
+{
+    "mcpServers":  {
+                       "task_tree":  {
+                                         "type":  "stdio",
+                                         "command":  "node",
+                                         "args":  [
+                                                      "${workspaceFolder}/llm-task-tree/mcp-server.mjs"
+                                                  ]
+                                     }
+                   }
+}

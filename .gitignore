@@ -1,0 +1,49 @@
+.task-tree-port
+.task-tree-ports
+.task-tree-thread
+.task-tree-threads.json
+.task-tree-runs/
+llm-task-tree/widget-report.json
+llm-task-tree/api-bridge-log.txt
+.env
+model-agents.json
+model-agent-history.json
+model-agents/
+knowledge-config.json
+knowledge-index.json
+knowledge-indices/
+knowledge/
+web-search-config.json
+open-websearch-launcher.log
+open-websearch-launcher.err.log
+llm-task-tree-kit/node_modules/
+skill-routing-log.md
+.task-tree-maintenance/
+.chain-run/
+.subtree-run/
+scripts/versions/
+
+# Local runtime output and caches
+*.log
+*.err.log
+*.out.log
+node_modules/
+test-runs/
+backups/
+knowledge-index.corrupt*.json
+
+# Generated archives and packaged copies
+*.zip
+dist/
+
+# External repositories vendored only for local study
+agent-reach/
+CL4R1T4S/
+
+# External research/skill collections; project integrations remain in llm-task-tree/ and skills/
+scientific-agent-skills/
+marketplace/
+copilot/
+gill_with_doc/
+handoff/
+open-webSearch/

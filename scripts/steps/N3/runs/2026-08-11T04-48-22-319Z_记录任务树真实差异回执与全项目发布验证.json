@@ -1,0 +1,53 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N3",
+  "blockId": "",
+  "updatedAt": "2026-08-10T14:16:21.123Z",
+  "title": "让 Codex 同步维护任务图",
+  "reportZh": "report.zh.md",
+  "substeps": [
+    {
+      "title": "压缩放大后的节点布局并保持核心信息可读",
+      "functions": [
+        {
+          "path": "public/app.js",
+          "line": 212,
+          "name": "卡片高度估算"
+        },
+        {
+          "path": "public/app.js",
+          "line": 657,
+          "name": "compactCard"
+        },
+        {
+          "path": "public/styles.css",
+          "line": 1641,
+          "name": "graphNode"
+        },
+        {
+          "path": "public/styles.css",
+          "line": 4420,
+          "name": "nodeActions"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "task-tree.md",
+          "line": 137,
+          "name": "N3 当前目标"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "scripts/test-node-core-summary-ui.mjs",
+          "name": "节点摘要、缩放和溢出回归测试"
+        },
+        {
+          "path": "artifacts/current-node-detail-final.png",
+          "name": "1.8 倍细节缩放截图"
+        }
+      ],
+      "result": "14 个节点保留问题、思路、结果三项；工具栏变为两行；1.8 倍细节缩放下最大内容溢出为负值，未发现截断。"
+    }
+  ]
+}

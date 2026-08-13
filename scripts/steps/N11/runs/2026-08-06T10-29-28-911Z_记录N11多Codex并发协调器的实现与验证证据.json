@@ -1,0 +1,63 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N11",
+  "blockId": "",
+  "updatedAt": "2026-08-06T09:16:57.195Z",
+  "title": "重构多树上下文与 Agent 维护闭环",
+  "reportZh": "report.zh.md",
+  "substeps": [
+    {
+      "title": "把任务树维护前移到每轮和每个工作单元",
+      "inputs": [
+        {
+          "path": "C:/Users/Administrator/.codex/prompts/global-every-turn.en.md"
+        },
+        {
+          "path": "C:/Users/Administrator/.codex/prompts/global-every-turn.zh.md"
+        },
+        {
+          "path": ".codex/hooks/turn-start.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "server/turn-context.js"
+        },
+        {
+          "path": "server/codex-prompts.js"
+        },
+        {
+          "path": "scripts/test-multitree-maintenance.mjs"
+        }
+      ]
+    },
+    {
+      "title": "压缩活动方法树并消除执行流程漂移",
+      "inputs": [
+        {
+          "path": "task-tree.md"
+        },
+        {
+          "path": "trees/architecture.md"
+        },
+        {
+          "path": "scripts/project.json"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "task-tree.md"
+        },
+        {
+          "path": "scripts/project.json"
+        },
+        {
+          "path": "server/flow-script.js"
+        },
+        {
+          "path": "scripts/check-tree-compact.mjs"
+        }
+      ]
+    }
+  ]
+}

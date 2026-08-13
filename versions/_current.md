@@ -117,7 +117,7 @@
 - Metrics:
 - Notes:
 - CodeLoc:
-- CurrentResult: kit 采用标记入口、项目数据隔离和备份；25 个项目更新实测 failed=0，架构见 trees/architecture.md A9。
+- CurrentResult: kit 已完成跨项目分发，并建立 GitHub 私有备份仓库 guess-guess-who-i-am/llm-task-tree-workspace-backup。远端 main 与本地提交 f82aeea 一致，包含项目代码、任务树、子树、版本、文档和验收证据；密钥、知识索引、运行状态及外部仓库已排除。可移植与灾难恢复目标已具备。
 - RootCauseAnalysis:
 - CaseStudy:
 - NextIdea:

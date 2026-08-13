@@ -132,6 +132,7 @@ await cp(path.join(repoRoot, "integrations"), path.join(outDir, "integrations"),
 await mkdir(path.join(outDir, "artifacts"), { recursive: true });
 for (const name of [
   "focus-lens-desktop.png",
+  "readme-hero.png",
   "task-tree-semantic-zoom-macro.png",
   "task-tree-core-summary-detail.png"
 ]) {

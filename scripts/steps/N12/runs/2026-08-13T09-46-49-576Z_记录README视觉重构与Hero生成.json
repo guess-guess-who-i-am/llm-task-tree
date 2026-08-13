@@ -1,0 +1,54 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N12",
+  "blockId": "",
+  "updatedAt": "2026-08-13T08:36:26.439Z",
+  "title": "公开 README 与跨平台插件分发",
+  "reportZh": "report.zh.md",
+  "substeps": [
+    {
+      "title": "重写公开 README 并建立多平台安装入口",
+      "inputs": [
+        {
+          "path": "README.md"
+        },
+        {
+          "path": ".agents/plugins/marketplace.json"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "README.md"
+        },
+        {
+          "path": ".claude-plugin/marketplace.json"
+        },
+        {
+          "path": "marketplace/plugins/task-tree/.claude-plugin/plugin.json"
+        },
+        {
+          "path": "integrations/trae/mcp.json"
+        }
+      ]
+    },
+    {
+      "title": "验证插件包和公开分发",
+      "functions": [
+        {
+          "path": "scripts/test-plugin-manifest.mjs"
+        },
+        {
+          "path": "scripts/test-plugin-package.mjs"
+        },
+        {
+          "path": "scripts/build-public-repo.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "dist/task-tree-public/README.md"
+        }
+      ]
+    }
+  ]
+}

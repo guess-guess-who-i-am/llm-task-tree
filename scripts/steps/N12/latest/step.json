@@ -2,18 +2,39 @@
   "schema": "flow-step/v1",
   "nodeId": "N12",
   "blockId": "",
-  "updatedAt": "2026-08-13T08:36:26.439Z",
-  "title": "公开 README 与跨平台插件分发",
+  "updatedAt": "2026-08-13T09:46:49.576Z",
+  "title": "README 视觉重构与产品 Hero",
   "reportZh": "report.zh.md",
   "substeps": [
     {
-      "title": "重写公开 README 并建立多平台安装入口",
+      "title": "用真实产品截图生成三阶段 Hero",
+      "functions": [
+        {
+          "path": "scripts/build-readme-hero.ps1"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "artifacts/project-overview-desktop.png"
+        },
+        {
+          "path": "artifacts/task-tree-semantic-zoom-macro.png"
+        },
+        {
+          "path": "artifacts/focus-lens-desktop.png"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "artifacts/readme-hero.png"
+        }
+      ]
+    },
+    {
+      "title": "按成熟开源产品模式重排 README",
       "inputs": [
         {
           "path": "README.md"
-        },
-        {
-          "path": ".agents/plugins/marketplace.json"
         }
       ],
       "outputs": [
@@ -21,18 +42,12 @@
           "path": "README.md"
         },
         {
-          "path": ".claude-plugin/marketplace.json"
-        },
-        {
-          "path": "marketplace/plugins/task-tree/.claude-plugin/plugin.json"
-        },
-        {
-          "path": "integrations/trae/mcp.json"
+          "path": "dist/task-tree-public/README.md"
         }
       ]
     },
     {
-      "title": "验证插件包和公开分发",
+      "title": "验证插件与公开分发",
       "functions": [
         {
           "path": "scripts/test-plugin-manifest.mjs"
@@ -46,7 +61,7 @@
       ],
       "outputs": [
         {
-          "path": "dist/task-tree-public/README.md"
+          "path": "dist/task-tree-public/artifacts/readme-hero.png"
         }
       ]
     }

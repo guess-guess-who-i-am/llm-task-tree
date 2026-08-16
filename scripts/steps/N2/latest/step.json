@@ -3,7 +3,7 @@
   "nodeId": "N2",
   "title": "实现可视化图谱编辑器",
   "reportZh": "report.zh.md",
-  "updatedAt": "2026-07-23T03:30:00.000Z",
+  "updatedAt": "2026-08-16T03:30:56.3177889Z",
   "substeps": [
     {
       "title": "紧凑自动整理",
@@ -52,6 +52,24 @@
       ],
       "inputs": [{ "path": "AGENTS.md", "line": 1 }],
       "outputs": [{ "path": "task-tree.md", "line": 58 }]
+    },
+    {
+      "title": "焦点透镜保持完整工作台能力并使用顶部单一入口",
+      "functions": [
+        { "path": "public/app.js", "name": "renderFocusLens" },
+        { "path": "public/app.js", "name": "runFocusLensNode" },
+        { "path": "public/app.js", "name": "syncFocusLensToolbarButton" },
+        { "path": "public/app.js", "name": "setGraphView" }
+      ],
+      "inputs": [
+        { "path": "public/index.html" },
+        { "path": "public/styles.css" }
+      ],
+      "outputs": [
+        { "path": "scripts/test-focus-lens-integration.mjs" },
+        { "path": "artifacts/focus-lens-desktop.png" },
+        { "path": "artifacts/focus-lens-mobile.png" }
+      ]
     }
   ]
 }

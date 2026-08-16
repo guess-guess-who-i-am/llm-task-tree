@@ -41,6 +41,7 @@
           </label>
           <button id="nodeCardCompactBtn" type="button" class="nodeCardCompactBtn" title="节点卡片摘要模式：默认只显示问题与一行结果，详情点开" aria-pressed="true">摘要</button>
           <button id="projectOverviewBtn" type="button" class="projectOverviewBtn" title="查看项目决策总览">总览</button>
+          <button id="focusLensOpenBtn" type="button" class="focusLensToolbarBtn" title="对选中节点打开焦点透镜" aria-pressed="false"><span aria-hidden="true">◎</span><span class="focusLensToolbarLabel">透镜</span></button>
           <button id="layoutTreeBtn" title="Layout as tree">⇲</button>
           <button id="fitViewBtn" title="Fit view">⛶</button>
           <button id="embedExpandBtn" type="button" class="embedExpandBtn" title="在对话里铺开" aria-pressed="false" hidden>⤢</button>
@@ -165,7 +166,7 @@
             <header class="focusLensHeader">
               <div>
                 <span class="focusLensEyebrow">焦点透镜</span>
-                <p>沿上下游查看；完整详情可在节点内展开</p>
+                <p>只改变关系图的阅读方式；编辑、执行链和其它面板照常使用</p>
               </div>
               <button type="button" id="focusLensClose" aria-label="关闭焦点透镜" title="关闭并定位到当前节点">×</button>
             </header>

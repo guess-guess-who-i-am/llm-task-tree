@@ -205,6 +205,39 @@ h1 {
   color: var(--accent);
 }
 
+.toolbar .focusLensToolbarBtn {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: auto;
+  min-width: 76px;
+  padding: 0 12px;
+  color: #246452;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.toolbar .focusLensToolbarBtn:hover,
+.toolbar .focusLensToolbarBtn.is-active {
+  border-color: #7aa596;
+  background: #e8f3ef;
+  color: #155746;
+}
+
+@media (max-width: 1120px) {
+  .toolbar .focusLensToolbarBtn {
+    width: 38px;
+    min-width: 38px;
+    padding: 0;
+  }
+
+  .focusLensToolbarLabel {
+    display: none;
+  }
+}
+
 .layout {
   flex: 1;
   min-height: 0;
@@ -1619,6 +1652,34 @@ button.chainAddBtn.active {
   font-weight: 750;
 }
 
+.focusLensActionBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 10px 20px;
+  border-bottom: 1px solid #d8e0dc;
+  background: #f8faf9;
+}
+
+.focusLensActionBar button {
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid #c8d4cf;
+  border-radius: 5px;
+  background: #fff;
+  color: #40534c;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.focusLensActionBar button:hover,
+.focusLensActionBar button.is-active {
+  border-color: #5f897b;
+  background: #eaf2ef;
+  color: #174d41;
+}
+
 .focusLensFields {
   display: grid;
 }
@@ -1666,9 +1727,98 @@ button.chainAddBtn.active {
   border-left: 4px solid #2f7661;
 }
 
-.focusLensField--next {
+.focusLensNextWork {
+  display: grid;
+  gap: 10px;
+  padding: 17px 20px 18px;
+  border-top: 1px solid #d8e0dc;
   border-left: 4px solid #967a30;
   background: #fffcf2;
+}
+
+.focusLensNextWork header,
+.focusLensNextActions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.focusLensNextWork h3,
+.focusLensNextWork p {
+  margin: 0;
+}
+
+.focusLensNextWork h3 {
+  color: #4f4425;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.focusLensNextWork p {
+  margin-top: 3px;
+  color: #756b4d;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.focusLensNextWork header > span {
+  flex: 0 0 auto;
+  color: #8b7940;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.focusLensNextIdeaInput {
+  width: 100%;
+  min-height: 92px;
+  resize: vertical;
+  padding: 11px 12px;
+  border: 1px solid #cdbf91;
+  border-radius: 6px;
+  outline: none;
+  background: #fff;
+  color: #332f23;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.focusLensNextIdeaInput:focus {
+  border-color: #8b7432;
+  box-shadow: 0 0 0 3px rgba(150, 122, 48, 0.13);
+}
+
+.focusLensNextActions {
+  align-items: center;
+}
+
+.focusLensNextActions > span {
+  color: #80765d;
+  font-size: 10px;
+}
+
+.focusLensNextActions button {
+  min-height: 34px;
+  padding: 7px 13px;
+  border: 1px solid #765f25;
+  border-radius: 6px;
+  background: #806a2d;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.focusLensNextActions button:hover {
+  background: #68541f;
+}
+
+.focusLensNextActions button:disabled {
+  cursor: wait;
+  opacity: 0.62;
 }
 
 .focusLensDetails {
@@ -1787,6 +1937,24 @@ button.chainAddBtn.active {
 
   .focusLensDetails > summary span {
     display: none;
+  }
+
+  .focusLensActionBar {
+    padding-inline: 14px;
+  }
+
+  .focusLensNextWork {
+    padding-inline: 14px;
+  }
+
+  .focusLensNextWork header,
+  .focusLensNextActions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .focusLensNextActions button {
+    width: 100%;
   }
 }
 
@@ -4880,10 +5048,6 @@ button.chainAddBtn.active {
   order: 1;
 }
 
-.nodeActions [data-action="open-focus-lens"] {
-  order: 2;
-}
-
 .nodeActions [data-action="toggle-neighbor-guides"],
 .nodeActions [data-action="edit-subtree"] {
   order: 3;
@@ -4915,13 +5079,6 @@ button.chainAddBtn.active {
 
 .nodeActions [data-action="add-node"] {
   order: 10;
-}
-
-.nodeActions [data-action="open-focus-lens"] {
-  border-color: #9db9ae;
-  background: #f2f8f5;
-  color: #246452;
-  font-size: 15px;
 }
 
 .nodeActions button {

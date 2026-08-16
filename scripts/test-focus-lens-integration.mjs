@@ -37,21 +37,68 @@ async function zoomWithoutOpeningLens(page, nodeId) {
 }
 
 async function verifyViewport(page, screenshotName, nodeId, { automaticZoom = true } = {}) {
+  let resolveCodexRequest;
+  let savedMarkdown = "";
+  const codexRequest = new Promise((resolve) => { resolveCodexRequest = resolve; });
+  await page.route("**/api/tree**", async (route) => {
+    if (route.request().method() === "PUT") {
+      savedMarkdown = route.request().postDataJSON()?.markdown || savedMarkdown;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
+      return;
+    }
+    if (route.request().method() === "GET" && savedMarkdown && new URL(route.request().url()).pathname === "/api/tree") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ markdown: savedMarkdown }) });
+      return;
+    }
+    await route.continue();
+  });
+  await page.route("**/api/codex/run", async (route) => {
+    resolveCodexRequest(route.request().postDataJSON());
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, resumed: true }) });
+  });
+  await page.route("**/api/versions**", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ versions: [] }) });
+  });
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelectorAll(".graphNode").length > 0);
   await closeOverview(page);
   if (automaticZoom) await zoomWithoutOpeningLens(page, nodeId);
-  const openButton = page.locator(`.graphNode[data-node-id='${nodeId}'] [data-action='open-focus-lens']`);
-  assert.equal(await openButton.count(), 1, `missing explicit lens button for ${nodeId}`);
-  await openButton.dispatchEvent("click");
+  const openButton = page.locator("#focusLensOpenBtn");
+  assert.equal(await openButton.count(), 1, "the focus lens must have one top-level entry");
+  assert.equal(await page.locator(".graphNode [data-action='open-focus-lens']").count(), 0, "node cards must not repeat the lens entry");
+  await page.locator(`.graphNode[data-node-id='${nodeId}'] [data-action='set-next']`).dispatchEvent("click");
+  await openButton.click();
 
   const lens = page.locator("#focusLens");
   assert.equal(await lens.isVisible(), true);
+  assert.equal(await openButton.getAttribute("aria-pressed"), "true");
   assert.equal(await page.locator(".focusLensNodeId").innerText(), nodeId);
   const text = await page.locator(".focusLensCenter").innerText();
   assert.match(text, /解决什么问题/);
   assert.match(text, /思路怎么做/);
   assert.match(text, /结果如何/);
+  assert.equal(await page.locator("#openInCodexBtn").isVisible(), true, "top-level Codex action must remain available");
+  assert.equal(await page.locator(".chainDock").isVisible(), true, "execution chain must remain available");
+  await page.locator(".graphViewBtn[data-graph-view='flow']").click();
+  assert.equal(await lens.isVisible(), false, "focus lens must yield to the execution flow view");
+  assert.equal(await page.locator("#flowViewHost").isVisible(), true);
+  await page.locator(".graphViewBtn[data-graph-view='tree']").click();
+  assert.equal(await lens.isVisible(), true, "returning to the relation graph must restore the lens");
+  const nextIdea = page.locator(".focusLensNextIdeaInput");
+  assert.equal(await nextIdea.count(), 1, "focus lens must expose the Agent NextIdea editor");
+  const marker = `焦点透镜验收-${nodeId}`;
+  await nextIdea.fill(marker);
+  await page.locator("[data-focus-lens-action='set-next']").click();
+  assert.equal(await page.locator("[data-focus-lens-action='set-next']").getAttribute("aria-pressed"), "true");
+  assert.equal(await page.locator(".focusLensNextIdeaInput").inputValue(), marker);
+
+  const chainButton = page.locator("[data-focus-lens-action='toggle-chain']");
+  const wasInChain = await chainButton.getAttribute("aria-pressed") === "true";
+  await chainButton.click();
+  assert.equal(await page.locator("[data-focus-lens-action='toggle-chain']").getAttribute("aria-pressed"), String(!wasInChain));
+  assert.equal(await page.locator(`.chainCard[data-chain-id='${nodeId}']`).count(), wasInChain ? 0 : 1);
+
+  assert.equal(await page.locator(".focusLensNextIdeaInput").inputValue(), marker);
   const details = page.locator(".focusLensDetails");
   assert.equal(await details.isVisible(), true);
   await details.locator("summary").click();
@@ -68,6 +115,7 @@ async function verifyViewport(page, screenshotName, nodeId, { automaticZoom = tr
   await page.screenshot({ path: path.join(outputDir, screenshotName) });
   await page.locator("#focusLensClose").click();
   assert.equal(await lens.isVisible(), false);
+  assert.equal(await openButton.getAttribute("aria-pressed"), "false");
   assert.equal(await page.locator(`.graphNode.selected[data-node-id='${finalId}']`).count(), 1);
 
   const centered = await page.evaluate((id) => {
@@ -79,6 +127,12 @@ async function verifyViewport(page, screenshotName, nodeId, { automaticZoom = tr
   }, finalId);
   assert(centered.dx < 3 && centered.dy < 3, JSON.stringify(centered));
   assert.equal(await page.locator(".graphViewport").evaluate((element) => element.scrollWidth >= element.clientWidth), true);
+
+  await openButton.click();
+  await page.locator(".focusLensNextIdeaInput").fill(`发送验收-${finalId}`);
+  await page.locator("[data-focus-lens-action='set-next']").click();
+  await page.locator("[data-focus-lens-action='run-agent']").click();
+  assert.deepEqual(await codexRequest, { preset: "next" }, "lens run must use the saved Next node preset");
 }
 
 const browser = await chromium.launch({ headless: true, executablePath: browserExecutable });
@@ -97,7 +151,7 @@ try {
   await verifyViewport(mobile, "focus-lens-mobile.png", "N11", { automaticZoom: false });
   assert.equal(await mobile.locator(".focusLensBody").evaluate((element) => element.scrollWidth <= element.clientWidth), true);
 
-  console.log("PASS wheel keeps zooming, explicit lens entry exposes full details, and close returns to the centered node");
+  console.log("PASS wheel keeps zooming, the single top-level lens entry exposes full details, and close returns to the centered node");
 } finally {
   await browser.close();
 }

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { mkdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
@@ -39,7 +41,10 @@ async function closeOverview() {
 
 try {
   await page.addInitScript(() => localStorage.clear());
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  // The app can keep maintenance requests open. Prefer network-idle, then fall back to the
+  // product's deterministic readiness signal so one long poll cannot block media generation.
+  await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => undefined);
   await page.waitForFunction(() => document.querySelectorAll(".graphNode").length > 0);
   await closeOverview();
   await page.locator("#fitViewBtn").click();
@@ -95,5 +100,37 @@ const finalVideo = path.join(outputDir, "readme-demo.webm");
 await rm(finalVideo, { force: true });
 await rename(recordedPath, finalVideo);
 await rm(videoDir, { recursive: true, force: true });
+
+const localAppData = process.env.LOCALAPPDATA || "";
+const ffmpegCandidates = [
+  process.env.FFMPEG_EXECUTABLE,
+  localAppData && path.join(
+    localAppData,
+    "Programs",
+    "Python",
+    "Python311",
+    "Lib",
+    "site-packages",
+    "imageio_ffmpeg",
+    "binaries",
+    "ffmpeg-win-x86_64-v7.1.exe"
+  ),
+  "ffmpeg"
+].filter(Boolean);
+const ffmpegExecutable = ffmpegCandidates.find((candidate) => candidate === "ffmpeg" || existsSync(candidate));
+assert(ffmpegExecutable, "ffmpeg is required to build the browser-playable MP4; set FFMPEG_EXECUTABLE");
+const mp4Path = path.join(outputDir, "readme-demo.mp4");
+const transcode = spawnSync(ffmpegExecutable, [
+  "-y",
+  "-i", finalVideo,
+  "-an",
+  "-c:v", "libx264",
+  "-preset", "medium",
+  "-crf", "25",
+  "-pix_fmt", "yuv420p",
+  "-movflags", "+faststart",
+  mp4Path
+], { stdio: "inherit" });
+assert.equal(transcode.status, 0, `ffmpeg failed with status ${transcode.status}`);
 
 console.log(`Captured README media from ${baseUrl}`);

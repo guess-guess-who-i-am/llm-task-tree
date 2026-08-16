@@ -2,7 +2,7 @@
   "schema": "flow-step/v1",
   "nodeId": "N3",
   "blockId": "",
-  "updatedAt": "2026-08-13T04:02:18.273Z",
+  "updatedAt": "2026-08-16T06:30:32.1771243Z",
   "title": "让 Codex 同步维护任务图",
   "reportZh": "report.zh.md",
   "substeps": [
@@ -55,6 +55,22 @@
         }
       ],
       "result": "两个执行范围分别绑定不同节点；越权写返回拒绝；并发写不同节点均保留。完整 MCP、协调器、多树、插件与安装测试通过，本机和 huangyu 全局 Prompt 已发布。"
+    },
+    {
+      "title": "统一本机与远程发布验收",
+      "functions": [
+        { "path": "scripts/audit-deployment-sync.mjs", "name": "本机/远程运行时与平台版本审计" },
+        { "path": "scripts/test-knowledge-sidebar-scroll.mjs", "name": "知识库侧栏真实滚轮回归" }
+      ],
+      "inputs": [
+        { "path": "marketplace/plugins/task-tree/.codex-plugin/plugin.json", "name": "Codex cachebuster 清单" },
+        { "path": "huangyu:/data/fqd/llm-task-tree-kit", "name": "远程 Linux 共享 kit" }
+      ],
+      "outputs": [
+        { "path": "scripts/audit-deployment-sync.mjs", "name": "20/20 发布链一致性通过" },
+        { "path": "llm-task-tree-kit/backups/deploy-20260816-1417-before-cachebuster.tar.gz", "name": "远程更新前备份" }
+      ],
+      "result": "本机 32 个有效项目、Codex 两处缓存、Cursor/Claude/Trae 分发、huangyu kit 与远程插件版本均一致；20/20 审计通过，侧栏滚动回归连续 3 次通过。"
     }
   ]
 }

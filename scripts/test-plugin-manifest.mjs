@@ -77,7 +77,11 @@ function checkPlugin(pluginRoot, entryName) {
   const manifest = readJson(manifestFile);
 
   assert.equal(manifest.name, entryName, "plugin.json name must match the marketplace entry name");
-  assert.match(String(manifest.version || ""), /^\d+\.\d+\.\d+$/, "version must be semver-ish");
+  assert.match(
+    String(manifest.version || ""),
+    /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
+    "version must be semver-ish"
+  );
   assert.ok(String(manifest.description || "").length > 10, "description is too short to be useful");
   assert.ok(manifest.license, "license is missing");
   assert.ok(manifest.author?.name, "author.name is missing");

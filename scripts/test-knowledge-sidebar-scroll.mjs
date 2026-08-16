@@ -24,8 +24,14 @@ try {
 
   const box = await body.boundingBox();
   assert(box, "knowledge sidebar body is not visible");
-  await page.mouse.move(box.x + box.width / 2, box.y + Math.min(80, box.height / 2));
+  const wheelPoint = { x: box.x + box.width - 12, y: box.y + box.height / 2 };
+  const wheelTarget = await page.evaluate(({ x, y }) => {
+    const element = document.elementFromPoint(x, y);
+    return element ? `${element.tagName.toLowerCase()}${element.id ? `#${element.id}` : ""}.${element.className || ""}` : "none";
+  }, wheelPoint);
+  await page.mouse.move(wheelPoint.x, wheelPoint.y);
   await page.mouse.wheel(0, 1600);
+  await page.waitForTimeout(150);
 
   const after = await body.evaluate((element) => ({
     clientHeight: element.clientHeight,
@@ -33,7 +39,7 @@ try {
     scrollTop: element.scrollTop,
     overflowY: getComputedStyle(element).overflowY
   }));
-  assert(after.scrollTop > 0, `knowledge sidebar did not scroll: ${JSON.stringify({ before, after })}`);
+  assert(after.scrollTop > 0, `knowledge sidebar did not scroll over ${wheelTarget}: ${JSON.stringify({ before, after })}`);
 
   await body.evaluate((element) => { element.scrollTop = element.scrollHeight; });
   const bottomGap = await body.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop);

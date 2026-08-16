@@ -134,10 +134,10 @@
 - Metrics:
 - Notes: 内置 coordinator 自动注入范围；手动并行会话先用 task_tree_scope 创建范围并传 scopeId。
 - CodeLoc:
-- CurrentResult: 已验证多 Agent 不再共用全局 Next 作为执行目标：范围分别返回分配节点，越权写被拒绝，并发写 N1/N2 后两项结果均保留。协议、插件 kit、本机和 huangyu 全局 Prompt 已同步；仍缺用户真实手动多会话试用，因此根本目标尚不能宣称完全达到。
-- RootCauseAnalysis: 当前 Codex 的延迟工具桥把 MCP 结果重建为文本和图片，丢失用于挂载界面的元数据；旧测试只验证原始 JSON-RPC，未覆盖用户实际看到的宿主链路。
+- CurrentResult: 已将发布链统一为可审计版本：本机 32 个有效项目、Codex 两处缓存、Cursor/Claude/Trae 分发与 huangyu 共享 kit 均通过 20/20 一致性检查；侧栏滚动回归连续 3 次通过。仍缺用户真实多平台手动试用，N3 根本目标不能宣称完全达到。
+- RootCauseAnalysis: 源码、共享 kit、平台缓存、远程 kit 与运行进程此前没有统一验收；插件版本未变时宿主会复用旧缓存，导致代码已改但实际平台仍旧。
 - CaseStudy:
-- NextIdea: 在远程 Linux 与另一个本机项目调用 task_tree_open，确认共享 kit 更新后同样直接打开且不闪终端。
+- NextIdea: 用户在本机 5410 与远程 5633 各手动打开任务图，确认新缓存和共享 kit 的页面体验。
 - SelectedSkills:
 - Folded: true
 - SubtreeFile: subtrees/N3-subtree.md

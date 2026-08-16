@@ -132,9 +132,15 @@ await cp(path.join(repoRoot, "integrations"), path.join(outDir, "integrations"),
 await mkdir(path.join(outDir, "artifacts"), { recursive: true });
 for (const name of [
   "focus-lens-desktop.png",
+  "readme-demo-cover.png",
+  "readme-demo.webm",
+  "readme-flow-wide.png",
+  "readme-focus-wide.png",
   "readme-hero.png",
-  "task-tree-semantic-zoom-macro.png",
-  "task-tree-core-summary-detail.png"
+  "readme-overview-wide.png",
+  "readme-tree-wide.png",
+  "task-tree-core-summary-detail.png",
+  "task-tree-semantic-zoom-macro.png"
 ]) {
   await cp(path.join(repoRoot, "artifacts", name), path.join(outDir, "artifacts", name));
 }
@@ -147,6 +153,11 @@ await mkdir(path.join(outDir, "docs"), { recursive: true });
 await cp(
   path.join(repoRoot, "docs", "share-with-others.zh.md"),
   path.join(outDir, "docs", "share-with-others.zh.md")
+);
+await mkdir(path.join(outDir, "docs", "readme-design"), { recursive: true });
+await cp(
+  path.join(repoRoot, "docs", "readme-design", "apple-reference-style.md"),
+  path.join(outDir, "docs", "readme-design", "apple-reference-style.md")
 );
 await cp(path.join(kitDir, "LICENSE"), path.join(outDir, "LICENSE"));
 await cp(path.join(repoRoot, "README.md"), path.join(outDir, "README.md"));

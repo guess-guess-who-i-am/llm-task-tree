@@ -247,7 +247,7 @@
 - Metrics:
 - Notes:
 - CodeLoc:
-- CurrentResult: 供各种人使用的公开入口已具备：仓库已公开并改名为 llm-task-tree，已配置英文简介、12 个 topics、Issues、Discussions，并发布 v0.8.0 Release 与首个双语公告；README 和安装包可匿名访问。脱敏包含 234 个文件、4.22 MiB，未发现本机路径或凭据泄漏；当前下载数为 0，尚无真实流量、Star 或外部市场收录数据，因此“让更多人知道”尚不能宣称达到。
+- CurrentResult: 供各种人使用的公开入口已具备：仓库已公开并改名为 llm-task-tree，已配置英文简介、12 个 topics、Issues、Discussions，并发布 v0.8.0 Release 与首个双语公告；README 和安装包可匿名访问。脱敏包含 234 个文件、4.22 MiB，未发现本机路径或凭据泄漏；尚无可归因于真实用户的流量、Star 或外部市场收录数据，因此“让更多人知道”尚不能宣称达到。
 - RootCauseAnalysis: 此前不适合公开传播，是因为仓库名强调备份、安装入口仍指向旧名，完整工作区又混有环境证据；现以简洁仓库名、脱敏 Release 包和 GitHub 元数据建立产品入口。公开只解决可发现性的基础条件，不等于已有传播效果。
 - CaseStudy:
 - NextIdea:

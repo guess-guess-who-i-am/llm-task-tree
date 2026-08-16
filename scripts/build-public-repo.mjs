@@ -133,6 +133,7 @@ await mkdir(path.join(outDir, "artifacts"), { recursive: true });
 for (const name of [
   "focus-lens-desktop.png",
   "readme-demo-cover.png",
+  "readme-demo.mp4",
   "readme-demo.webm",
   "readme-flow-wide.png",
   "readme-focus-wide.png",

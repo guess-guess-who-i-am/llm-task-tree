@@ -2,7 +2,7 @@
   "schema": "flow-step/v1",
   "nodeId": "N12",
   "blockId": "",
-  "updatedAt": "2026-08-16T07:55:49.779Z",
+  "updatedAt": "2026-08-16T07:22:02.746Z",
   "title": "公开仓库、README 视觉与插件分发",
   "reportZh": "report.zh.md",
   "substeps": [
@@ -116,9 +116,6 @@
         },
         {
           "path": "artifacts/readme-hero.png"
-        },
-        {
-          "path": "artifacts/readme-demo.mp4"
         },
         {
           "path": "artifacts/readme-demo.webm"

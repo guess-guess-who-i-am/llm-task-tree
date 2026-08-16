@@ -17,7 +17,7 @@
 不用重读几十轮对话。先看项目为什么存在、已经走到哪里、现在卡在哪里；再沿主干进入真正需要判断的节点。
 
 <div align="center">
-  <a href="artifacts/readme-demo.webm">
+  <a href="https://raw.githubusercontent.com/guess-guess-who-i-am/llm-task-tree/main/artifacts/readme-demo.mp4">
     <img src="artifacts/readme-demo-cover.png" alt="播放 LLM Task Tree 真实操作演示" />
   </a>
   <br />

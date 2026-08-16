@@ -5,6 +5,7 @@
 - 仓库已公开并改名为 `llm-task-tree`，正式安装入口均已切换到新地址。
 - README Hero 按用户反馈改为三张完整 16:10 横屏截图并排，保留界面的真实空间关系。
 - GitHub 已配置英文简介、12 个 topics、Issues、Discussions，并发布首个 `v0.8.0` Release。
+- Discussions 已发布首个中英双语公告，邀请早期用户反馈安装、总览可读性和中断恢复体验。
 - Release 提供脱敏安装包 `llm-task-tree-v0.8.0.zip`；README 与资产已通过匿名访问验证。
 
 ## 验证
@@ -13,6 +14,7 @@
 - 已发布提交对应的插件 manifest 与真实 MCP 包启动测试通过；当前工作区另有两处并发运行时源码改动尚未同步到插件包，本轮未将其混入公开提交。
 - 公开包：234 个文件、4.22 MiB；本机路径与疑似凭据均为 0。
 - Release 安装包：2909112 bytes，已公开且非草稿；当前下载数为 0，尚无真实传播效果数据。
+- API 推送器改为上传 Git HEAD 的原始 blob，避免 Windows 工作区换行转换导致远端持续假漂移。
 - `git diff --check` 通过。
 
 ## 当前工作区边界
@@ -30,3 +32,4 @@
 - `dist/task-tree-public/README.md`
 - https://github.com/guess-guess-who-i-am/llm-task-tree
 - https://github.com/guess-guess-who-i-am/llm-task-tree/releases/tag/v0.8.0
+- https://github.com/guess-guess-who-i-am/llm-task-tree/discussions/1

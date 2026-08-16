@@ -11,7 +11,6 @@
  * usage: node scripts/push-public-repo.mjs [--source <git-dir>] [--repo owner/name] [--branch main] [--dry-run]
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,6 +28,12 @@ const dryRun = process.argv.includes("--dry-run");
 function git(args) {
   const result = spawnSync("git", args, { cwd: repoDir, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   if (result.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
+  return result.stdout;
+}
+
+function gitBytes(args) {
+  const result = spawnSync("git", args, { cwd: repoDir, maxBuffer: 64 * 1024 * 1024 });
+  if (result.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr?.toString("utf8") || ""}`);
   return result.stdout;
 }
 
@@ -94,9 +99,10 @@ function main() {
 
   const tree = [];
   for (const [file, entry] of changed) {
-    // Base64 keeps binaries (the plugin artwork) intact; text survives it unchanged.
+    // Upload the exact object compared above. Reading the Windows worktree here would upload CRLF
+    // bytes while localTree() compares the normalized LF blob, causing permanent false drift.
     const blob = api(`repos/${repo}/git/blobs`, {
-      content: readFileSync(path.join(repoDir, file)).toString("base64"),
+      content: gitBytes(["cat-file", "blob", entry.sha]).toString("base64"),
       encoding: "base64"
     });
     tree.push({ path: file, mode: entry.mode, type: "blob", sha: blob.sha });

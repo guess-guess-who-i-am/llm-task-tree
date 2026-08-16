@@ -205,6 +205,39 @@ h1 {
   color: var(--accent);
 }
 
+.toolbar .focusLensToolbarBtn {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: auto;
+  min-width: 76px;
+  padding: 0 12px;
+  color: #246452;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.toolbar .focusLensToolbarBtn:hover,
+.toolbar .focusLensToolbarBtn.is-active {
+  border-color: #7aa596;
+  background: #e8f3ef;
+  color: #155746;
+}
+
+@media (max-width: 1120px) {
+  .toolbar .focusLensToolbarBtn {
+    width: 38px;
+    min-width: 38px;
+    padding: 0;
+  }
+
+  .focusLensToolbarLabel {
+    display: none;
+  }
+}
+
 .layout {
   flex: 1;
   min-height: 0;
@@ -5015,10 +5048,6 @@ button.chainAddBtn.active {
   order: 1;
 }
 
-.nodeActions [data-action="open-focus-lens"] {
-  order: 2;
-}
-
 .nodeActions [data-action="toggle-neighbor-guides"],
 .nodeActions [data-action="edit-subtree"] {
   order: 3;
@@ -5050,13 +5079,6 @@ button.chainAddBtn.active {
 
 .nodeActions [data-action="add-node"] {
   order: 10;
-}
-
-.nodeActions [data-action="open-focus-lens"] {
-  border-color: #9db9ae;
-  background: #f2f8f5;
-  color: #246452;
-  font-size: 15px;
 }
 
 .nodeActions button {

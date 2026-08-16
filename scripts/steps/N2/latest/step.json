@@ -54,10 +54,11 @@
       "outputs": [{ "path": "task-tree.md", "line": 58 }]
     },
     {
-      "title": "焦点透镜保持完整工作台能力",
+      "title": "焦点透镜保持完整工作台能力并使用顶部单一入口",
       "functions": [
         { "path": "public/app.js", "name": "renderFocusLens" },
         { "path": "public/app.js", "name": "runFocusLensNode" },
+        { "path": "public/app.js", "name": "syncFocusLensToolbarButton" },
         { "path": "public/app.js", "name": "setGraphView" }
       ],
       "inputs": [

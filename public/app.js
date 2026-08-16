@@ -246,6 +246,7 @@ const els = {
   edgeDimOpacityInput: document.querySelector("#edgeDimOpacity"),
   nodeCardCompactBtn: document.querySelector("#nodeCardCompactBtn"),
   projectOverviewBtn: document.querySelector("#projectOverviewBtn"),
+  focusLensOpenBtn: document.querySelector("#focusLensOpenBtn"),
   projectOverviewDialog: document.querySelector("#projectOverviewDialog"),
   projectOverviewClose: document.querySelector("#projectOverviewClose"),
   projectOverviewTitle: document.querySelector("#projectOverviewTitle"),
@@ -678,6 +679,7 @@ function renderTree() {
   renderNeighborGuides();
   renderChainDock();
   renderWorkspaceBanner();
+  syncFocusLensToolbarButton();
 
   rerenderEdges();
   if (focusLensOpen) renderFocusLens();
@@ -747,6 +749,19 @@ function renderFocusLensDetail(label, value) {
     <h4>${escapeHtml(label)}</h4>
     <p>${focusLensFullText(value)}</p>
   </section>`;
+}
+
+function syncFocusLensToolbarButton() {
+  if (!els.focusLensOpenBtn) return;
+  const visible = focusLensOpen && !els.focusLens?.hidden;
+  const targetId = focusLensId || selectedId || nextFocusId || currentFocusId || "ROOT";
+  const target = nodes.find((node) => node.id === targetId);
+  els.focusLensOpenBtn.classList.toggle("is-active", visible);
+  els.focusLensOpenBtn.setAttribute("aria-pressed", String(visible));
+  els.focusLensOpenBtn.disabled = nodes.length === 0;
+  els.focusLensOpenBtn.title = visible
+    ? "关闭焦点透镜并定位到当前节点"
+    : `对${target?.title || targetId || "当前节点"}打开焦点透镜`;
 }
 
 function focusLensRelations(nodeId) {
@@ -878,6 +893,7 @@ function openFocusLens(nodeId) {
   els.graphPane?.classList.add("has-focus-lens");
   renderFocusLens();
   renderTree();
+  syncFocusLensToolbarButton();
 }
 
 function closeFocusLens({ locate = true } = {}) {
@@ -886,6 +902,7 @@ function closeFocusLens({ locate = true } = {}) {
   focusLensId = "";
   if (els.focusLens) els.focusLens.hidden = true;
   els.graphPane?.classList.remove("has-focus-lens");
+  syncFocusLensToolbarButton();
   if (locate && nodeId && nodes.some((node) => node.id === nodeId)) focusNodeInView(nodeId);
 }
 
@@ -2160,10 +2177,6 @@ function chainAddButton(node) {
   return `<button type="button" data-action="add-to-chain" class="chainAddBtn${inChain ? " active" : ""}" title="加入底部执行链">⊕</button>`;
 }
 
-function focusLensButton(node) {
-  return `<button type="button" data-action="open-focus-lens" class="focusLensOpenBtn" title="在焦点透镜中查看上下游和完整详情" aria-label="打开${attr(node.title || node.id)}的焦点透镜">◎</button>`;
-}
-
 function coreNodeSummary(node, { compact = true } = {}) {
   const fields = [
     { label: "问题", value: node.problem, maxChars: compact ? 150 : null },
@@ -2208,7 +2221,6 @@ function renderNodeCard(node) {
         </span>
         <span class="nodeActions">
           ${foldBtn}
-          ${focusLensButton(node)}
           <button type="button" data-action="edit-subtree" class="subtreeEditBtn" title="在子树工作区编辑（不展开）">✎</button>
           ${readDoneButton(node)}
           <button type="button" data-action="toggle-complete" class="completeBtn" title="完成 / 取消完成">✓</button>
@@ -2243,7 +2255,6 @@ function renderNodeCard(node) {
           </span>
           <span class="nodeActions">
             ${foldBtn}
-            ${focusLensButton(node)}
             <button type="button" data-action="toggle-neighbor-guides" class="neighborGuideBtn${neighborGuideVisibleIds.has(node.id) ? " active" : ""}" title="显示/隐藏邻居跳转方向">↗</button>
             ${readDoneButton(node)}
             <button type="button" data-action="toggle-complete" class="completeBtn" title="完成 / 取消完成">✓</button>
@@ -2271,7 +2282,6 @@ function renderNodeCard(node) {
         </span>
         <span class="nodeActions">
           ${foldBtn}
-          ${focusLensButton(node)}
           <button type="button" data-action="toggle-neighbor-guides" class="neighborGuideBtn${neighborGuideVisibleIds.has(node.id) ? " active" : ""}" title="显示/隐藏邻居跳转方向">↗</button>
           ${readDoneButton(node)}
           <button type="button" data-action="toggle-complete" class="completeBtn" title="完成 / 取消完成">✓</button>
@@ -2303,7 +2313,6 @@ function renderNodeCard(node) {
       </span>
       <span class="nodeActions">
         ${foldBtn}
-        ${focusLensButton(node)}
         <button type="button" data-action="toggle-neighbor-guides" class="neighborGuideBtn${neighborGuideVisibleIds.has(node.id) ? " active" : ""}" title="显示/隐藏邻居跳转方向">↗</button>
         ${readDoneButton(node)}
         <button type="button" data-action="toggle-complete" class="completeBtn" title="完成 / 取消完成">✓</button>
@@ -3116,11 +3125,6 @@ function wireNodeCard(nodeCard, nodeId) {
   nodeCard.querySelector("[data-action='add-node']").addEventListener("click", (event) => {
     event.stopPropagation();
     addNodeNear(nodeId);
-  });
-
-  nodeCard.querySelector("[data-action='open-focus-lens']")?.addEventListener("click", (event) => {
-    event.stopPropagation();
-    openFocusLens(nodeId);
   });
 
   nodeCard.querySelector("[data-action='model-panel']")?.addEventListener("click", (event) => {
@@ -5838,6 +5842,15 @@ function attr(value) {
 els.addChildBtn.addEventListener("click", () => addNodeNear());
 els.nodeCardCompactBtn?.addEventListener("click", () => toggleNodeCardCompact());
 els.projectOverviewBtn?.addEventListener("click", () => openProjectOverview());
+els.focusLensOpenBtn?.addEventListener("click", () => {
+  if (focusLensOpen && !els.focusLens?.hidden) {
+    closeFocusLens({ locate: true });
+    return;
+  }
+  const targetId = focusLensId || selectedId || nextFocusId || currentFocusId || "ROOT";
+  setGraphView("tree");
+  openFocusLens(targetId);
+});
 els.projectOverviewClose?.addEventListener("click", () => els.projectOverviewDialog?.close());
 els.projectOverviewDialog?.addEventListener("click", (event) => {
   if (event.target === els.projectOverviewDialog) els.projectOverviewDialog.close();
@@ -6531,6 +6544,7 @@ function setGraphView(view) {
   }
   if (els.focusLens) els.focusLens.hidden = view !== "tree" || !focusLensOpen;
   if (view === "tree" && focusLensOpen) renderFocusLens();
+  syncFocusLensToolbarButton();
 }
 
 document.querySelectorAll(".graphViewBtn").forEach((btn) => {

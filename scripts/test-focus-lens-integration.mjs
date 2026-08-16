@@ -63,12 +63,15 @@ async function verifyViewport(page, screenshotName, nodeId, { automaticZoom = tr
   await page.waitForFunction(() => document.querySelectorAll(".graphNode").length > 0);
   await closeOverview(page);
   if (automaticZoom) await zoomWithoutOpeningLens(page, nodeId);
-  const openButton = page.locator(`.graphNode[data-node-id='${nodeId}'] [data-action='open-focus-lens']`);
-  assert.equal(await openButton.count(), 1, `missing explicit lens button for ${nodeId}`);
-  await openButton.dispatchEvent("click");
+  const openButton = page.locator("#focusLensOpenBtn");
+  assert.equal(await openButton.count(), 1, "the focus lens must have one top-level entry");
+  assert.equal(await page.locator(".graphNode [data-action='open-focus-lens']").count(), 0, "node cards must not repeat the lens entry");
+  await page.locator(`.graphNode[data-node-id='${nodeId}'] [data-action='set-next']`).dispatchEvent("click");
+  await openButton.click();
 
   const lens = page.locator("#focusLens");
   assert.equal(await lens.isVisible(), true);
+  assert.equal(await openButton.getAttribute("aria-pressed"), "true");
   assert.equal(await page.locator(".focusLensNodeId").innerText(), nodeId);
   const text = await page.locator(".focusLensCenter").innerText();
   assert.match(text, /解决什么问题/);
@@ -112,6 +115,7 @@ async function verifyViewport(page, screenshotName, nodeId, { automaticZoom = tr
   await page.screenshot({ path: path.join(outputDir, screenshotName) });
   await page.locator("#focusLensClose").click();
   assert.equal(await lens.isVisible(), false);
+  assert.equal(await openButton.getAttribute("aria-pressed"), "false");
   assert.equal(await page.locator(`.graphNode.selected[data-node-id='${finalId}']`).count(), 1);
 
   const centered = await page.evaluate((id) => {
@@ -124,7 +128,7 @@ async function verifyViewport(page, screenshotName, nodeId, { automaticZoom = tr
   assert(centered.dx < 3 && centered.dy < 3, JSON.stringify(centered));
   assert.equal(await page.locator(".graphViewport").evaluate((element) => element.scrollWidth >= element.clientWidth), true);
 
-  await page.locator(`.graphNode[data-node-id='${finalId}'] [data-action='open-focus-lens']`).dispatchEvent("click");
+  await openButton.click();
   await page.locator(".focusLensNextIdeaInput").fill(`发送验收-${finalId}`);
   await page.locator("[data-focus-lens-action='set-next']").click();
   await page.locator("[data-focus-lens-action='run-agent']").click();
@@ -147,7 +151,7 @@ try {
   await verifyViewport(mobile, "focus-lens-mobile.png", "N11", { automaticZoom: false });
   assert.equal(await mobile.locator(".focusLensBody").evaluate((element) => element.scrollWidth <= element.clientWidth), true);
 
-  console.log("PASS wheel keeps zooming, explicit lens entry exposes full details, and close returns to the centered node");
+  console.log("PASS wheel keeps zooming, the single top-level lens entry exposes full details, and close returns to the centered node");
 } finally {
   await browser.close();
 }

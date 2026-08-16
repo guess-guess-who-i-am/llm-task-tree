@@ -37,6 +37,28 @@ async function zoomWithoutOpeningLens(page, nodeId) {
 }
 
 async function verifyViewport(page, screenshotName, nodeId, { automaticZoom = true } = {}) {
+  let resolveCodexRequest;
+  let savedMarkdown = "";
+  const codexRequest = new Promise((resolve) => { resolveCodexRequest = resolve; });
+  await page.route("**/api/tree**", async (route) => {
+    if (route.request().method() === "PUT") {
+      savedMarkdown = route.request().postDataJSON()?.markdown || savedMarkdown;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
+      return;
+    }
+    if (route.request().method() === "GET" && savedMarkdown && new URL(route.request().url()).pathname === "/api/tree") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ markdown: savedMarkdown }) });
+      return;
+    }
+    await route.continue();
+  });
+  await page.route("**/api/codex/run", async (route) => {
+    resolveCodexRequest(route.request().postDataJSON());
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, resumed: true }) });
+  });
+  await page.route("**/api/versions**", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ versions: [] }) });
+  });
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelectorAll(".graphNode").length > 0);
   await closeOverview(page);
@@ -52,6 +74,28 @@ async function verifyViewport(page, screenshotName, nodeId, { automaticZoom = tr
   assert.match(text, /解决什么问题/);
   assert.match(text, /思路怎么做/);
   assert.match(text, /结果如何/);
+  assert.equal(await page.locator("#openInCodexBtn").isVisible(), true, "top-level Codex action must remain available");
+  assert.equal(await page.locator(".chainDock").isVisible(), true, "execution chain must remain available");
+  await page.locator(".graphViewBtn[data-graph-view='flow']").click();
+  assert.equal(await lens.isVisible(), false, "focus lens must yield to the execution flow view");
+  assert.equal(await page.locator("#flowViewHost").isVisible(), true);
+  await page.locator(".graphViewBtn[data-graph-view='tree']").click();
+  assert.equal(await lens.isVisible(), true, "returning to the relation graph must restore the lens");
+  const nextIdea = page.locator(".focusLensNextIdeaInput");
+  assert.equal(await nextIdea.count(), 1, "focus lens must expose the Agent NextIdea editor");
+  const marker = `焦点透镜验收-${nodeId}`;
+  await nextIdea.fill(marker);
+  await page.locator("[data-focus-lens-action='set-next']").click();
+  assert.equal(await page.locator("[data-focus-lens-action='set-next']").getAttribute("aria-pressed"), "true");
+  assert.equal(await page.locator(".focusLensNextIdeaInput").inputValue(), marker);
+
+  const chainButton = page.locator("[data-focus-lens-action='toggle-chain']");
+  const wasInChain = await chainButton.getAttribute("aria-pressed") === "true";
+  await chainButton.click();
+  assert.equal(await page.locator("[data-focus-lens-action='toggle-chain']").getAttribute("aria-pressed"), String(!wasInChain));
+  assert.equal(await page.locator(`.chainCard[data-chain-id='${nodeId}']`).count(), wasInChain ? 0 : 1);
+
+  assert.equal(await page.locator(".focusLensNextIdeaInput").inputValue(), marker);
   const details = page.locator(".focusLensDetails");
   assert.equal(await details.isVisible(), true);
   await details.locator("summary").click();
@@ -79,6 +123,12 @@ async function verifyViewport(page, screenshotName, nodeId, { automaticZoom = tr
   }, finalId);
   assert(centered.dx < 3 && centered.dy < 3, JSON.stringify(centered));
   assert.equal(await page.locator(".graphViewport").evaluate((element) => element.scrollWidth >= element.clientWidth), true);
+
+  await page.locator(`.graphNode[data-node-id='${finalId}'] [data-action='open-focus-lens']`).dispatchEvent("click");
+  await page.locator(".focusLensNextIdeaInput").fill(`发送验收-${finalId}`);
+  await page.locator("[data-focus-lens-action='set-next']").click();
+  await page.locator("[data-focus-lens-action='run-agent']").click();
+  assert.deepEqual(await codexRequest, { preset: "next" }, "lens run must use the saved Next node preset");
 }
 
 const browser = await chromium.launch({ headless: true, executablePath: browserExecutable });

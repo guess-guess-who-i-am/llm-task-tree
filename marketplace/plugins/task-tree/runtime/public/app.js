@@ -680,6 +680,7 @@ function renderTree() {
   renderWorkspaceBanner();
 
   rerenderEdges();
+  if (focusLensOpen) renderFocusLens();
   if (positionsChanged && !dirty && !saveInFlight) markDirty("将补齐节点位置避免图谱重叠");
 }
 
@@ -797,16 +798,39 @@ function renderFocusLens() {
     }).join("");
   }
   const relations = focusLensRelations(node.id);
+  const inChain = parseChainIds(chainText).includes(node.id);
+  const activeMethod = isViewingActiveMethodTree();
   els.focusLensBody.innerHTML = `
     ${renderFocusLensRelation("从哪里来", relations.parents, "before")}
     <article class="focusLensCenter">
       <header class="focusLensCenterHeader">
-        <div>
+        <div class="focusLensCenterIdentity">
           <span class="focusLensNodeId">${escapeHtml(node.id)}</span>
           <h2>${escapeHtml(node.title || "未命名节点")}</h2>
         </div>
         <span class="focusLensStatus">${escapeHtml(node.completion || "未开始")}</span>
       </header>
+      <div class="focusLensActionBar" aria-label="当前节点操作">
+        <button type="button" class="${node.id === currentFocusId ? "is-active" : ""}" data-focus-lens-action="set-current" aria-pressed="${node.id === currentFocusId}">● 设为当前</button>
+        <button type="button" class="${node.id === nextFocusId ? "is-active" : ""}" data-focus-lens-action="set-next" aria-pressed="${node.id === nextFocusId}">◆ 设为下一步</button>
+        ${activeMethod ? `<button type="button" class="${inChain ? "is-active" : ""}" data-focus-lens-action="toggle-chain" aria-pressed="${inChain}">${inChain ? "⊖ 移出执行链" : "⊕ 加入执行链"}</button>` : ""}
+        <button type="button" class="${isNodeComplete(node) ? "is-active" : ""}" data-focus-lens-action="toggle-complete" aria-pressed="${isNodeComplete(node)}">✓ ${isNodeComplete(node) ? "已完成" : "标记完成"}</button>
+        <button type="button" data-focus-lens-action="edit-node">✎ 编辑完整节点</button>
+      </div>
+      <section class="focusLensNextWork">
+        <header>
+          <div>
+            <h3>让 Agent 继续做什么</h3>
+            <p>这里就是这个节点的「下一步思路」，执行链和 Codex 都读取它。</p>
+          </div>
+          <span>NextIdea</span>
+        </header>
+        <textarea class="focusLensNextIdeaInput" data-focus-lens-next-idea="${attr(node.id)}" placeholder="写一句可执行的话，并说明服务的方向和完成判据">${escapeHtml(node.nextIdea || "")}</textarea>
+        ${activeMethod ? `<div class="focusLensNextActions">
+          <span>Ctrl / ⌘ + Enter 也可发送</span>
+          <button type="button" data-focus-lens-action="run-agent">保存并让 Codex 继续</button>
+        </div>` : ""}
+      </section>
       <div class="focusLensFields">
         <section class="focusLensField focusLensField--problem">
           <h3>解决什么问题</h3>
@@ -820,10 +844,6 @@ function renderFocusLens() {
           <h3>结果如何</h3>
           <p>${escapeHtml(focusLensText(node.currentResult, "尚未记录验证结果。"))}</p>
         </section>
-        ${String(node.nextIdea || "").trim() ? `<section class="focusLensField focusLensField--next">
-          <h3>尚待推进</h3>
-          <p>${escapeHtml(focusLensText(node.nextIdea, "", 280))}</p>
-        </section>` : ""}
       </div>
       <details class="focusLensDetails">
         <summary>完整详情 <span>输入 / 输出 / 评价 / 备注 / 根因 / 证据</span></summary>
@@ -2312,6 +2332,72 @@ function isNodeComplete(node) {
   return String(node.completion || "").trim() === "已完成";
 }
 
+function toggleNodeComplete(nodeId) {
+  const node = nodes.find((item) => item.id === nodeId);
+  if (!node) return;
+  node.completion = isNodeComplete(node) ? "" : "已完成";
+  syncReadFingerprintIfMarked(node);
+  markDirty(`${isNodeComplete(node) ? "将标记完成" : "将取消完成"}${nodeTitle(nodeId)}`);
+  renderTree();
+}
+
+function setCurrentNode(nodeId) {
+  if (!nodes.some((node) => node.id === nodeId)) return;
+  currentFocusId = nodeId;
+  selectedId = nodeId;
+  ioPreviewNodeId = nodeId;
+  saveUserGraphStateFocus();
+  markDirty(`将修改当前推进节点为${nodeTitle(nodeId)}`);
+  renderTree();
+}
+
+function setNextNode(nodeId) {
+  if (!nodes.some((node) => node.id === nodeId)) return;
+  nextFocusId = nodeId;
+  selectedId = nodeId;
+  ioPreviewNodeId = nodeId;
+  saveUserGraphStateFocus();
+  markDirty(`将修改下一步推进节点为${nodeTitle(nodeId)}`);
+  renderTree();
+}
+
+function editFullNodeFromLens(nodeId) {
+  if (!nodes.some((node) => node.id === nodeId)) return;
+  editNodeId = nodeId;
+  selectedId = nodeId;
+  ioPreviewNodeId = nodeId;
+  closeFocusLens({ locate: false });
+  renderTree();
+  requestAnimationFrame(() => focusNodeInView(nodeId));
+}
+
+async function runFocusLensNode(nodeId) {
+  const node = nodes.find((item) => item.id === nodeId);
+  if (!node) return;
+  if (!String(node.nextIdea || "").trim()) {
+    setSaveState("先写清楚让 Agent 继续做什么");
+    els.focusLensBody?.querySelector(".focusLensNextIdeaInput")?.focus();
+    return;
+  }
+  if (nextFocusId !== nodeId) setNextNode(nodeId);
+  if (dirty) await saveTree();
+  await runCodex({ preset: "next" });
+}
+
+function handleFocusLensAction(action, nodeId) {
+  if (action === "set-current") setCurrentNode(nodeId);
+  if (action === "set-next") setNextNode(nodeId);
+  if (action === "toggle-complete") toggleNodeComplete(nodeId);
+  if (action === "edit-node") editFullNodeFromLens(nodeId);
+  if (action === "toggle-chain") {
+    if (parseChainIds(chainText).includes(nodeId)) removeNodeFromChain(nodeId);
+    else addNodeToChain(nodeId);
+  }
+  if (action === "run-agent") {
+    runFocusLensNode(nodeId).catch((error) => setSaveState(`Codex 没能启动: ${error.message}`));
+  }
+}
+
 function nextIdeaBox(node) {
   return `
     <span class="nextIdeaBox">
@@ -3103,32 +3189,17 @@ function wireNodeCard(nodeCard, nodeId) {
 
   nodeCard.querySelector("[data-action='toggle-complete']").addEventListener("click", (event) => {
     event.stopPropagation();
-    const node = nodes.find((item) => item.id === nodeId);
-    if (!node) return;
-    node.completion = isNodeComplete(node) ? "" : "已完成";
-    syncReadFingerprintIfMarked(node);
-    markDirty(`${isNodeComplete(node) ? "将标记完成" : "将取消完成"}${nodeTitle(nodeId)}`);
-    renderTree();
+    toggleNodeComplete(nodeId);
   });
 
   nodeCard.querySelector("[data-action='set-current']").addEventListener("click", (event) => {
     event.stopPropagation();
-    currentFocusId = nodeId;
-    selectedId = nodeId;
-    ioPreviewNodeId = nodeId;
-    saveUserGraphStateFocus();
-    markDirty(`将修改当前推进节点为${nodeTitle(nodeId)}`);
-    renderTree();
+    setCurrentNode(nodeId);
   });
 
   nodeCard.querySelector("[data-action='set-next']").addEventListener("click", (event) => {
     event.stopPropagation();
-    nextFocusId = nodeId;
-    selectedId = nodeId;
-    ioPreviewNodeId = nodeId;
-    saveUserGraphStateFocus();
-    markDirty(`将修改下一步推进节点为${nodeTitle(nodeId)}`);
-    renderTree();
+    setNextNode(nodeId);
   });
 
   nodeCard.querySelector("[data-action='add-to-chain']")?.addEventListener("click", (event) => {
@@ -5838,7 +5909,12 @@ function closeCodexThreadMenu() {
 
 async function runCodex(body = {}) {
   closeCodexThreadMenu();
-  const buttons = [els.openInCodexBtn, els.codexThreadsBtn, els.chainRunBtn].filter(Boolean);
+  const buttons = [
+    els.openInCodexBtn,
+    els.codexThreadsBtn,
+    els.chainRunBtn,
+    els.focusLensBody?.querySelector("[data-focus-lens-action='run-agent']")
+  ].filter(Boolean);
   for (const button of buttons) button.disabled = true;
   setSaveState("正在发给 Codex...");
   try {
@@ -6340,15 +6416,35 @@ els.graphViewport.addEventListener("wheel", (event) => {
 
 els.focusLensClose?.addEventListener("click", () => closeFocusLens({ locate: true }));
 els.focusLensBody?.addEventListener("click", (event) => {
+  const action = event.target.closest("[data-focus-lens-action]");
+  if (action) {
+    handleFocusLensAction(action.getAttribute("data-focus-lens-action"), focusLensId);
+    return;
+  }
   const target = event.target.closest("[data-focus-lens-node]");
   if (target) openFocusLens(target.getAttribute("data-focus-lens-node"));
+});
+els.focusLensBody?.addEventListener("input", (event) => {
+  const input = event.target.closest("[data-focus-lens-next-idea]");
+  if (!input) return;
+  const nodeId = input.getAttribute("data-focus-lens-next-idea");
+  const node = nodes.find((item) => item.id === nodeId);
+  if (!node) return;
+  node.nextIdea = input.value.trim();
+  syncReadFingerprintIfMarked(node);
+  markDirty(`将修改${nodeTitle(nodeId)}的下一步思路`);
+});
+els.focusLensBody?.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || (!event.ctrlKey && !event.metaKey) || !event.target.closest("[data-focus-lens-next-idea]")) return;
+  event.preventDefault();
+  runFocusLensNode(focusLensId).catch((error) => setSaveState(`Codex 没能启动: ${error.message}`));
 });
 els.focusLensTrail?.addEventListener("click", (event) => {
   const target = event.target.closest("[data-focus-lens-node]");
   if (target) openFocusLens(target.getAttribute("data-focus-lens-node"));
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && focusLensOpen) closeFocusLens({ locate: true });
+  if (event.key === "Escape" && focusLensOpen && !els.focusLens?.hidden) closeFocusLens({ locate: true });
 });
 
 els.graphViewport.addEventListener("pointerdown", (event) => {
@@ -6408,7 +6504,6 @@ async function ensureFlowView() {
 }
 
 function setGraphView(view) {
-  closeFocusLens({ locate: false });
   if (view === "flow" && !isViewingActiveMethodTree()) {
     setSaveState("执行流程只绑定活动方法树；请先切换到活动方法树");
     view = "tree";
@@ -6434,6 +6529,8 @@ function setGraphView(view) {
       host.classList.remove("is-visible");
     }
   }
+  if (els.focusLens) els.focusLens.hidden = view !== "tree" || !focusLensOpen;
+  if (view === "tree" && focusLensOpen) renderFocusLens();
 }
 
 document.querySelectorAll(".graphViewBtn").forEach((btn) => {

@@ -44,9 +44,9 @@
 - Input:
 - Output:
 - Metrics:
-- Notes: 节点删除按钮与双视图 SVG 尚缺人工验收；仅在用户重新聚焦 N2 时执行。
+- Notes:
 - CodeLoc:
-- CurrentResult: 图编辑、自动保存、版本回退、双视图、紧凑排版和项目回顾已上线；架构见 trees/architecture.md A2。
+- CurrentResult: 焦点透镜仅替换关系图呈现，仍可编辑下一步、设置当前/下一节点、管理执行链、标记完成并让 Codex 继续；执行流程等界面仍可用。三套前端及桌面/手机验收通过；长期体验待验证，目标仅达可测试状态。
 - RootCauseAnalysis:
 - CaseStudy:
 - NextIdea:

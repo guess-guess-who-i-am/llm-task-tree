@@ -8,7 +8,7 @@
  *
  * Authentication comes from the `gh` CLI.
  *
- * usage: node scripts/push-public-repo.mjs [--repo owner/name] [--branch main] [--dry-run]
+ * usage: node scripts/push-public-repo.mjs [--source <git-dir>] [--repo owner/name] [--branch main] [--dry-run]
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -16,12 +16,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const repoDir = path.join(projectRoot, "dist", "task-tree-public");
 
 const flag = (name, fallback = "") => {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : fallback;
 };
+const repoDir = path.resolve(flag("--source", path.join(projectRoot, "dist", "task-tree-public")));
 const repo = flag("--repo", "guess-guess-who-i-am/llm-task-tree-workspace-backup");
 const branch = flag("--branch", "main");
 const dryRun = process.argv.includes("--dry-run");

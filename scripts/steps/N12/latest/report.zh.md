@@ -1,18 +1,24 @@
-# N12：README 视觉重构与产品 Hero
+# N12：公开仓库、README 视觉与插件分发
 
 ## 本轮交付
 
-- README 首屏改为品牌 Logo、单句价值、快速入口、真实产品 Hero 和少量平台徽章。
-- 新 Hero 将项目总览、宏观任务树和焦点节点按真实阅读顺序合成，来源均为产品截图。
-- 快速开始提前；平台安装、核心能力、工作闭环与深入文档分层展示。
-- 新增可重复构建脚本 `scripts/build-readme-hero.ps1`，并把 Hero 纳入公开分发构建。
+- 仓库已公开并改名为 `llm-task-tree`，正式安装入口均已切换到新地址。
+- README Hero 按用户反馈改为三张完整 16:10 横屏截图并排，保留界面的真实空间关系。
+- GitHub 已配置英文简介、12 个 topics、Issues、Discussions，并发布首个 `v0.8.0` Release。
+- Release 提供脱敏安装包 `llm-task-tree-v0.8.0.zip`；README 与资产已通过匿名访问验证。
 
 ## 验证
 
-- Hero：1920×1080，397040 bytes。
-- 插件 manifest 和真实 MCP 包启动测试全部通过。
-- 公开包：234 个文件、4.23 MB；本机路径与疑似凭据均为 0。
+- Hero：1920×720，380937 bytes。
+- 已发布提交对应的插件 manifest 与真实 MCP 包启动测试通过；当前工作区另有两处并发运行时源码改动尚未同步到插件包，本轮未将其混入公开提交。
+- 公开包：234 个文件、4.22 MiB；本机路径与疑似凭据均为 0。
+- Release 安装包：2909112 bytes，已公开且非草稿；当前下载数为 0，尚无真实传播效果数据。
 - `git diff --check` 通过。
+
+## 当前工作区边界
+
+- `scripts/mcp-server.mjs` 与 `server/codex-run.js` 是并发用户改动，插件包一致性复验准确报告这 2 个文件漂移。
+- 本轮只发布仓库地址、README、插件清单、任务树和交付证据；上述两处源码保持未提交。
 
 ## 证据
 
@@ -20,4 +26,7 @@
 - `artifacts/readme-hero.png`
 - `scripts/build-readme-hero.ps1`
 - `scripts/build-public-repo.mjs`
+- `scripts/push-public-repo.mjs`
 - `dist/task-tree-public/README.md`
+- https://github.com/guess-guess-who-i-am/llm-task-tree
+- https://github.com/guess-guess-who-i-am/llm-task-tree/releases/tag/v0.8.0

@@ -33,3 +33,10 @@
 - https://github.com/guess-guess-who-i-am/llm-task-tree
 - https://github.com/guess-guess-who-i-am/llm-task-tree/releases/tag/v0.8.0
 - https://github.com/guess-guess-who-i-am/llm-task-tree/discussions/1
+
+## Apple 参考风格重构与真实演示
+
+- 从用户提供的 Apple 官方产品页截图提取“单一主张、真实画面主导、一段一能力、克制色彩和稳定横屏比例”五项落地原则，记录于 `docs/readme-design/apple-reference-style.md`。
+- README 首屏已从徽章墙和三联缩略卡改为一句核心承诺与一张完整横屏任务图；正文按项目总览、宏观主干、焦点节点和执行流程逐层展开。
+- 真实操作演示为 25.48 秒 WebM，1440×900、25 fps；封面和四张功能图均来自本机任务图页面，没有伪造产品界面。
+- 公开构建含 238 个文件、7.83 MiB；本机路径和疑似凭据扫描均为 0。线上 GitHub 渲染与相对链接仍需发布后复核。

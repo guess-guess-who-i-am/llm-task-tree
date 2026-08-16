@@ -230,7 +230,7 @@
 - Metrics:
 - Notes:
 - CodeLoc:
-- CurrentResult: 向量+词法检索、path 去重和预检索已上线；batch=64、concurrency=40、每篇默认 1 段。
+- CurrentResult: 向量+词法检索、path 去重和预检索已上线；侧栏 1133px 内容可完整滚动并显示检索区，自动化回归通过；真实知识库使用体验待反馈。
 - RootCauseAnalysis:
 - CaseStudy:
 - NextIdea:

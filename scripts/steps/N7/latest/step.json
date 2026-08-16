@@ -3,7 +3,7 @@
   "nodeId": "N7",
   "title": "集成 Markdown 知识库检索面板",
   "reportZh": "report.zh.md",
-  "updatedAt": "2026-07-08T08:20:00.000Z",
+  "updatedAt": "2026-08-16T05:23:07.1923529Z",
   "substeps": [
     {
       "title": "Embedding 索引重建",
@@ -21,6 +21,15 @@
         { "path": "task-tree.md", "line": 128, "name": "concurrency=40" }
       ],
       "outputs": [{ "path": ".env.example", "line": 1 }]
+    },
+    {
+      "title": "知识库侧栏完整滚动",
+      "functions": [
+        { "path": "public/styles.css", "name": ".knowledgeBody" },
+        { "path": "public/styles.css", "name": ".knowledgeSection--chat" },
+        { "path": "public/styles.css", "name": ".knowledgeHistory" }
+      ],
+      "outputs": [{ "path": "scripts/test-knowledge-sidebar-scroll.mjs" }]
     }
   ]
 }

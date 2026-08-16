@@ -78,7 +78,7 @@ Windows 也可以双击 `打开任务图.cmd`。服务会为项目选择稳定�
 ### Codex
 
 ```text
-codex plugin marketplace add guess-guess-who-i-am/llm-task-tree-workspace-backup
+codex plugin marketplace add guess-guess-who-i-am/llm-task-tree
 ```
 
 然后在插件目录安装 `task-tree`。要在对话内显示交互界面，在 `~/.codex/config.toml` 开启：
@@ -101,7 +101,7 @@ node .\llm-task-tree-kit\scripts\install-codex-mcp.mjs --with-plugin
 ### Claude Code
 
 ```text
-/plugin marketplace add guess-guess-who-i-am/llm-task-tree-workspace-backup
+/plugin marketplace add guess-guess-who-i-am/llm-task-tree
 /plugin install task-tree@llm-task-tree
 ```
 

@@ -2,8 +2,8 @@
   "schema": "flow-step/v1",
   "nodeId": "N12",
   "blockId": "",
-  "updatedAt": "2026-08-13T09:46:49.576Z",
-  "title": "README 视觉重构与产品 Hero",
+  "updatedAt": "2026-08-16T02:48:56.6019290Z",
+  "title": "公开仓库、README 视觉与插件分发",
   "reportZh": "report.zh.md",
   "substeps": [
     {
@@ -62,6 +62,30 @@
       "outputs": [
         {
           "path": "dist/task-tree-public/artifacts/readme-hero.png"
+        }
+      ]
+    },
+    {
+      "title": "建立 GitHub 公开入口与首个 Release",
+      "functions": [
+        {
+          "path": "scripts/push-public-repo.mjs"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "dist/task-tree-public"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "dist/llm-task-tree-v0.8.0.zip"
+        },
+        {
+          "path": "README.md"
+        },
+        {
+          "path": ".claude-plugin/marketplace.json"
         }
       ]
     }

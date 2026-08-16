@@ -5,10 +5,10 @@
   "description": "让人与 Agent 通过可视任务图共享项目目标、进度、方法和下一步。",
   "author": {
     "name": "llm-task-tree",
-    "url": "https://github.com/guess-guess-who-i-am/llm-task-tree-workspace-backup"
+    "url": "https://github.com/guess-guess-who-i-am/llm-task-tree"
   },
-  "homepage": "https://github.com/guess-guess-who-i-am/llm-task-tree-workspace-backup",
-  "repository": "https://github.com/guess-guess-who-i-am/llm-task-tree-workspace-backup",
+  "homepage": "https://github.com/guess-guess-who-i-am/llm-task-tree",
+  "repository": "https://github.com/guess-guess-who-i-am/llm-task-tree",
   "license": "MIT",
   "keywords": ["task-tree", "task-graph", "agent-memory", "project-management"],
   "skills": "./skills/",

@@ -22,7 +22,7 @@ const flag = (name, fallback = "") => {
   return index >= 0 ? process.argv[index + 1] : fallback;
 };
 const repoDir = path.resolve(flag("--source", path.join(projectRoot, "dist", "task-tree-public")));
-const repo = flag("--repo", "guess-guess-who-i-am/llm-task-tree-workspace-backup");
+const repo = flag("--repo", "guess-guess-who-i-am/llm-task-tree");
 const branch = flag("--branch", "main");
 const dryRun = process.argv.includes("--dry-run");
 

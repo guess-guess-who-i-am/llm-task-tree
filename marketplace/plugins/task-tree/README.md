@@ -39,7 +39,7 @@ enable_mcp_apps = true
 powershell -File kit\deploy-task-tree.ps1 -ProjectRoot <你的项目路径> -UseSharedKit
 ```
 
-装了 CLI 的话，`codex plugin marketplace add guess-guess-who-i-am/llm-task-tree-workspace-backup` 是另一条等价的取插件路径，但不是必需的。
+装了 CLI 的话，`codex plugin marketplace add guess-guess-who-i-am/llm-task-tree` 是另一条等价的取插件路径，但不是必需的。
 
 ## 在桌面应用里怎么用
 
@@ -111,7 +111,7 @@ node scripts/test-plugin-manifest.mjs       # 清单字段、资源尺寸、市�
 本包同时带 `.claude-plugin/plugin.json`。从仓库市场安装：
 
 ```text
-/plugin marketplace add guess-guess-who-i-am/llm-task-tree-workspace-backup
+/plugin marketplace add guess-guess-who-i-am/llm-task-tree
 /plugin install task-tree@llm-task-tree
 ```
 

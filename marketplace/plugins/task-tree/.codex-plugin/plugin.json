@@ -4,10 +4,10 @@
   "description": "把项目的任务图（关系图 / 执行流程 / 知识库 / 多模型协作）变成 Agent 可直接调用的工具，并可靠打开可交互任务图界面。",
   "author": {
     "name": "llm-task-tree",
-    "url": "https://github.com/guess-guess-who-i-am/llm-task-tree-workspace-backup"
+    "url": "https://github.com/guess-guess-who-i-am/llm-task-tree"
   },
-  "homepage": "https://github.com/guess-guess-who-i-am/llm-task-tree-workspace-backup",
-  "repository": "https://github.com/guess-guess-who-i-am/llm-task-tree-workspace-backup",
+  "homepage": "https://github.com/guess-guess-who-i-am/llm-task-tree",
+  "repository": "https://github.com/guess-guess-who-i-am/llm-task-tree",
   "license": "MIT",
   "keywords": [
     "task tree",
@@ -31,7 +31,7 @@
       "Read",
       "Write"
     ],
-    "websiteUrl": "https://github.com/guess-guess-who-i-am/llm-task-tree-workspace-backup",
+    "websiteUrl": "https://github.com/guess-guess-who-i-am/llm-task-tree",
     "defaultPrompt": [
       "打开任务图，我要自己拖着看",
       "读一下任务图现在的焦点和下一步",

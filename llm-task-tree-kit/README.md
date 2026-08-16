@@ -7,10 +7,10 @@
 ### 1. 拿到本仓库（kit）
 
 ```bash
-git clone https://github.com/guess-guess-who-i-am/llm-task-tree-workspace-backup.git
+git clone https://github.com/guess-guess-who-i-am/llm-task-tree.git
 ```
 
-装了 codex CLI 的话，`codex plugin marketplace add guess-guess-who-i-am/llm-task-tree-workspace-backup` 是等价的取法，但不是必需的。
+装了 codex CLI 的话，`codex plugin marketplace add guess-guess-who-i-am/llm-task-tree` 是等价的取法，但不是必需的。
 
 ### 2. 部署到你的项目
 

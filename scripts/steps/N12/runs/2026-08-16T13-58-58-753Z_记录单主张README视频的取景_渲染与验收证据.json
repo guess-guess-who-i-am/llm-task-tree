@@ -1,0 +1,144 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N12",
+  "blockId": "",
+  "updatedAt": "2026-08-16T07:55:49.779Z",
+  "title": "公开仓库、README 视觉与插件分发",
+  "reportZh": "report.zh.md",
+  "substeps": [
+    {
+      "title": "用真实产品截图生成三阶段 Hero",
+      "functions": [
+        {
+          "path": "scripts/build-readme-hero.ps1"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "artifacts/project-overview-desktop.png"
+        },
+        {
+          "path": "artifacts/task-tree-semantic-zoom-macro.png"
+        },
+        {
+          "path": "artifacts/focus-lens-desktop.png"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "artifacts/readme-hero.png"
+        }
+      ]
+    },
+    {
+      "title": "按成熟开源产品模式重排 README",
+      "inputs": [
+        {
+          "path": "README.md"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "README.md"
+        },
+        {
+          "path": "dist/task-tree-public/README.md"
+        }
+      ]
+    },
+    {
+      "title": "验证插件与公开分发",
+      "functions": [
+        {
+          "path": "scripts/test-plugin-manifest.mjs"
+        },
+        {
+          "path": "scripts/test-plugin-package.mjs"
+        },
+        {
+          "path": "scripts/build-public-repo.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "dist/task-tree-public/artifacts/readme-hero.png"
+        }
+      ]
+    },
+    {
+      "title": "建立 GitHub 公开入口与首个 Release",
+      "functions": [
+        {
+          "path": "scripts/push-public-repo.mjs"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "dist/task-tree-public"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "dist/llm-task-tree-v0.8.0.zip"
+        },
+        {
+          "path": "README.md"
+        },
+        {
+          "path": ".claude-plugin/marketplace.json"
+        }
+      ]
+    },
+    {
+      "title": "按 Apple 产品叙事重构 README 并录制真实演示",
+      "functions": [
+        {
+          "path": "scripts/capture-readme-media.mjs"
+        },
+        {
+          "path": "scripts/build-readme-hero.ps1"
+        },
+        {
+          "path": "scripts/build-public-repo.mjs"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "docs/readme-design/apple-reference-style.md"
+        },
+        {
+          "path": "public/index.html"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "README.md"
+        },
+        {
+          "path": "artifacts/readme-hero.png"
+        },
+        {
+          "path": "artifacts/readme-demo.mp4"
+        },
+        {
+          "path": "artifacts/readme-demo.webm"
+        },
+        {
+          "path": "artifacts/readme-demo-cover.png"
+        },
+        {
+          "path": "artifacts/readme-overview-wide.png"
+        },
+        {
+          "path": "artifacts/readme-tree-wide.png"
+        },
+        {
+          "path": "artifacts/readme-focus-wide.png"
+        },
+        {
+          "path": "artifacts/readme-flow-wide.png"
+        }
+      ]
+    }
+  ]
+}

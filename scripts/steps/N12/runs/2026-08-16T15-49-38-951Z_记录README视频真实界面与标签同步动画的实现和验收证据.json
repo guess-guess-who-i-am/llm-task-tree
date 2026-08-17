@@ -2,7 +2,7 @@
   "schema": "flow-step/v1",
   "nodeId": "N12",
   "blockId": "",
-  "updatedAt": "2026-08-17T01:50:26.981Z",
+  "updatedAt": "2026-08-16T13:58:58.753Z",
   "title": "公开仓库、README 视觉与插件分发",
   "reportZh": "report.zh.md",
   "substeps": [
@@ -182,119 +182,6 @@
         },
         {
           "path": "artifacts/readme-flow-wide.png"
-        }
-      ]
-    },
-    {
-      "title": "让状态标签与真实界面区域同步变化",
-      "functions": [
-        {
-          "path": "scripts/capture-readme-media.mjs",
-          "name": "normalizedRegions"
-        },
-        {
-          "path": "scripts/capture-readme-media.mjs",
-          "name": "stageState"
-        },
-        {
-          "path": "scripts/capture-readme-media.mjs",
-          "name": "spotlightStages"
-        },
-        {
-          "path": "scripts/capture-readme-media.mjs",
-          "name": "spotlightPath"
-        }
-      ],
-      "inputs": [
-        {
-          "path": "llm-task-tree-kit/public/app.js"
-        },
-        {
-          "path": "llm-task-tree-kit/public/styles.css"
-        },
-        {
-          "path": "docs/readme-video-production.md"
-        }
-      ],
-      "outputs": [
-        {
-          "path": "artifacts/readme-demo.mp4"
-        },
-        {
-          "path": "artifacts/readme-demo.webm"
-        },
-        {
-          "path": "artifacts/readme-demo-cover.png"
-        },
-        {
-          "path": "docs/readme-video-production.md"
-        }
-      ]
-    },
-    {
-      "title": "把重复的节点说明改为执行回写场景",
-      "functions": [
-        {
-          "path": "scripts/capture-readme-media.mjs",
-          "name": "normalizedRegions"
-        },
-        {
-          "path": "scripts/capture-readme-media.mjs",
-          "name": "clickPulse"
-        },
-        {
-          "path": "scripts/capture-readme-media.mjs",
-          "name": "sceneAction"
-        }
-      ],
-      "inputs": [
-        {
-          "path": "README.md"
-        },
-        {
-          "path": "docs/readme-video-production.md"
-        },
-        {
-          "path": "llm-task-tree-kit/public/app.js"
-        },
-        {
-          "path": "llm-task-tree-kit/public/styles.css"
-        }
-      ],
-      "outputs": [
-        {
-          "path": "artifacts/readme-demo.mp4"
-        },
-        {
-          "path": "artifacts/readme-demo.webm"
-        },
-        {
-          "path": "artifacts/readme-demo-cover.png"
-        }
-      ]
-    },
-    {
-      "title": "发布新版演示并验证线上播放",
-      "inputs": [
-        {
-          "path": "README.md"
-        },
-        {
-          "path": "artifacts/readme-demo.mp4"
-        },
-        {
-          "path": "artifacts/readme-demo.webm"
-        },
-        {
-          "path": "artifacts/readme-demo-cover.png"
-        }
-      ],
-      "outputs": [
-        {
-          "path": "https://github.com/guess-guess-who-i-am/llm-task-tree/commit/9f6e7b1dce8a024a2cebf56aed684fcb4fb7eaaf"
-        },
-        {
-          "path": "https://cdn.jsdelivr.net/gh/guess-guess-who-i-am/llm-task-tree@main/artifacts/readme-demo.mp4"
         }
       ]
     }

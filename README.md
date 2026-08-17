@@ -21,7 +21,7 @@
     <img src="artifacts/readme-demo-cover.png" alt="播放 LLM Task Tree 真实操作演示" />
   </a>
   <br />
-  <sub>点击播放真实操作：项目总览、语义缩放、焦点透镜与执行流程。</sub>
+  <sub>20 秒看懂核心：先固定项目局面，再沿主干找到下一步，并把它交给 Agent 执行后回写结果。</sub>
 </div>
 
 ## 三层视野。一棵树。

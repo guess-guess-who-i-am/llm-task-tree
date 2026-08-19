@@ -90,7 +90,7 @@ README.md
 ## 验证
 
 ```bash
-node scripts/test-share-install.mjs     # 12 例：装到陌生项目、注册到空白 CODEX_HOME、跑通 17 个工具、审计打包后的插件、kit 是否落后于源码
+node scripts/test-share-install.mjs     # 12 例：装到陌生项目、注册到空白 CODEX_HOME、跑通 18 个工具、审计打包后的插件、kit 是否落后于源码
 node scripts/test-plugin-package.mjs    # 6 例：真启动包内入口，核对工具集与 ui:// 资源，并和自己的文档对账
 node scripts/test-mcp-server.mjs        # 26 例：工具行为回归，含真实截图与 PNG 编解码
 node scripts/test-plugin-manifest.mjs   # 6 例：清单字段、资源尺寸、市场 policy

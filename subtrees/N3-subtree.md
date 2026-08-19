@@ -7,22 +7,27 @@
 - Position: 2052,950
 - Size: 400,420
 - Completion: 进行中
-- Problem: 多个 Agent 共用一棵树时，如何避免把全局 Next 误当作各自目标并互相覆盖？
+- Problem: 自动并行如何复用分支上下文并持续抓住根目标？
 - Approach:
-  - 树外执行范围保存每个 Agent 的目标节点、可写节点、写集和任务说明。
-  - 优先级固定为用户最新要求、本 Agent 范围、全局 Next；GraphState 保留人类主视角。
-  - 写树由服务器基于最新版本串行应用节点补丁，并拒绝越权节点与范围内整树覆盖。
-- Input: 协调器分工、手动多会话 scopeId、共享任务树与各 Agent 的节点结果。
-- Output: server/execution-scope.js、server/tree-node-patch.js、范围接口、MCP scope/focus/write、Hook 与中英文逐轮 Prompt。
-- Metrics: 不同 Agent 看到各自目标；越权写入返回拒绝；并发写不同节点后两项结果均保留；旧单 Agent 行为不变。
-- Notes: 内置 coordinator 自动注入范围；手动并行会话先用 task_tree_scope 创建范围并传 scopeId。
+  - 继承用户当前配置，兼容分支默认复用旧对话且可改选。
+  - 规划、分支、汇总和同步会话可见可进入；用户可按节点持续追加。
+  - worker 在独立 worktree 执行，双审核后同步任务树。
+  - 长上下文生成短交接包，新代继续旧分支并归档旧thread。
+- Input: 当前任务树、本轮目标、用户配置、可审核草案。
+- Output: 可追踪的分支上下文、隔离并行、失败重跑和接受后同步。
+- Metrics: 分支可改选；接受前主工作区不变；交接可读；连续两轮保持根目标。
+- Notes: 机制和回归已通过，长期连续性待真实试跑。
 - CodeLoc:
-- CurrentResult: 已验证多 Agent 不再共用全局 Next 作为执行目标：范围分别返回分配节点，越权写被拒绝，并发写 N1/N2 后两项结果均保留。协议、插件 kit、本机和 huangyu 全局 Prompt 已同步；仍缺用户真实手动多会话试用，因此根本目标尚不能宣称完全达到。
-- RootCauseAnalysis: 首次偏离在执行目标传递层：协调器已有 nodeId，但 Hook、MCP 和 Prompt 又无条件注入全局 Next；整树提交进一步造成旧快照覆盖。仅加提示词无法提供权限和并发一致性。
+  - server/codex-run.js
+  - server/codex-coordinator.js
+  - server/parallel-worktree.js
+  - public/app.js
+- CurrentResult: 已验证90%后自动换代；新代在隔离worktree读取交接包并继续，旧thread归档、输入清理。Codex、协调器、worktree及真实浏览器回归通过；两轮真实业务待验证。
+- RootCauseAnalysis: 隔离worktree读不到主目录交接路径，且档案缺少上一代结果；现已投送分支内交接包并保存摘要。
 - CaseStudy:
-  - case 1: Agent A 分配 N1 却写 N2 → 服务端按范围拒绝。
-  - case 2: Agent A/B 同时写 N1/N2 → 串行最新树补丁保留两项结果。
-- NextIdea: 用两个手动 Codex 会话分别领取不同节点，实测 focus、写回和关闭范围的完整操作。
+  - case 1: 主目录相对路径 → 新代无法读取 → 投送分支内交接包。
+  - case 2: 交接只有文件无结果 → 新代缺少连续性 → 保存上一代结果摘要。
+- NextIdea: 用当前配置连续运行两轮真实业务，检查根目标是否保持。
 - SelectedSkills: codex:skill-creator
 
 # GraphState

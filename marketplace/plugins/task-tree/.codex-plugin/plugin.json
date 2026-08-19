@@ -1,7 +1,7 @@
 {
   "name": "task-tree",
-  "version": "0.8.0+codex.20260816062259",
-  "description": "把项目的任务图（关系图 / 执行流程 / 知识库 / 多模型协作）变成 Agent 可直接调用的工具，并可靠打开可交互任务图界面。",
+  "version": "0.8.0+codex.20260819134500",
+  "description": "\u628a\u9879\u76ee\u7684\u4efb\u52a1\u56fe\uff08\u5173\u7cfb\u56fe / \u6267\u884c\u6d41\u7a0b / \u77e5\u8bc6\u5e93 / \u591a\u6a21\u578b\u534f\u4f5c\uff09\u53d8\u6210 Agent \u53ef\u76f4\u63a5\u8c03\u7528\u7684\u5de5\u5177\uff0c\u5e76\u53ef\u9760\u6253\u5f00\u53ef\u4ea4\u4e92\u4efb\u52a1\u56fe\u754c\u9762\u3002",
   "author": {
     "name": "llm-task-tree",
     "url": "https://github.com/guess-guess-who-i-am/llm-task-tree"
@@ -12,8 +12,8 @@
   "keywords": [
     "task tree",
     "task graph",
-    "任务图",
-    "任务树",
+    "\u4efb\u52a1\u56fe",
+    "\u4efb\u52a1\u6811",
     "focus",
     "flow",
     "knowledge base",
@@ -22,9 +22,9 @@
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "任务图",
-    "shortDescription": "可靠打开可交互任务图，读写节点、链式推进、检索知识库",
-    "longDescription": "任务图是人与 Agent 共享的外置记忆：节点保存当前有效结论，GraphState 指定焦点，scripts/project.json 定义执行顺序。说一句「打开任务图」，完整界面会在桌面浏览器打开；宿主支持 MCP Apps 时也会嵌入对话。界面能拖节点、改字段、切执行流程、查知识库；只想看一眼不动手，就让它「画一张任务图」。除了界面，Agent 还用 task_tree_* 工具读焦点、按字段写树（自动备份并过精炼门禁）、沿 Chain 推进一步、检索本地 Markdown 知识库、跑多模型协作、自动整理画布，而不是手改 markdown。工具按会话的项目根定位任务图，同一台机器上的多个项目互不干扰。",
+    "displayName": "\u4efb\u52a1\u56fe",
+    "shortDescription": "\u53ef\u9760\u6253\u5f00\u53ef\u4ea4\u4e92\u4efb\u52a1\u56fe\uff0c\u8bfb\u5199\u8282\u70b9\u3001\u94fe\u5f0f\u63a8\u8fdb\u3001\u68c0\u7d22\u77e5\u8bc6\u5e93",
+    "longDescription": "\u4efb\u52a1\u56fe\u662f\u4eba\u4e0e Agent \u5171\u4eab\u7684\u5916\u7f6e\u8bb0\u5fc6\uff1a\u8282\u70b9\u4fdd\u5b58\u5f53\u524d\u6709\u6548\u7ed3\u8bba\uff0cGraphState \u6307\u5b9a\u7126\u70b9\uff0cscripts/project.json \u5b9a\u4e49\u6267\u884c\u987a\u5e8f\u3002\u8bf4\u4e00\u53e5\u300c\u6253\u5f00\u4efb\u52a1\u56fe\u300d\uff0c\u5b8c\u6574\u754c\u9762\u4f1a\u5728\u684c\u9762\u6d4f\u89c8\u5668\u6253\u5f00\uff1b\u5bbf\u4e3b\u652f\u6301 MCP Apps \u65f6\u4e5f\u4f1a\u5d4c\u5165\u5bf9\u8bdd\u3002\u754c\u9762\u80fd\u62d6\u8282\u70b9\u3001\u6539\u5b57\u6bb5\u3001\u5207\u6267\u884c\u6d41\u7a0b\u3001\u67e5\u77e5\u8bc6\u5e93\uff1b\u53ea\u60f3\u770b\u4e00\u773c\u4e0d\u52a8\u624b\uff0c\u5c31\u8ba9\u5b83\u300c\u753b\u4e00\u5f20\u4efb\u52a1\u56fe\u300d\u3002\u9664\u4e86\u754c\u9762\uff0cAgent \u8fd8\u7528 task_tree_* \u5de5\u5177\u8bfb\u7126\u70b9\u3001\u6309\u5b57\u6bb5\u5199\u6811\uff08\u81ea\u52a8\u5907\u4efd\u5e76\u8fc7\u7cbe\u70bc\u95e8\u7981\uff09\u3001\u6cbf Chain \u63a8\u8fdb\u4e00\u6b65\u3001\u68c0\u7d22\u672c\u5730 Markdown \u77e5\u8bc6\u5e93\u3001\u8dd1\u591a\u6a21\u578b\u534f\u4f5c\u3001\u81ea\u52a8\u6574\u7406\u753b\u5e03\uff0c\u800c\u4e0d\u662f\u624b\u6539 markdown\u3002\u5de5\u5177\u6309\u4f1a\u8bdd\u7684\u9879\u76ee\u6839\u5b9a\u4f4d\u4efb\u52a1\u56fe\uff0c\u540c\u4e00\u53f0\u673a\u5668\u4e0a\u7684\u591a\u4e2a\u9879\u76ee\u4e92\u4e0d\u5e72\u6270\u3002",
     "developerName": "llm-task-tree",
     "category": "Productivity",
     "capabilities": [
@@ -32,9 +32,9 @@
       "Write"
     ],
     "defaultPrompt": [
-      "打开任务图，我要自己拖着看",
-      "读一下任务图现在的焦点和下一步",
-      "把这一轮的结论写进当前节点的 CurrentResult"
+      "\u6253\u5f00\u4efb\u52a1\u56fe\uff0c\u6211\u8981\u81ea\u5df1\u62d6\u7740\u770b",
+      "\u8bfb\u4e00\u4e0b\u4efb\u52a1\u56fe\u73b0\u5728\u7684\u7126\u70b9\u548c\u4e0b\u4e00\u6b65",
+      "\u628a\u8fd9\u4e00\u8f6e\u7684\u7ed3\u8bba\u5199\u8fdb\u5f53\u524d\u8282\u70b9\u7684 CurrentResult"
     ],
     "brandColor": "#6E56CF",
     "composerIcon": "./assets/icon.png",

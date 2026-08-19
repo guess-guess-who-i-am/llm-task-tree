@@ -12,6 +12,53 @@ export const OPEN_GRAPH_PROMPT = "调用 task_tree_open 打开任务图。只做
 
 export const PRESETS = ["open", "next", "chain"];
 
+/** Keep accepted-run state sync inside the nodes that the parallel jobs actually owned. */
+export function resolveAcceptedParallelNodeIds({ sourceNodeIds = [], reportedNodeIds } = {}) {
+  const unique = (values) => [...new Set(
+    (Array.isArray(values) ? values : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  )];
+  const source = unique(sourceNodeIds);
+  const reported = unique(reportedNodeIds);
+  const scoped = reported.filter((nodeId) => source.includes(nodeId));
+  return scoped.length ? scoped : source;
+}
+
+/**
+ * Reconciles an accepted parallel run with the scoped task-tree nodes. The inputs are evidence
+ * leads, not completion claims; the state-sync turn must verify them against the tree's goals.
+ */
+export function buildAcceptedParallelStateSyncPrompt({
+  scopeId,
+  nodeIds = [],
+  summary,
+  appliedFiles = [],
+  integrationTests,
+  coordinatorEvidence
+} = {}) {
+  const writableNodes = [...new Set(nodeIds.map((nodeId) => String(nodeId || "").trim()).filter(Boolean))];
+  const nodeList = writableNodes.join(", ") || "none";
+
+  return [
+    "【Task Tree · Accepted Parallel Run State Sync】",
+    `Execution scope: ${String(scopeId || "(missing)").trim()}; writable nodes: ${nodeList}`,
+    `Accepted result: ${String(summary || "(not provided)").trim()}`,
+    `Applied files: ${appliedFiles.join(", ") || "none"}`,
+    `Integration tests: ${String(integrationTests || "未配置集成命令").trim()}`,
+    coordinatorEvidence ? `Coordinator evidence: ${String(coordinatorEvidence).trim()}` : "",
+    "",
+    `先用 task_tree_focus 读取 ROOT 的 Problem / Approach / Metrics，再读取受限节点 ${nodeList} 的 Problem / Approach / Metrics；ROOT 定义根目标，受限节点定义当前阶段目标与完成判据。ROOT 只读。`,
+    "把 Accepted result、Applied files、Integration tests 和 Coordinator evidence 仅作为待核验线索；对照实际产物、测试输出、根目标和阶段目标判断证据是否充分，不得把摘要、文件名、worker 报告或测试通过本身当成目标已达到的证明。",
+    `只允许用 task_tree_write 写受限节点 ${nodeList}，不得写 ROOT、未列出的节点、flow 顺序或任何 GraphState 字段，也不得移动 GraphState.Current / Next / NextPlan / ChainForceNext。`,
+    "每个受限节点的 CurrentResult 必须直接回答根目标和该节点的阶段目标：写明已由证据验证的能力、仍未解决的缺口，以及据此现在是否可以宣称达到目标。不要用计划、实现描述或空泛进展代替结论。",
+    "Completion 只有在证据同时满足该节点阶段目标及其 Metrics 时才能置为已完成；局部单元测试或集成测试通过只证明对应检查，不得仅凭局部测试通过就把 Completion 置为已完成，也不得由接受并行结果推断根目标已经达到。",
+    "NextIdea 必须替换为下一条可执行的未决动作，并明确它要关闭的剩余缺口；若已无未决动作，必须以达到阶段目标的充分证据为依据，不能编造后续动作。",
+    "节点中只保留精炼结论和短证据引用；禁止复制过程叙述、原始日志、完整测试输出或 worker 报告。",
+    "写入成功后，只报告工具返回的 persisted changes，逐项给出 old -> new；不报告未落盘或未变化的字段。"
+  ].filter(Boolean).join("\n");
+}
+
 /**
  * One step on the Next node. Repeats the two rules that are easy to break from a fresh context:
  * NextPlan is the user's memo and must not be executed, and focus is the user's to move.

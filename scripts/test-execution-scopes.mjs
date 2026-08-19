@@ -66,10 +66,27 @@ try {
   ]);
   assert.equal(left.response.status, 200);
   assert.equal(right.response.status, 200);
+  const rejected = await request("POST", "/api/tree/node-patch", {
+    scopeId: one.scopeId,
+    nodeId: "N1",
+    fields: { CurrentResult: "x".repeat(13000) },
+    reason: "exercise compact rejection"
+  });
+  assert.equal(rejected.response.status, 422);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(child.exitCode, null, "a rejected queued write must not terminate the server");
+  assert.equal((await request("GET", "/api/tree")).response.status, 200);
+  const afterRejection = await request("POST", "/api/tree/node-patch", {
+    scopeId: one.scopeId,
+    nodeId: "N1",
+    fields: { CurrentResult: "new-one-after-rejection" },
+    reason: "write after compact rejection"
+  });
+  assert.equal(afterRejection.response.status, 200);
   const markdown = await readFile(path.join(fixture, "task-tree.md"), "utf8");
-  assert.match(markdown, /CurrentResult: new-one/);
+  assert.match(markdown, /CurrentResult: new-one-after-rejection/);
   assert.match(markdown, /CurrentResult: new-two/);
-  console.log("PASS execution scopes isolate targets, reject cross-node writes, and preserve concurrent patches");
+  console.log("PASS execution scopes isolate targets, preserve concurrent patches, and survive compact rejection");
 } finally {
   child.kill();
   await rm(fixture, { recursive: true, force: true });

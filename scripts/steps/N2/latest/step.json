@@ -3,7 +3,7 @@
   "nodeId": "N2",
   "title": "实现可视化图谱编辑器",
   "reportZh": "report.zh.md",
-  "updatedAt": "2026-08-16T03:30:56.3177889Z",
+  "updatedAt": "2026-08-17T14:26:39.4107495+08:00",
   "substeps": [
     {
       "title": "紧凑自动整理",
@@ -69,6 +69,34 @@
         { "path": "scripts/test-focus-lens-integration.mjs" },
         { "path": "artifacts/focus-lens-desktop.png" },
         { "path": "artifacts/focus-lens-mobile.png" }
+      ]
+    },
+    {
+      "title": "让摘要节点按内容自适应宽高",
+      "functions": [
+        { "path": "public/app.js", "line": 3763, "name": "layoutNodeHeightById" },
+        { "path": "public/app.js", "line": 5511, "name": "compactNodeAutoWidth" },
+        { "path": "public/app.js", "line": 5589, "name": "measureRenderedCompactNodes" },
+        { "path": "public/app.js", "line": 5639, "name": "updateGraphCanvasSize" }
+      ],
+      "inputs": [
+        { "path": "task-tree.md", "line": 38 }
+      ],
+      "outputs": [
+        { "path": "scripts/test-content-sized-nodes.mjs" },
+        { "path": "artifacts/content-sized-nodes-macro.png" },
+        { "path": "artifacts/content-sized-nodes-detail.png" },
+        { "path": "artifacts/content-sized-nodes-mobile.png" }
+      ]
+    },
+    {
+      "title": "平衡节点标签轨道与操作栏尺寸",
+      "inputs": [
+        { "path": "public/styles.css", "line": 3604 }
+      ],
+      "outputs": [
+        { "path": "scripts/test-node-core-summary-ui.mjs" },
+        { "path": "artifacts/inspect-node-columns.png" }
       ]
     }
   ]

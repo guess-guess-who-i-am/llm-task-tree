@@ -1,0 +1,107 @@
+{
+  "ok": true,
+  "expectedVersion": "0.8.0+codex.20260818204315",
+  "checks": [
+    {
+      "label": "发布基准",
+      "ok": true,
+      "detail": "version=0.8.0+codex.20260818204315；43 个运行时文件"
+    },
+    {
+      "label": "Cursor 插件清单",
+      "ok": true,
+      "detail": "version=0.8.0+codex.20260818204315"
+    },
+    {
+      "label": "Claude 插件清单",
+      "ok": true,
+      "detail": "version=0.8.0+codex.20260818204315"
+    },
+    {
+      "label": "Claude 仓库市场",
+      "ok": true,
+      "detail": "version=0.8.0+codex.20260818204315"
+    },
+    {
+      "label": "Trae MCP 分发",
+      "ok": true,
+      "detail": "integrations/trae/mcp.json"
+    },
+    {
+      "label": "仓库共享 kit",
+      "ok": true,
+      "detail": "43 个运行时文件一致"
+    },
+    {
+      "label": "仓库 kit 插件运行时",
+      "ok": true,
+      "detail": "43 个运行时文件一致"
+    },
+    {
+      "label": "Codex 缓存版本 C:\\Users\\Administrator\\.codex\\plugins\\cache",
+      "ok": true,
+      "detail": "version=0.8.0+codex.20260818204315"
+    },
+    {
+      "label": "Codex 缓存运行时 C:\\Users\\Administrator\\.codex\\plugins\\cache",
+      "ok": true,
+      "detail": "43 个运行时文件一致"
+    },
+    {
+      "label": "Codex 缓存版本 D:\\Codex\\desktop\\plugins\\cache",
+      "ok": true,
+      "detail": "version=0.8.0+codex.20260818204315"
+    },
+    {
+      "label": "Codex 缓存运行时 D:\\Codex\\desktop\\plugins\\cache",
+      "ok": true,
+      "detail": "43 个运行时文件一致"
+    },
+    {
+      "label": "本机项目共享入口",
+      "ok": true,
+      "detail": "28 个有效项目；14 条失效登记"
+    },
+    {
+      "label": "Cursor 项目入口",
+      "ok": true,
+      "detail": "28/28 个有效项目已配置"
+    },
+    {
+      "label": "项目共享 kit E:\\解决跟不上大模型思路问题\\llm-task-tree-kit",
+      "ok": true,
+      "detail": "43 个运行时文件一致"
+    },
+    {
+      "label": "本机旧模板兼容副本",
+      "ok": true,
+      "detail": "43 个运行时文件一致"
+    },
+    {
+      "label": "远程 kit huangyu:/data/fqd/llm-task-tree-kit",
+      "ok": true,
+      "detail": "43 个运行时文件一致"
+    },
+    {
+      "label": "远程插件运行时 huangyu:/data/fqd/llm-task-tree-kit",
+      "ok": true,
+      "detail": "43 个运行时文件一致"
+    },
+    {
+      "label": "远程 Codex 插件版本 huangyu:/data/fqd/llm-task-tree-kit",
+      "ok": true,
+      "detail": "version=0.8.0+codex.20260818204315"
+    },
+    {
+      "label": "远程 Cursor 插件版本 huangyu:/data/fqd/llm-task-tree-kit",
+      "ok": true,
+      "detail": "version=0.8.0+codex.20260818204315"
+    },
+    {
+      "label": "远程 Claude 插件版本 huangyu:/data/fqd/llm-task-tree-kit",
+      "ok": true,
+      "detail": "version=0.8.0+codex.20260818204315"
+    }
+  ],
+  "warnings": []
+}

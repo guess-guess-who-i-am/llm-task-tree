@@ -18,13 +18,20 @@ import {
   listProjectThreads,
   openInCodex,
   readPinnedThread,
+  isTaskTreeSystemThread,
   startCodexTurn,
+  taskTreeSystemThreadKind,
   threadDeepLink,
   writePinnedThread
 } from "./server/codex-run.js";
-import { buildPresetPrompt, describePresets } from "./server/codex-prompts.js";
+import {
+  buildAcceptedParallelStateSyncPrompt,
+  buildPresetPrompt,
+  describePresets,
+  resolveAcceptedParallelNodeIds
+} from "./server/codex-prompts.js";
 import { createParallelCodexCoordinator } from "./server/codex-coordinator.js";
-import { createExecutionScopeStore } from "./server/execution-scope.js";
+import { createExecutionScopeStore, executionScopeEnvironment } from "./server/execution-scope.js";
 import { patchNodeFields } from "./server/tree-node-patch.js";
 import { ACTIVE_METHOD_TREE_MAX_BYTES, inspectTreeMarkdown, parseTreeNodeFields } from "./server/tree-quality.js";
 import { changedNodeIds, diffTreeMarkdown } from "./server/tree-diff.js";
@@ -86,18 +93,60 @@ const port = Number(process.env.PORT || 5177);
 const host = process.env.HOST || "127.0.0.1";
 const execFileAsync = promisify(execFile);
 const executionScopes = createExecutionScopeStore({ projectRoot });
-const parallelCodex = createParallelCodexCoordinator({ projectRoot, scopeStore: executionScopes });
+const parallelCodex = createParallelCodexCoordinator({
+  projectRoot,
+  scopeStore: executionScopes,
+  onAccepted: async ({ run, appliedFiles }) => {
+    const nodeIds = resolveAcceptedParallelNodeIds({
+      sourceNodeIds: run.jobs.map((job) => job.nodeId),
+      reportedNodeIds: run.review?.affectedNodes
+    });
+    if (!nodeIds.length) return { status: "skipped", reason: "没有受影响节点" };
+    const scope = await executionScopes.create({
+      runId: run.id,
+      role: "state-sync",
+      targetNodeIds: nodeIds,
+      writableNodeIds: nodeIds,
+      writeSet: ["task-tree.md", "scripts/steps/**"],
+      instruction: "把已接受的并行实现和验收证据同步为精炼的任务树当前状态"
+    });
+    try {
+      const tests = (run.integrationTestResults || []).map((test) => `${test.ok ? "PASS" : "FAIL"} ${test.command}`).join("; ") || "未配置集成命令";
+      const result = await startCodexTurn({
+        cwd: projectRoot,
+        threadName: `任务图状态同步 · ${run.id.slice(0, 8)}`,
+        sandbox: "read-only",
+        approvalPolicy: "never",
+        environment: executionScopeEnvironment(scope),
+        developerInstructions: "Update task-tree state only through task_tree_focus/task_tree_write. Do not edit code, flow order, GraphState, or unrelated nodes.",
+        waitForCompletion: true,
+        prompt: buildAcceptedParallelStateSyncPrompt({
+          scopeId: scope.scopeId,
+          nodeIds,
+          summary: run.review?.summary || run.summary,
+          appliedFiles,
+          integrationTests: tests,
+          coordinatorEvidence: run.review?.evidence
+        })
+      });
+      return { status: "completed", threadId: result.threadId, turnId: result.turnId };
+    } finally {
+      await executionScopes.close(scope.scopeId).catch(() => {});
+    }
+  }
+});
 const treeWriteQueues = new Map();
 let skillIndexCache = null;
 let openWebSearchDaemonPromise = null;
 const CODEX_THREAD_CACHE_TTL_MS = 30 * 1000;
+const CODEX_THREAD_CACHE_MAX = 60;
 const codexThreadCacheFile = path.join(projectRoot, ".task-tree-threads.json");
 
 function loadCodexThreadCache() {
   try {
     const saved = JSON.parse(readFileSync(codexThreadCacheFile, "utf8"));
     return {
-      threads: Array.isArray(saved.threads) ? saved.threads.slice(0, 12) : [],
+      threads: Array.isArray(saved.threads) ? saved.threads.slice(0, CODEX_THREAD_CACHE_MAX) : [],
       fetchedAt: Number(saved.fetchedAt) || 0,
       refresh: null
     };
@@ -109,17 +158,17 @@ function loadCodexThreadCache() {
 let codexThreadCache = loadCodexThreadCache();
 
 function saveCodexThreadCache(threads) {
-  const payload = { fetchedAt: Date.now(), threads: threads.slice(0, 12) };
+  const payload = { fetchedAt: Date.now(), threads: threads.slice(0, CODEX_THREAD_CACHE_MAX) };
   return writeFile(codexThreadCacheFile, `${JSON.stringify(payload, null, 2)}\n`, "utf8").catch(() => {});
 }
 
 function refreshCodexThreadCache() {
   if (codexThreadCache.refresh) return codexThreadCache.refresh;
-  codexThreadCache.refresh = listProjectThreads({ cwd: projectRoot, maxPages: 1, pageSize: 100 })
+  codexThreadCache.refresh = listProjectThreads({ cwd: projectRoot, limit: CODEX_THREAD_CACHE_MAX, maxPages: 1, pageSize: 100 })
     .then(async (recent) => {
-      const threads = recent.length
+      const threads = recent.some((thread) => !isTaskTreeSystemThread(thread))
         ? recent
-        : await listProjectThreads({ cwd: projectRoot, maxPages: 6, pageSize: 100 });
+        : await listProjectThreads({ cwd: projectRoot, limit: CODEX_THREAD_CACHE_MAX, maxPages: 6, pageSize: 100 });
       codexThreadCache = { threads, fetchedAt: Date.now(), refresh: null };
       await saveCodexThreadCache(threads);
       return threads;
@@ -164,7 +213,7 @@ function queueTreeWrite(filePath, operation) {
   const key = path.resolve(filePath).toLowerCase();
   const previous = treeWriteQueues.get(key) || Promise.resolve();
   const current = previous.catch(() => {}).then(operation);
-  const tracked = current.finally(() => {
+  const tracked = current.catch(() => {}).finally(() => {
     if (treeWriteQueues.get(key) === tracked) treeWriteQueues.delete(key);
   });
   treeWriteQueues.set(key, tracked);
@@ -4071,8 +4120,16 @@ const handleRequest = async (req, res) => {
       try {
         const requestUrl = new URL(req.url, `http://${req.headers.host}`);
         const { threads, cache } = await readCodexThreadsFast({ refresh: requestUrl.searchParams.get("refresh") === "1" });
+        const allSystemThreads = threads.filter(isTaskTreeSystemThread);
+        const systemThreads = allSystemThreads.slice(0, 40).map((thread) => ({
+          ...thread,
+          kind: taskTreeSystemThreadKind(thread)
+        }));
+        const projectThreads = threads.filter((thread) => !isTaskTreeSystemThread(thread)).slice(0, 12);
         jsonResponse(res, 200, {
-          threads,
+          threads: projectThreads,
+          systemThreads,
+          systemThreadCount: allSystemThreads.length,
           cache,
           pinned: readPinnedThread(projectRoot),
           presets: describePresets(await readCodexPromptState())
@@ -4134,6 +4191,78 @@ const handleRequest = async (req, res) => {
         jsonResponse(res, 202, { run });
       } catch (error) {
         jsonResponse(res, 400, { error: error.message });
+      }
+      return;
+    }
+
+    if (reqPath === "/api/codex/parallel/plan" && req.method === "POST") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const run = await parallelCodex.plan({ objective: typeof body.objective === "string" ? body.objective.trim() : "" });
+        jsonResponse(res, 201, { run });
+      } catch (error) {
+        jsonResponse(res, 400, { error: error.message });
+      }
+      return;
+    }
+
+    const parallelBranchPlan = reqPath.match(/^\/api\/codex\/parallel\/([A-Za-z0-9-]+)\/branch-plan$/);
+    if (parallelBranchPlan && req.method === "POST") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const proposal = await parallelCodex.branchPlan(parallelBranchPlan[1], {
+          nodeId: typeof body.nodeId === "string" ? body.nodeId.trim() : "",
+          objective: typeof body.objective === "string" ? body.objective.trim() : "",
+          existingJobs: Array.isArray(body.existingJobs) ? body.existingJobs : []
+        });
+        jsonResponse(res, 200, { proposal });
+      } catch (error) {
+        jsonResponse(res, 400, { error: error.message });
+      }
+      return;
+    }
+
+    const parallelAction = reqPath.match(/^\/api\/codex\/parallel\/([A-Za-z0-9-]+)\/(approve|retry|audit|accept|reject)$/);
+    if (parallelAction && req.method === "POST") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const action = parallelAction[2];
+        const run = action === "approve"
+          ? await parallelCodex.approve(parallelAction[1], body)
+          : action === "retry"
+            ? await parallelCodex.retry(parallelAction[1], body)
+          : action === "audit"
+            ? await parallelCodex.audit(parallelAction[1])
+          : action === "accept"
+            ? await parallelCodex.accept(parallelAction[1])
+            : await parallelCodex.reject(parallelAction[1]);
+        jsonResponse(res, ["approve", "retry", "audit"].includes(action) ? 202 : 200, { run });
+      } catch (error) {
+        jsonResponse(res, error.code === "MAIN_WORKSPACE_CHANGED" ? 409 : 400, { error: error.message, files: error.files || [] });
+      }
+      return;
+    }
+
+    const parallelAppend = reqPath.match(/^\/api\/codex\/parallel\/([A-Za-z0-9-]+)\/append$/);
+    if (parallelAppend && req.method === "POST") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const run = await parallelCodex.append(parallelAppend[1], body);
+        jsonResponse(res, 202, { run });
+      } catch (error) {
+        jsonResponse(res, error.code === "CONTEXT_BUSY" ? 409 : 400, { error: error.message });
+      }
+      return;
+    }
+
+    const parallelThreadOpen = reqPath.match(/^\/api\/codex\/parallel\/([A-Za-z0-9-]+)\/thread\/([A-Za-z0-9._-]+)\/open$/);
+    if (parallelThreadOpen && req.method === "POST") {
+      try {
+        const opened = await parallelCodex.openThread(parallelThreadOpen[1], parallelThreadOpen[2]);
+        openInCodex(opened.threadId);
+        jsonResponse(res, 200, opened);
+      } catch (error) {
+        jsonResponse(res, error.code === "THREAD_NOT_READY" ? 409 : 400, { error: error.message });
       }
       return;
     }

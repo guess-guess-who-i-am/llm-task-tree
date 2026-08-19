@@ -60,13 +60,23 @@ try {
     const contentBottom = Math.max(...visibleChildren.map(({ rect }) => rect.bottom), box.top);
     return {
       rows: card.querySelectorAll(".coreSummaryRow").length,
-      actionHeight: card.querySelector(".nodeActions")?.getBoundingClientRect().height || 0,
+      cardWidth: card.offsetWidth,
+      actionWidth: card.querySelector(".nodeActions")?.offsetWidth || 0,
+      actionHeight: card.querySelector(".nodeActions")?.offsetHeight || 0,
+      labelWidth: card.querySelector(".coreSummaryLabel")?.offsetWidth || 0,
+      textWidth: card.querySelector(".coreSummaryText")?.offsetWidth || 0,
       overflow: contentBottom - box.bottom
     };
   }));
   assert.ok(detailStats.every((item) => item.rows === 3), detailStats);
-  assert.ok(detailStats.every((item) => item.actionHeight <= 100), detailStats);
+  assert.ok(detailStats.every((item) => item.actionWidth <= 240 && item.actionHeight <= 55), JSON.stringify(detailStats));
+  assert.ok(detailStats.every((item) => item.cardWidth <= 420
+    ? item.actionHeight <= 30
+    : item.actionWidth <= 135), JSON.stringify(detailStats));
+  assert.ok(detailStats.every((item) => item.labelWidth >= 38 && item.labelWidth <= 54), JSON.stringify(detailStats));
+  assert.ok(detailStats.every((item) => item.textWidth > item.labelWidth * 3), JSON.stringify(detailStats));
   assert.ok(detailStats.every((item) => item.overflow <= 3), detailStats.filter((item) => item.overflow > 3));
+  await page.locator('.graphNode[data-node-id="N3"]').screenshot({ path: "artifacts/inspect-node-columns.png" });
   assert.deepEqual(errors, []);
   console.log(`PASS node core summary is visible at detail zoom (${nodeCount} nodes)`);
 } finally {

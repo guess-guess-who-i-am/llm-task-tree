@@ -2,7 +2,7 @@
 
 > 这个文件是大模型和前端共同维护的任务图。节点保存问题空间，边保存节点之间的关系；每条边只连接两个节点。
 ## ROOT - 建立可共享的大模型任务上下文
-- Position: 2179,70
+- Position: 1759,70
 - Size: 400,420
 - Completion: 进行中
 - Problem: 如何让人类快速看懂、纠正并持续维护大模型的当前工作状态？
@@ -19,7 +19,7 @@
 - SelectedSkills:
 
 ## N1 - 设计 Markdown 节点格式
-- Position: 459,474
+- Position: 245,557
 - Size: 400,720
 - Completion: 已完成
 - Problem: Markdown 如何同时保持人可读、Agent 可写和前端可解析？
@@ -36,24 +36,26 @@
 - SelectedSkills:
 
 ## N2 - 实现可视化图谱编辑器
-- Position: 869,474
+- Position: 636,557
 - Size: 400,420
 - Completion: 进行中
 - Problem: 如何一眼看清关系并直接编辑，同时保持 Markdown 为唯一数据源？
 - Approach:
+  - 摘要和宏观节点按核心文字量自适应；排版预留细节高度。
+  - 详文保留手动尺寸；连线与缩放读取显示尺寸。
 - Input:
 - Output:
 - Metrics:
 - Notes:
 - CodeLoc:
-- CurrentResult: 焦点透镜已上收为顶部单一入口，节点卡片内入口为 0；它仅替换关系图呈现，仍可编辑下一步、设置当前/下一节点、管理执行链、标记完成并让 Codex 继续。三套前端及桌面/手机验收通过；长期体验待验证，目标仅达可测试状态。
-- RootCauseAnalysis:
+- CurrentResult: 节点内尺寸已收敛：窄节点操作栏单行29px，宽节点两行55px；左标签轨道40–52px，正文宽度至少为其3倍。14节点摘要与内容自适应回归通过（宏观6、细节8、手机9种尺寸），标题无裁切、节点无重叠。仍待用户实用验证，“一眼看清并直接编辑”未达到。
+- RootCauseAnalysis: 固定 Size 跨层复用会让短节点空白、长节点受限；节点内又用固定42px标签和3×3操作块，导致不同宽度下左右比例失衡。宏观排版需预留细节高度，否则放大后重叠。
 - CaseStudy:
 - NextIdea:
 - SelectedSkills:
 
 ## N4 - 分析本地 skill 仓库与自动调用机制
-- Position: 3008,474
+- Position: 2533,557
 - Size: 470,750
 - Completion: 已完成
 - Problem: 如何从项目、kit 与全局目录自动选择相关且不重复的 skill？
@@ -70,7 +72,7 @@
 - SelectedSkills: codex:skill-creator
 
 ## N6 - 节点内多模型协作
-- Position: 70,961
+- Position: 70,1190
 - Size: 400,420
 - Completion: 进行中
 - Problem: [子树] 节点级多模型对话、检索与持久化如何闭环？
@@ -90,7 +92,7 @@
 - SubtreeCount: 1
 
 ## N10 - 执行顺序视图
-- Position: 1548,961
+- Position: 1281,1190
 - Size: 520,640
 - Completion: 已完成
 - Problem: 如何把执行顺序与关系图分离并保留节点级证据？
@@ -107,7 +109,7 @@
 - SelectedSkills:
 
 ## N9 - 可移植任务树 Kit 打包
-- Position: 1015,961
+- Position: 810,1190
 - Size: 520,640
 - Completion: 已完成
 - Problem: 如何把任务图能力复制到其它项目且不覆盖既有 AGENTS.md？
@@ -124,27 +126,27 @@
 - SelectedSkills:
 
 ## N3 - 让 Codex 同步维护任务图
-- Position: 2508,474
+- Position: 2103,557
 - Size: 488,953
 - Completion: 进行中
-- Problem: [子树] 如何让 Agent 主动维护核心状态，而不是追加过程历史？
-- Approach:
-- Input:
-- Output:
-- Metrics:
-- Notes: 内置 coordinator 自动注入范围；手动并行会话先用 task_tree_scope 创建范围并传 scopeId。
+- Problem: 如何复用并呈现并行分支上下文，同时抓住根目标？
+- Approach: 继承当前配置；相容分支复用旧对话且可改选；系统会话可进入；隔离执行，双审核写树。
+- Input: 任务树、本轮目标、当前配置。
+- Output: 可复用、可追踪的双审核结果。
+- Metrics: 分支上下文可改选；系统会话可进入；接受前主目录不变；两轮业务保持根目标。
+- Notes:
 - CodeLoc:
-- CurrentResult: 已将发布链统一为可审计版本：本机 32 个有效项目、Codex 两处缓存、Cursor/Claude/Trae 分发与 huangyu 共享 kit 均通过 20/20 一致性检查；侧栏滚动回归连续 3 次通过。仍缺用户真实多平台手动试用，N3 根本目标不能宣称完全达到。
-- RootCauseAnalysis: 源码、共享 kit、平台缓存、远程 kit 与运行进程此前没有统一验收；插件版本未变时宿主会复用旧缓存，导致代码已改但实际平台仍旧。
+- CurrentResult: 已验证：90%后自动换代；新代在隔离worktree读取交接包并继续，旧thread归档、输入清理。回归通过；两轮真实业务待验证，N3进行中。
+- RootCauseAnalysis: 隔离worktree读不到主目录交接路径，且档案缺少上一代结果；现已投送分支内交接包并保存摘要。
 - CaseStudy:
-- NextIdea: 用户在本机 5410 与远程 5633 各手动打开任务图，确认新缓存和共享 kit 的页面体验。
+- NextIdea: 用当前配置连续运行两轮真实业务，检查根目标是否保持。
 - SelectedSkills:
 - Folded: true
 - SubtreeFile: subtrees/N3-subtree.md
 - SubtreeCount: 1
 
 ## N5 - 处理任务树回溯后的文件漂移
-- Position: 2079,961
+- Position: 1672,1190
 - Size: 523,640
 - Completion: 已完成
 - Problem: 树回溯但代码和产物未回滚时，如何避免误判完成或误删文件？
@@ -161,7 +163,7 @@
 - SelectedSkills: codex:skill-creator, agents:write-a-skill
 
 ## ST-P1 - 子树试点A chain-step 审计
-- Position: 3489,474
+- Position: 2923,557
 - Size: 380,280
 - Completion: 已完成
 - Problem: [子树] chain-step 是否泄露后续 Chain？
@@ -181,7 +183,7 @@
 - SubtreeCount: 1
 
 ## ST-P2 - 子树试点B 并行冲突梳理
-- Position: 3899,474
+- Position: 3313,557
 - Size: 380,280
 - Completion: 已完成
 - Problem: [子树] 多 Agent 写树和代码有哪些冲突点？
@@ -201,26 +203,26 @@
 - SubtreeCount: 1
 
 ## N11 - 重构多树上下文与 Agent 维护闭环
-- Position: 2614,961
+- Position: 2062,1190
 - Size: 0,720
 - Completion: 进行中
 - Problem: 如何让人借助任务图舒适地形成局面感、恢复上下文并保持对模型的控制？
 - Approach:
-  - 任务树保持主界面；总览只答根本目标、当前进度和问题。
-  - 滚轮只缩放画布；节点按钮打开透镜查看详情和上下游，关闭后回图居中。
+  - 默认展示任务树和三项精炼状态；知识库、版本和执行链按需展开并记住布局。
+  - 总览看目标、进度、问题；透镜看节点问题、思路、结果和上下游。
 - Input:
-- Output: 三层界面、验收脚本与截图见 llm-task-tree-kit/public/task-tree-prototype-v2/、scripts/test-task-tree-prototype-v2.mjs、artifacts/。
+- Output: 界面与回归：public/，scripts/test-tree-first-workspace.mjs。
 - Metrics: 能否快速说出项目目标、当前问题和焦点依据；缩放与切换全貌后是否保持方向感。
 - Notes:
 - CodeLoc:
-- CurrentResult: 三层导航已验证：总览看方向，普通树缩放，透镜查看节点问题、思路、结果、上下游和详情，关闭后回图居中。桌面与手机测试通过；仍待真实使用反馈，舒适使用目标暂未达到。
-- RootCauseAnalysis: 原设计把缩放与进入透镜绑定，且透镜缺少详情，导致操作中断和反复退出。
+- CurrentResult: 首屏以20字短状态保留知识库、版本和执行链线索，全页389字；桌面和手机回归通过。仍待实用验证，舒适使用目标未达到。
+- RootCauseAnalysis: 完整面板挤压画布，完全隐藏丢失线索；首屏只保留可判断摘要。
 - CaseStudy:
-- NextIdea: 请用户在正式界面实测总览、连续放大进入透镜、上下游切换和关闭定位，再按真实阅读与导航阻力收敛。
+- NextIdea: 请用户完成一次项目回顾和节点推进，记录仍需追问或主动展开的内容。
 - SelectedSkills:
 
 ## N7 - 集成 Markdown 知识库检索面板
-- Position: 482,961
+- Position: 419,1190
 - Size: 520,420
 - Completion: 已完成
 - Problem: 如何索引本地 Markdown、检索/问答并把证据送入节点级多模型？
@@ -237,7 +239,7 @@
 - SelectedSkills:
 
 ## N12 - 让 Agent 直接调用任务图
-- Position: 3024,961
+- Position: 2493,1190
 - Size: 0,720
 - Completion: 已完成
 - Problem: 如何让 Agent 结构化读写任务图，并让图界面反向续接 Codex 会话？
@@ -247,8 +249,8 @@
 - Metrics:
 - Notes:
 - CodeLoc:
-- CurrentResult: README 视觉升级已可宣称达成：线上页面以单一承诺和完整横屏任务图开场，再按总览、宏观主干、焦点节点和执行流程展示真实界面；22.16 秒、1440×900 的 H.264 MP4 经 jsDelivr 返回 `video/mp4`，Edge 播放器实测可读完。公开构建含 242 个文件、9.88 MiB，路径与凭据扫描均为 0；真实用户采用和反馈仍未验证。
-- RootCauseAnalysis: 旧 README 用徽章墙和三联缩略图同时解释多项能力，真实树文字在 GitHub 宽度下几乎不可读。根因是按工具说明页堆信息，而非按“核心主张→真实画面→逐层理解”组织产品叙事。
+- CurrentResult: 新版 README 演示已发布至 GitHub main 提交 9f6e7b1：01 固定项目局面，02 展示主干方向，03 演示 NextIdea→Codex→CurrentResult。远端 MP4 为 2,113,213 bytes，Git blob 与本地一致，jsDelivr SHA-256 相同；Edge 实测 readyState=4、1600×900、20 秒并正常播放。仍待真实观众比较理解与采用，采用目标不能宣称达到。
+- RootCauseAnalysis: 01 和旧 03 都用“左侧列表逐项切换、右侧卡片逐项高亮”，虽然层级不同，读者感知仍是重复说明。根因是按界面字段分段，而非按叙事功能分工。
 - CaseStudy:
 - NextIdea:
 - SelectedSkills:

@@ -47,6 +47,7 @@
           <button id="embedExpandBtn" type="button" class="embedExpandBtn" title="在对话里铺开" aria-pressed="false" hidden>⤢</button>
           <button id="saveBtn" title="Save to task-tree.md">💾</button>
           <button id="reloadBtn" title="Reload Markdown">↻</button>
+          <button id="codexParallelBtn" type="button" class="codexParallelToolbarBtn" title="自动规划多个独立分支；你只在开始和结束各确认一次"><span aria-hidden="true">⇉</span><span class="codexParallelToolbarLabel">自动并行</span></button>
           <span class="codexLaunch">
             <button id="openInCodexBtn" type="button" class="openInCodexBtn" title="让 Codex 执行 Next 节点的 NextIdea，自动跑一轮，不用按回车。默认续用本项目上次那条会话；点右边的 ▾ 可以直接跟它说别的">Codex</button>
             <button id="codexThreadsBtn" type="button" class="codexThreadsBtn" title="换一条会话，或新开一条" aria-haspopup="menu" aria-expanded="false">▾</button>
@@ -61,8 +62,8 @@
         <button type="button" id="workspaceBannerExitBtn">返回主树</button>
       </div>
 
-      <main class="layout">
-        <aside class="knowledgePane" aria-label="Knowledge base">
+      <main class="layout is-left-pane-collapsed is-right-pane-collapsed">
+        <aside class="knowledgePane" aria-label="Knowledge base" aria-hidden="true">
           <div class="paneHeader">
             <strong>知识库</strong>
             <span id="knowledgeState">未配置</span>
@@ -135,8 +136,6 @@
           <div class="paneResizeHandle paneResizeHandle--left" data-pane-resize="left" aria-label="拖动调整知识库宽度" title="拖动调整宽度"></div>
         </aside>
         <section class="graphPane" aria-label="Task graph">
-          <button type="button" id="toggleLeftPaneBtn" class="paneEdgeToggle paneEdgeToggle--left" aria-expanded="true" title="收起知识库">‹</button>
-          <button type="button" id="toggleRightPaneBtn" class="paneEdgeToggle paneEdgeToggle--right" aria-expanded="true" title="收起版本树">›</button>
           <div class="paneHeader">
             <div class="graphPaneHeadRow">
               <strong>任务图谱</strong>
@@ -145,13 +144,25 @@
                 <button type="button" class="graphViewBtn" data-graph-view="flow">执行流程</button>
               </div>
             </div>
-            <span>
+            <span class="graphPaneStatusRow">
+              <span class="workspaceSummaryBar" aria-label="辅助信息状态">
+                <button type="button" id="toggleLeftPaneBtn" class="workspaceSummaryItem" aria-expanded="false" title="展开知识库">
+                  <span class="workspaceSummaryName">知识库</span>
+                  <span id="knowledgePaneSummary" class="workspaceSummaryMeta">载入中</span>
+                  <span class="workspaceSummaryChevron" aria-hidden="true">›</span>
+                </button>
+                <button type="button" id="toggleRightPaneBtn" class="workspaceSummaryItem" aria-expanded="false" title="展开版本树">
+                  <span class="workspaceSummaryName">版本</span>
+                  <span id="versionPaneSummary" class="workspaceSummaryMeta">载入中</span>
+                  <span class="workspaceSummaryChevron" aria-hidden="true">‹</span>
+                </button>
+              </span>
               <span id="nodeCount"></span>
               <span id="linkState"></span>
               <span id="saveState">已加载</span>
               <span class="graphExportBtns">
-                <button type="button" id="exportTreeSvgBtn" class="graphExportBtn" title="导出关系图 SVG（自动撑高+树形排版，样式与界面一致）">⤓ 关系图</button>
-                <button type="button" id="exportFlowSvgBtn" class="graphExportBtn" title="导出执行流程脚本为 SVG 矢量图">⤓ 流程图</button>
+                <button type="button" id="exportTreeSvgBtn" class="graphExportBtn" title="导出关系图 SVG（自动撑高+树形排版，样式与界面一致）" aria-label="导出关系图 SVG">⤓</button>
+                <button type="button" id="exportFlowSvgBtn" class="graphExportBtn" title="导出执行流程脚本为 SVG 矢量图" aria-label="导出执行流程 SVG">⤓</button>
               </span>
             </span>
           </div>
@@ -166,7 +177,6 @@
             <header class="focusLensHeader">
               <div>
                 <span class="focusLensEyebrow">焦点透镜</span>
-                <p>只改变关系图的阅读方式；编辑、执行链和其它面板照常使用</p>
               </div>
               <button type="button" id="focusLensClose" aria-label="关闭焦点透镜" title="关闭并定位到当前节点">×</button>
             </header>
@@ -175,7 +185,7 @@
           </section>
           <div id="flowViewHost" class="flowViewHost" hidden></div>
         </section>
-        <aside class="versionPane" aria-label="Version history">
+        <aside class="versionPane" aria-label="Version history" aria-hidden="true">
           <div class="paneHeader">
             <strong>版本树</strong>
             <span id="versionState">已加载</span>
@@ -190,8 +200,10 @@
         <code id="chainLoopCmdText" class="chainLoopCmdText"></code>
         <button type="button" id="chainLoopCmdCopyBtn" class="chainLoopCmdCopyBtn" title="复制 loop 命令，给 Cursor 或别的 Agent 用">复制</button>
       </div>
-      <footer class="chainDock" aria-label="Agent 执行链">
+      <footer class="chainDock is-collapsed" aria-label="Agent 执行链">
+        <button id="toggleChainDockBtn" type="button" class="chainDockToggle" title="展开执行链" aria-expanded="false">⌃</button>
         <span class="chainDockLabel">执行链</span>
+        <span id="chainDockSummary" class="chainDockSummary">0 个节点</span>
         <div id="chainSlot" class="chainSlot"></div>
         <button id="chainLoopHelpBtn" type="button" class="chainLoopHelpBtn" title="链式 loop 使用说明">循环说明</button>
         <button id="chainClearBtn" type="button" class="chainClearBtn" title="清空执行链">清空</button>
@@ -262,20 +274,81 @@
     </dialog>
     <dialog id="codexParallelDialog" class="codexParallelDialog" aria-label="并行 Codex 运行">
       <div class="codexParallelHeader">
-        <strong>并行 Codex</strong>
+        <strong>自动并行</strong>
         <button type="button" id="codexParallelClose" title="关闭">×</button>
       </div>
+      <div id="codexParallelStageRail" class="codexParallelStageRail" aria-label="并行阶段">
+        <span class="codexParallelStage" data-stage="planning">规划</span>
+        <span class="codexParallelStage" data-stage="execution">执行</span>
+        <span class="codexParallelStage" data-stage="summary">汇总</span>
+        <span class="codexParallelStage" data-stage="review">审核</span>
+        <span class="codexParallelStage" data-stage="applied">应用</span>
+      </div>
       <form id="codexParallelForm" class="codexParallelForm">
-        <div class="codexParallelTableWrap">
+        <div class="codexParallelObjective" id="codexParallelObjectiveBar">
+          <label for="codexParallelObjective">本轮目标</label>
+          <input id="codexParallelObjective" type="text" maxlength="4000" placeholder="留空则按当前任务树规划">
+          <button type="button" id="codexParallelRegenerate" title="按本轮目标重新生成并行草案">更新计划</button>
+        </div>
+        <details class="codexParallelSummary" id="codexParallelSummary" hidden>
+          <summary>规划依据</summary>
+          <p id="codexParallelSummaryText"></p>
+        </details>
+        <section id="codexParallelGoalReview" class="codexParallelGoalReview" hidden>
+          <div>
+            <span id="codexParallelGoalLabel">本轮目标</span>
+            <strong id="codexParallelGoalText"></strong>
+          </div>
+          <div>
+            <span id="codexParallelGoalStatus"></span>
+            <p id="codexParallelGoalResult"></p>
+          </div>
+        </section>
+        <details id="codexParallelContexts" class="codexParallelContexts" hidden>
+          <summary><span>分支上下文</span><strong id="codexParallelContextSummary"></strong></summary>
+          <div class="codexParallelContextBody">
+            <div id="codexParallelContextAssignments" class="codexParallelContextGroup"></div>
+            <div id="codexParallelContextPool" class="codexParallelContextGroup"></div>
+          </div>
+        </details>
+        <div id="codexParallelPlanTools" class="codexParallelPlanTools" hidden>
+          <label class="codexParallelAppendTarget" for="codexParallelAppendNode">
+            <span>继续到</span>
+            <select id="codexParallelAppendNode" aria-label="选择要继续并行的任务节点"></select>
+          </label>
+          <button type="button" id="codexParallelAddBranch" title="添加一个并行分支" aria-label="添加一个并行分支">+</button>
+        </div>
+        <div class="codexParallelTableWrap" id="codexParallelTableWrap">
           <table class="codexParallelTable">
-            <thead><tr><th>启用</th><th>节点</th><th>任务</th><th>独占写集</th></tr></thead>
+            <thead><tr><th>状态</th><th>分支</th><th>推进</th></tr></thead>
             <tbody id="codexParallelRows"></tbody>
           </table>
         </div>
+        <section id="codexParallelReview" class="codexParallelReview" hidden>
+          <div class="codexParallelReviewGrid">
+            <div><span>变更</span><strong id="codexParallelFiles"></strong></div>
+            <div><span>测试</span><strong id="codexParallelTests"></strong></div>
+          </div>
+          <div id="codexParallelReviewWarning" class="codexParallelReviewWarning" hidden></div>
+          <details>
+            <summary>查看代码差异</summary>
+            <pre id="codexParallelPatch"></pre>
+          </details>
+        </section>
         <div class="codexParallelActions">
-          <span id="codexParallelState" role="status"></span>
-          <button type="button" id="codexParallelOpen" hidden>打开协调任务</button>
-          <button type="submit" id="codexParallelStart">开始并行</button>
+          <span id="codexParallelState" class="codexParallelState" role="status"></span>
+          <details id="codexParallelMore" class="codexParallelMore" hidden>
+            <summary>更多</summary>
+            <div class="codexParallelMorePanel">
+              <button type="button" id="codexParallelAudit" hidden>重新核验目标</button>
+              <button type="button" id="codexParallelOpen" hidden>打开协调任务</button>
+            </div>
+          </details>
+          <button type="button" id="codexParallelRetry" hidden>修订并重跑失败分支</button>
+          <button type="button" id="codexParallelAppendConfirm" hidden>确认加入分支</button>
+          <button type="button" id="codexParallelReject" hidden>丢弃结果</button>
+          <button type="button" id="codexParallelAccept" hidden>接受并应用</button>
+          <button type="submit" id="codexParallelStart" disabled>确认开始并行</button>
         </div>
       </form>
     </dialog>

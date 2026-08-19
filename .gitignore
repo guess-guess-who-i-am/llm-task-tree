@@ -3,6 +3,8 @@
 .task-tree-thread
 .task-tree-threads.json
 .task-tree-runs/
+.task-tree-scopes/
+.task-tree-context/
 llm-task-tree/widget-report.json
 llm-task-tree/api-bridge-log.txt
 .env

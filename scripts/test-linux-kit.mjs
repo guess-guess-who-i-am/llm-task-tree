@@ -157,7 +157,7 @@ try {
   ], projectDir);
   assert.equal(session.stderr.trim(), "", `stub wrote to stderr: ${session.stderr.slice(0, 300)}`);
   assert.equal(session.responses.find((item) => item.id === 1).result.serverInfo.name, "llm-task-tree");
-  assert.equal(session.responses.find((item) => item.id === 2).result.tools.length, 17);
+  assert.equal(session.responses.find((item) => item.id === 2).result.tools.length, 18);
   const focus = JSON.parse(session.responses.find((item) => item.id === 3).result.content[0].text);
   assert.equal(path.resolve(focus.projectRoot), projectDir);
   assert.equal(focus.graphState.current, "ROOT");

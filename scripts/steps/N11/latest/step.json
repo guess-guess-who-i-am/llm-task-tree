@@ -2,7 +2,7 @@
   "schema": "flow-step/v1",
   "nodeId": "N11",
   "blockId": "",
-  "updatedAt": "2026-08-12T05:45:21.243Z",
+  "updatedAt": "2026-08-17T12:35:39.2614588+08:00",
   "title": "多树上下文与 Agent 维护闭环",
   "reportZh": "report.zh.md",
   "substeps": [
@@ -466,6 +466,61 @@
         },
         {
           "path": "artifacts/focus-lens-mobile.png"
+        }
+      ]
+    },
+    {
+      "title": "将默认工作台收敛为精炼状态常驻",
+      "functions": [
+        {
+          "path": "public/app.js",
+          "line": 5845,
+          "name": "syncPaneSummaryBar"
+        },
+        {
+          "path": "public/app.js",
+          "line": 3941,
+          "name": "renderChainDock"
+        },
+        {
+          "path": "public/app.js",
+          "line": 5874,
+          "name": "initPaneCollapseState"
+        },
+        {
+          "path": "public/app.js",
+          "line": 5902,
+          "name": "applyChainDockCollapseState"
+        },
+        {
+          "path": "public/styles.css",
+          "line": 5384,
+          "name": "mobile tree-first workspace layout"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "task-tree.md"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "public/index.html"
+        },
+        {
+          "path": "public/app.js"
+        },
+        {
+          "path": "public/styles.css"
+        },
+        {
+          "path": "scripts/test-tree-first-workspace.mjs"
+        },
+        {
+          "path": "artifacts/tree-first-workspace-desktop.png"
+        },
+        {
+          "path": "artifacts/tree-first-workspace-mobile.png"
         }
       ]
     }

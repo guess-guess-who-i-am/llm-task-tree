@@ -39,6 +39,34 @@ const TURN_TIMEOUT_MS = 10 * 60 * 1000;
 /** Failing to even accept the turn should surface fast instead of hanging the button. */
 const ACCEPT_TIMEOUT_MS = 60 * 1000;
 
+/**
+ * App-server versions have used slightly different names for the usage payload. Keep the
+ * normalization here so callers never need to depend on a wire-format detail.
+ */
+export function normalizeThreadTokenUsage(params = {}) {
+  const raw = params?.tokenUsage || params?.usage || params?.token_usage || params || {};
+  const totals = raw?.total && typeof raw.total === "object" ? raw.total : raw;
+  const pick = (...keys) => keys.map((key) => totals?.[key] ?? raw?.[key]).find((value) => Number.isFinite(Number(value)));
+  const inputTokens = Number(pick("inputTokens", "input_tokens", "promptTokens", "prompt_tokens")) || 0;
+  const outputTokens = Number(pick("outputTokens", "output_tokens", "completionTokens", "completion_tokens")) || 0;
+  const cachedInputTokens = Number(pick("cachedInputTokens", "cached_input_tokens", "cacheReadInputTokens")) || 0;
+  const totalTokens = Number(pick("totalTokens", "total_tokens", "tokens")) || inputTokens + outputTokens;
+  const contextWindow = Number(pick("modelContextWindow", "model_context_window", "contextWindow", "context_window", "maxContextTokens", "max_context_tokens")) || 0;
+  const explicitPercent = Number(pick("usedPercent", "used_percent", "usagePercent", "usage_percent", "percent"));
+  const percent = Number.isFinite(explicitPercent)
+    ? (explicitPercent > 1 ? explicitPercent / 100 : explicitPercent)
+    : (contextWindow > 0 ? totalTokens / contextWindow : null);
+  return {
+    inputTokens,
+    outputTokens,
+    cachedInputTokens,
+    totalTokens,
+    contextWindow,
+    percent: Number.isFinite(percent) ? Math.max(0, Math.min(1, percent)) : null,
+    updatedAt: new Date().toISOString()
+  };
+}
+
 function newestCodexInBinDir(binDir) {
   if (!existsSync(binDir)) return "";
   const candidates = readdirSync(binDir)
@@ -150,6 +178,14 @@ class AppServerSession {
     });
   }
 
+  sendNotification(method, params) {
+    this.child.stdin.write(`${JSON.stringify({
+      jsonrpc: "2.0",
+      method,
+      ...(params === undefined ? {} : { params })
+    })}\n`);
+  }
+
   close() {
     this.child.kill();
   }
@@ -192,6 +228,7 @@ export async function withSession(spawnCodex, run) {
       ACCEPT_TIMEOUT_MS,
       "连接 codex app-server"
     );
+    session.sendNotification("initialized");
     return await run(session);
   } finally {
     session.close();
@@ -250,6 +287,7 @@ export async function startCodexTurn({
   prompt = OPEN_GRAPH_PROMPT,
   cwd,
   threadId: wanted = "",
+  forkThreadId = "",
   threadName = PINNED_THREAD_NAME,
   model = null,
   sandbox = "read-only",
@@ -258,25 +296,58 @@ export async function startCodexTurn({
   developerInstructions = null,
   environment = null,
   waitForCompletion = false,
+  completionTimeoutMs = TURN_TIMEOUT_MS,
+  totalTimeoutMs = null,
+  forceNewThread = false,
+  onUsage = null,
+  onContextCompaction = null,
+  onNotification = null,
+  onAccepted = null,
   spawnCodex = spawnAppServer
 } = {}) {
   const session = new AppServerSession(spawnCodex(environment || {}));
+  const startedAt = Date.now();
+  const waitFor = (promise, timeoutMs, label) => {
+    const remaining = Number.isFinite(totalTimeoutMs) && totalTimeoutMs > 0
+      ? Math.max(1, totalTimeoutMs - (Date.now() - startedAt))
+      : timeoutMs;
+    return withTimeout(promise, Math.min(timeoutMs, remaining), label);
+  };
 
   try {
-    await withTimeout(
+    await waitFor(
       session.request("initialize", { clientInfo: { name: "task-tree-ui", title: "任务图", version: "1.0.0" } }),
       ACCEPT_TIMEOUT_MS,
       "连接 codex app-server"
     );
+    session.sendNotification("initialized");
 
     // Resuming loads the conversation's history, so the turn lands in the thread the user is
     // already working in instead of starting a stranger. A thread that was archived or deleted
     // outside the UI should not turn a click into an error, so that case falls through to a new one.
     let resumed = false;
+    let forked = false;
     let started = null;
-    if (wanted) {
+    if (!forceNewThread && forkThreadId) {
+      started = await waitFor(
+        session.request("thread/fork", {
+          threadId: forkThreadId,
+          cwd,
+          sandbox,
+          approvalPolicy,
+          ...(config ? { config } : {}),
+          ...(model ? { model } : {}),
+          ...(developerInstructions ? { developerInstructions } : {})
+        }),
+        ACCEPT_TIMEOUT_MS,
+        "复制已有对话"
+      );
+      forked = Boolean(started?.thread?.id || started?.threadId);
+      if (!forked) throw new Error("Codex 没有返回复制后的对话 id");
+    }
+    if (!forceNewThread && !started && wanted) {
       try {
-        started = await withTimeout(session.request("thread/resume", { threadId: wanted }), ACCEPT_TIMEOUT_MS, "恢复会话");
+        started = await waitFor(session.request("thread/resume", { threadId: wanted }), ACCEPT_TIMEOUT_MS, "恢复会话");
         // A conversation belongs to the directory it was started in, and resuming one from another
         // project would quietly file this project's work under someone else's history. A stale pin
         // is not worth that, so it is dropped and a fresh conversation takes over.
@@ -289,7 +360,7 @@ export async function startCodexTurn({
     }
 
     if (!started) {
-      started = await withTimeout(
+      started = await waitFor(
         session.request("thread/start", {
           cwd,
           sandbox,
@@ -306,20 +377,25 @@ export async function startCodexTurn({
     const threadId = started?.thread?.id || started?.threadId;
     if (!threadId) throw new Error("codex 没有返回会话 id");
 
-    // A named thread is findable in the app's list; an id is not. Failure here is cosmetic.
-    if (!resumed) {
-      try {
-        await withTimeout(session.request("thread/name/set", { threadId, name: threadName }), ACCEPT_TIMEOUT_MS, "命名会话");
-      } catch { /* the thread still works unnamed */ }
-    }
-
     let failure = "";
+    let lastTokenUsage = null;
+    let contextCompactions = 0;
     let finish = () => {};
     const completed = new Promise((resolve) => { finish = resolve; });
 
     session.notify = (message) => {
       const params = message.params || {};
       if (params.threadId && params.threadId !== threadId) return;
+      Promise.resolve(onNotification?.(message)).catch(() => {});
+
+      if (message.method === "thread/tokenUsage/updated") {
+        lastTokenUsage = normalizeThreadTokenUsage(params);
+        Promise.resolve(onUsage?.(lastTokenUsage)).catch(() => {});
+      }
+      if (message.method === "item/completed" && params.item?.type === "contextCompaction") {
+        contextCompactions += 1;
+        Promise.resolve(onContextCompaction?.({ threadId, item: params.item })).catch(() => {});
+      }
 
       // A retrying error is Codex narrating a hiccup ("Reconnecting... 1/5"), not a dead turn.
       if (message.method === "error" && params.willRetry !== true) {
@@ -336,14 +412,22 @@ export async function startCodexTurn({
       }
     };
 
-    const accepted = await withTimeout(
+    const accepted = await waitFor(
       session.request("turn/start", { threadId, input: [{ type: "text", text: prompt }] }),
       ACCEPT_TIMEOUT_MS,
       "发起对话"
     );
+    // Naming is cosmetic. Start the real work first so an unsupported or slow naming request
+    // cannot consume a planner's entire total timeout before turn/start is even sent.
+    if (!resumed) {
+      session.request("thread/name/set", { threadId, name: threadName }).catch(() => {});
+    }
+    if (typeof onAccepted === "function") {
+      await onAccepted({ threadId, turnId: accepted?.turn?.id || null });
+    }
 
     if (waitForCompletion) {
-      const turn = await withTimeout(completed, TURN_TIMEOUT_MS, "等待 Codex 完成");
+      const turn = await waitFor(completed, completionTimeoutMs, "等待 Codex 完成");
       const messages = (turn?.items || [])
         .filter((item) => item?.type === "agentMessage" && typeof item.text === "string")
         .map((item) => item.text.trim())
@@ -360,15 +444,18 @@ export async function startCodexTurn({
         threadId,
         turnId: turn?.id || accepted?.turn?.id || null,
         resumed,
+        forked,
         status: turn?.status || "completed",
         output
+        ,tokenUsage: lastTokenUsage
+        ,contextCompactions
       };
     }
 
     // Nothing awaits the rest of the turn; this only guarantees the child is reaped.
     setTimeout(() => session.close(), TURN_TIMEOUT_MS).unref?.();
 
-    return { threadId, turnId: accepted?.turn?.id || null, resumed };
+    return { threadId, turnId: accepted?.turn?.id || null, resumed, forked, tokenUsage: lastTokenUsage, contextCompactions };
   } catch (error) {
     session.close();
     throw error;
@@ -377,6 +464,31 @@ export async function startCodexTurn({
 
 export function threadDeepLink(threadId) {
   return `codex://threads/${threadId}`;
+}
+
+/** Archive a completed context generation without deleting its history. */
+export async function archiveCodexThread(threadId, { spawnCodex = spawnAppServer } = {}) {
+  const id = String(threadId || "").trim();
+  if (!id) return false;
+  await withSession(spawnCodex, async (session) => {
+    await withTimeout(session.request("thread/archive", { threadId: id }), ACCEPT_TIMEOUT_MS, "归档 Codex 上下文");
+  });
+  return true;
+}
+
+export function isTaskTreeSystemThread(thread) {
+  const text = `${thread?.name || ""} ${thread?.preview || ""}`;
+  return /(?:【?Task Tree\s*[·:-]|任务图(?:\s*[·：:-]|状态同步|并行|规划))/i.test(text);
+}
+
+export function taskTreeSystemThreadKind(thread) {
+  const text = `${thread?.name || ""} ${thread?.preview || ""}`;
+  if (/Single Parallel Branch Planner|新增并行分支/i.test(text)) return "branch-planner";
+  if (/Automatic Parallel Planner|自动规划/i.test(text)) return "planner";
+  if (/Isolated Parallel Worker|任务图\s*·\s*并行/i.test(text)) return "worker";
+  if (/Parallel Coordinator|任务图\s*·\s*汇总/i.test(text)) return "coordinator";
+  if (/状态同步|tree.?sync/i.test(text)) return "sync";
+  return "internal";
 }
 
 /** Hands the url to the OS so the desktop app comes forward on the thread we just started. */

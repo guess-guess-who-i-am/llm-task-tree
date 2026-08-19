@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "business-routing-run-001",
+  "status": "accepted",
+  "objective": "并行更新订单履约资格与优先级规则，并在本地集成测试中确认组合决策。",
+  "summary": "两个隔离分支均已完成并集成，离线测试通过，审核结果已接受。",
+  "affectedNodes": [
+    "N3"
+  ],
+  "jobs": [
+    {
+      "taskId": "eligibility-rule",
+      "nodeId": "N3",
+      "status": "completed",
+      "isolated": true,
+      "writeSet": [
+        "business/eligibility.mjs"
+      ],
+      "changedFiles": [
+        "business/eligibility.mjs"
+      ]
+    },
+    {
+      "taskId": "priority-rule",
+      "nodeId": "N3",
+      "status": "completed",
+      "isolated": true,
+      "writeSet": [
+        "business/priority.mjs"
+      ],
+      "changedFiles": [
+        "business/priority.mjs"
+      ]
+    }
+  ],
+  "review": {
+    "readyToAccept": true,
+    "changedFiles": [
+      "business/eligibility.mjs",
+      "business/priority.mjs"
+    ],
+    "appliedFiles": [
+      "business/eligibility.mjs",
+      "business/priority.mjs"
+    ],
+    "integrationTests": [
+      {
+        "command": "node tests/order-routing.integration.mjs",
+        "status": "passed",
+        "exitCode": 0,
+        "evidenceFile": "evidence/integration-test.json"
+      }
+    ],
+    "treeSync": {
+      "status": "completed",
+      "affectedNodes": [
+        "N3"
+      ]
+    }
+  },
+  "goalAssessment": {
+    "localCapability": "verified",
+    "realBusinessEvidence": "missing",
+    "goalAchieved": false,
+    "residualGap": "该运行只证明本地夹具中的执行、集成和状态同步；尚无真实业务项目的使用与业务验收记录。"
+  }
+}

@@ -9,7 +9,7 @@
       "name": "task-tree",
       "displayName": "LLM Task Tree",
       "description": "让人与 Agent 通过可视任务图共享项目目标、进度、方法和下一步。",
-      "version": "0.8.0+codex.20260816062259",
+      "version": "0.8.0+codex.20260819134500",
       "source": "./marketplace/plugins/task-tree",
       "category": "productivity"
     }

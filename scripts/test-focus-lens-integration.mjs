@@ -74,9 +74,11 @@ async function verifyViewport(page, screenshotName, nodeId, { automaticZoom = tr
   assert.equal(await openButton.getAttribute("aria-pressed"), "true");
   assert.equal(await page.locator(".focusLensNodeId").innerText(), nodeId);
   const text = await page.locator(".focusLensCenter").innerText();
-  assert.match(text, /解决什么问题/);
-  assert.match(text, /思路怎么做/);
-  assert.match(text, /结果如何/);
+  assert.match(text, /问题/);
+  assert.match(text, /思路/);
+  assert.match(text, /结果/);
+  assert(text.replace(/\s+/g, " ").trim().length <= 430, `focus center is still too dense: ${text.length}`);
+  assert.equal(await page.locator(".focusLensRelation").evaluateAll((items) => items.every((item) => item.innerText.replace(/\s+/g, " ").trim().length <= 36)), true);
   assert.equal(await page.locator("#openInCodexBtn").isVisible(), true, "top-level Codex action must remain available");
   assert.equal(await page.locator(".chainDock").isVisible(), true, "execution chain must remain available");
   await page.locator(".graphViewBtn[data-graph-view='flow']").click();
@@ -88,6 +90,7 @@ async function verifyViewport(page, screenshotName, nodeId, { automaticZoom = tr
   assert.equal(await nextIdea.count(), 1, "focus lens must expose the Agent NextIdea editor");
   const marker = `焦点透镜验收-${nodeId}`;
   await nextIdea.fill(marker);
+  await page.locator(".focusLensActionsMenu > summary").click();
   await page.locator("[data-focus-lens-action='set-next']").click();
   assert.equal(await page.locator("[data-focus-lens-action='set-next']").getAttribute("aria-pressed"), "true");
   assert.equal(await page.locator(".focusLensNextIdeaInput").inputValue(), marker);
@@ -130,6 +133,7 @@ async function verifyViewport(page, screenshotName, nodeId, { automaticZoom = tr
 
   await openButton.click();
   await page.locator(".focusLensNextIdeaInput").fill(`发送验收-${finalId}`);
+  await page.locator(".focusLensActionsMenu > summary").click();
   await page.locator("[data-focus-lens-action='set-next']").click();
   await page.locator("[data-focus-lens-action='run-agent']").click();
   assert.deepEqual(await codexRequest, { preset: "next" }, "lens run must use the saved Next node preset");

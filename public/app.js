@@ -8,6 +8,9 @@ const KB_HISTORY_MAX_TURNS = 12;
 const IO_FILE_PREVIEW_CHARS = 3600;
 const KB_HISTORY_STORAGE_KEY = "taskTree.knowledgeHistory";
 const LEFT_PANE_WIDTH_STORAGE_KEY = "taskTree.leftPaneWidth";
+const LEFT_PANE_COLLAPSED_STORAGE_KEY = "taskTree.leftPaneCollapsed.v2";
+const RIGHT_PANE_COLLAPSED_STORAGE_KEY = "taskTree.rightPaneCollapsed.v2";
+const CHAIN_DOCK_COLLAPSED_STORAGE_KEY = "taskTree.chainDockCollapsed.v1";
 const LEFT_PANE_MIN_WIDTH = 260;
 const LEFT_PANE_MAX_WIDTH = 960;
 const USER_GRAPH_STATE_STORAGE_KEY = "taskTree.userGraphState";
@@ -193,6 +196,7 @@ let knowledgeRetrievalStatus = "";
 let knowledgeReindexJob = null;
 let leftPaneCollapsed = false;
 let rightPaneCollapsed = false;
+let chainDockCollapsed = true;
 let leftPaneWidth = null;
 const floatingPanelOffsets = { io: {}, skill: {}, model: {} };
 const floatingPanelSizes = { io: {} };
@@ -211,11 +215,26 @@ let activeMethodTreeId = "method";
 let maintenanceStatus = null;
 let focusLensId = "";
 let focusLensOpen = false;
-const card = { width: 520, height: 720, minWidth: 400, minHeight: 420, compactMinHeight: 190, compactMaxHeight: 340, compactFocusMaxHeight: 420 };
+let codexParallelContextOptions = [];
+const codexParallelPendingAppendJobs = new Map();
+let codexParallelBranchPlanning = false;
+const card = {
+  width: 520,
+  height: 720,
+  minWidth: 400,
+  minHeight: 420,
+  compactMinWidth: 340,
+  compactMaxWidth: 480,
+  compactMinHeight: 150,
+  compactMaxHeight: 420,
+  compactFocusMaxHeight: 560
+};
 const NODE_CARD_COMPACT_STORAGE_KEY = "taskTree.nodeCardCompact";
 const PROJECT_OVERVIEW_SEEN_KEY = "taskTree.projectOverviewSeen";
 const GRAPH_MAX_SCALE = 2.4;
 const nodeDetailsOpenIds = new Set();
+const renderedCompactNodeSizes = new Map();
+let compactNodeMeasureFrame = 0;
 let nodeCardCompact = (() => {
   try {
     const saved = localStorage.getItem(NODE_CARD_COMPACT_STORAGE_KEY);
@@ -241,6 +260,7 @@ const els = {
   linkState: document.querySelector("#linkState"),
   saveState: document.querySelector("#saveState"),
   versionState: document.querySelector("#versionState"),
+  versionPaneSummary: document.querySelector("#versionPaneSummary"),
   versionList: document.querySelector("#versionList"),
   addChildBtn: document.querySelector("#addChildBtn"),
   edgeDimOpacityInput: document.querySelector("#edgeDimOpacity"),
@@ -259,16 +279,48 @@ const els = {
   reloadBtn: document.querySelector("#reloadBtn"),
   openInCodexBtn: document.querySelector("#openInCodexBtn"),
   codexThreadsBtn: document.querySelector("#codexThreadsBtn"),
+  codexParallelBtn: document.querySelector("#codexParallelBtn"),
   codexThreadMenu: document.querySelector("#codexThreadMenu"),
   codexParallelDialog: document.querySelector("#codexParallelDialog"),
   codexParallelClose: document.querySelector("#codexParallelClose"),
   codexParallelForm: document.querySelector("#codexParallelForm"),
+  codexParallelStageRail: document.querySelector("#codexParallelStageRail"),
+  codexParallelObjectiveBar: document.querySelector("#codexParallelObjectiveBar"),
+  codexParallelObjective: document.querySelector("#codexParallelObjective"),
   codexParallelRows: document.querySelector("#codexParallelRows"),
   codexParallelState: document.querySelector("#codexParallelState"),
+  codexParallelSummary: document.querySelector("#codexParallelSummary"),
+  codexParallelSummaryText: document.querySelector("#codexParallelSummaryText"),
+  codexParallelGoalReview: document.querySelector("#codexParallelGoalReview"),
+  codexParallelGoalLabel: document.querySelector("#codexParallelGoalLabel"),
+  codexParallelGoalText: document.querySelector("#codexParallelGoalText"),
+  codexParallelGoalStatus: document.querySelector("#codexParallelGoalStatus"),
+  codexParallelGoalResult: document.querySelector("#codexParallelGoalResult"),
+  codexParallelContexts: document.querySelector("#codexParallelContexts"),
+  codexParallelContextSummary: document.querySelector("#codexParallelContextSummary"),
+  codexParallelContextAssignments: document.querySelector("#codexParallelContextAssignments"),
+  codexParallelContextPool: document.querySelector("#codexParallelContextPool"),
+  codexParallelPlanTools: document.querySelector("#codexParallelPlanTools"),
+  codexParallelAppendNode: document.querySelector("#codexParallelAppendNode"),
+  codexParallelAddBranch: document.querySelector("#codexParallelAddBranch"),
+  codexParallelAppendConfirm: document.querySelector("#codexParallelAppendConfirm"),
+  codexParallelTableWrap: document.querySelector("#codexParallelTableWrap"),
+  codexParallelReview: document.querySelector("#codexParallelReview"),
+  codexParallelFiles: document.querySelector("#codexParallelFiles"),
+  codexParallelTests: document.querySelector("#codexParallelTests"),
+  codexParallelPatch: document.querySelector("#codexParallelPatch"),
+  codexParallelReviewWarning: document.querySelector("#codexParallelReviewWarning"),
+  codexParallelMore: document.querySelector("#codexParallelMore"),
+  codexParallelAudit: document.querySelector("#codexParallelAudit"),
+  codexParallelRegenerate: document.querySelector("#codexParallelRegenerate"),
   codexParallelOpen: document.querySelector("#codexParallelOpen"),
+  codexParallelRetry: document.querySelector("#codexParallelRetry"),
+  codexParallelReject: document.querySelector("#codexParallelReject"),
+  codexParallelAccept: document.querySelector("#codexParallelAccept"),
   codexParallelStart: document.querySelector("#codexParallelStart"),
   shutdownBtn: document.querySelector("#shutdownBtn"),
   knowledgeState: document.querySelector("#knowledgeState"),
+  knowledgePaneSummary: document.querySelector("#knowledgePaneSummary"),
   kbEnvInfo: document.querySelector("#kbEnvInfo"),
   kbLibrarySelect: document.querySelector("#kbLibrarySelect"),
   kbSearchAllLibraries: document.querySelector("#kbSearchAllLibraries"),
@@ -297,6 +349,9 @@ const els = {
   filePreviewClose: document.querySelector("#filePreviewClose"),
   layoutMain: document.querySelector(".layout"),
   chainAutoAdvanceBtn: document.querySelector("#chainAutoAdvanceBtn"),
+  chainDock: document.querySelector(".chainDock"),
+  chainDockSummary: document.querySelector("#chainDockSummary"),
+  toggleChainDockBtn: document.querySelector("#toggleChainDockBtn"),
   chainSlot: document.querySelector("#chainSlot"),
   chainClearBtn: document.querySelector("#chainClearBtn"),
   chainLoopHelpBtn: document.querySelector("#chainLoopHelpBtn"),
@@ -637,16 +692,8 @@ function renderTree() {
   const positionsChanged = ensureNodePositions();
   for (const node of nodes) ensureNodeSize(node);
   const highlights = getFocusHighlights();
-
-  const canvasWidth = Math.max(5000, ...nodes.map((node) => (node.x || 0) + nodeWidth(node) + 420));
-  const canvasHeight = Math.max(3200, ...nodes.map((node) => (node.y || 0) + displayNodeHeight(node) + 360));
-
-  els.graphCanvas.style.width = `${canvasWidth}px`;
-  els.graphCanvas.style.height = `${canvasHeight}px`;
+  const { canvasWidth, canvasHeight } = updateGraphCanvasSize();
   applyGraphTransform();
-  els.edges.setAttribute("width", canvasWidth);
-  els.edges.setAttribute("height", canvasHeight);
-  els.edges.setAttribute("viewBox", `0 0 ${canvasWidth} ${canvasHeight}`);
   els.nodesLayer.innerHTML = "";
   const chainIds = new Set(parseChainIds(chainText));
 
@@ -673,6 +720,8 @@ function renderTree() {
     wireCodeLocLinks(nodeCard);
     els.nodesLayer.appendChild(nodeCard);
   }
+  measureRenderedCompactNodes();
+  updateGraphCanvasSize();
   renderIoPreview(highlights);
   renderSkillPanel(highlights);
   renderModelPanel(highlights);
@@ -703,7 +752,7 @@ function renderProjectOverview() {
   const next = nodes.find((node) => node.id === nextFocusId);
   if (els.projectOverviewTitle) els.projectOverviewTitle.textContent = tree?.title || "项目回顾";
   if (els.projectOverviewMeta) {
-    els.projectOverviewMeta.textContent = "用三件事重新进入项目";
+    els.projectOverviewMeta.textContent = "一眼看清现在";
   }
 
   if (!nodes.length) {
@@ -711,10 +760,14 @@ function renderProjectOverview() {
     return;
   }
 
-  const purpose = String(root?.problem || root?.title || "").trim() || "尚未记录根本目的。";
+  const purpose = overviewFirstLine(root?.problem || root?.title, "尚未记录根本目的。", 56);
   const active = next || current || root;
-  const progress = overviewFirstLine(active?.currentResult || root?.currentResult, "当前还没有记录已经推进到什么状态。", 360);
-  const problem = overviewFirstLine(active?.problem || root?.problem, "当前还没有记录需要解决的问题。", 320);
+  const progress = overviewGlanceStatus(active?.currentResult || root?.currentResult, "还没有可靠的进度结论。", 88);
+  const problem = overviewFirstLine(
+    String(active?.problem || root?.problem || "").replace(/^\[子树\]\s*/, ""),
+    "还没有记录当前问题。",
+    64
+  );
   const activeLabel = active ? `${active.id} · ${active.title || "未命名节点"}` : "尚未指定当前阶段";
   els.projectOverviewBody.innerHTML = `
     <section class="overviewThreePart overviewThreePart--purpose">
@@ -722,12 +775,12 @@ function renderProjectOverview() {
       <p>${escapeHtml(purpose)}</p>
     </section>
     <section class="overviewThreePart overviewThreePart--progress">
-      <span class="overviewLargeLabel">现在进行到了哪里</span>
+      <span class="overviewLargeLabel">当前进度</span>
       <h3>${escapeHtml(activeLabel)}</h3>
       <p>${escapeHtml(progress)}</p>
     </section>
     <section class="overviewThreePart overviewThreePart--problem">
-      <span class="overviewLargeLabel">现在的问题是什么</span>
+      <span class="overviewLargeLabel">当前问题</span>
       <p>${escapeHtml(problem)}</p>
     </section>
   `;
@@ -785,10 +838,9 @@ function renderFocusLensRelation(label, ids, direction) {
   const items = ids.map((id) => {
     const node = nodes.find((item) => item.id === id);
     if (!node) return "";
-    return `<button type="button" class="focusLensRelation" data-focus-lens-node="${attr(id)}">
+    return `<button type="button" class="focusLensRelation" data-focus-lens-node="${attr(id)}" aria-label="${attr(`${node.title || id}，${node.completion || "未开始"}`)}">
       <span class="focusLensRelationId">${escapeHtml(id)}</span>
       <strong>${escapeHtml(node.title || "未命名节点")}</strong>
-      <span>${escapeHtml(focusLensText(node.currentResult, node.completion || "未记录结果", 120))}</span>
     </button>`;
   }).join("");
   return `<section class="focusLensRelations focusLensRelations--${direction}">
@@ -815,6 +867,7 @@ function renderFocusLens() {
   const relations = focusLensRelations(node.id);
   const inChain = parseChainIds(chainText).includes(node.id);
   const activeMethod = isViewingActiveMethodTree();
+  const actionsOpen = Boolean(els.focusLensBody.querySelector(".focusLensActionsMenu")?.open);
   els.focusLensBody.innerHTML = `
     ${renderFocusLensRelation("从哪里来", relations.parents, "before")}
     <article class="focusLensCenter">
@@ -825,43 +878,41 @@ function renderFocusLens() {
         </div>
         <span class="focusLensStatus">${escapeHtml(node.completion || "未开始")}</span>
       </header>
-      <div class="focusLensActionBar" aria-label="当前节点操作">
-        <button type="button" class="${node.id === currentFocusId ? "is-active" : ""}" data-focus-lens-action="set-current" aria-pressed="${node.id === currentFocusId}">● 设为当前</button>
-        <button type="button" class="${node.id === nextFocusId ? "is-active" : ""}" data-focus-lens-action="set-next" aria-pressed="${node.id === nextFocusId}">◆ 设为下一步</button>
-        ${activeMethod ? `<button type="button" class="${inChain ? "is-active" : ""}" data-focus-lens-action="toggle-chain" aria-pressed="${inChain}">${inChain ? "⊖ 移出执行链" : "⊕ 加入执行链"}</button>` : ""}
-        <button type="button" class="${isNodeComplete(node) ? "is-active" : ""}" data-focus-lens-action="toggle-complete" aria-pressed="${isNodeComplete(node)}">✓ ${isNodeComplete(node) ? "已完成" : "标记完成"}</button>
-        <button type="button" data-focus-lens-action="edit-node">✎ 编辑完整节点</button>
-      </div>
+      <details class="focusLensActionsMenu"${actionsOpen ? " open" : ""}>
+        <summary>节点操作</summary>
+        <div class="focusLensActionBar" aria-label="当前节点操作">
+          <button type="button" class="${node.id === currentFocusId ? "is-active" : ""}" data-focus-lens-action="set-current" aria-pressed="${node.id === currentFocusId}">● 设为当前</button>
+          <button type="button" class="${node.id === nextFocusId ? "is-active" : ""}" data-focus-lens-action="set-next" aria-pressed="${node.id === nextFocusId}">◆ 设为下一步</button>
+          ${activeMethod ? `<button type="button" class="${inChain ? "is-active" : ""}" data-focus-lens-action="toggle-chain" aria-pressed="${inChain}">${inChain ? "⊖ 移出执行链" : "⊕ 加入执行链"}</button>` : ""}
+          <button type="button" class="${isNodeComplete(node) ? "is-active" : ""}" data-focus-lens-action="toggle-complete" aria-pressed="${isNodeComplete(node)}">✓ ${isNodeComplete(node) ? "已完成" : "标记完成"}</button>
+          <button type="button" data-focus-lens-action="edit-node">✎ 编辑完整节点</button>
+        </div>
+      </details>
       <section class="focusLensNextWork">
         <header>
-          <div>
-            <h3>让 Agent 继续做什么</h3>
-            <p>这里就是这个节点的「下一步思路」，执行链和 Codex 都读取它。</p>
-          </div>
-          <span>NextIdea</span>
+          <h3>下一步</h3>
         </header>
         <textarea class="focusLensNextIdeaInput" data-focus-lens-next-idea="${attr(node.id)}" placeholder="写一句可执行的话，并说明服务的方向和完成判据">${escapeHtml(node.nextIdea || "")}</textarea>
         ${activeMethod ? `<div class="focusLensNextActions">
-          <span>Ctrl / ⌘ + Enter 也可发送</span>
           <button type="button" data-focus-lens-action="run-agent">保存并让 Codex 继续</button>
         </div>` : ""}
       </section>
       <div class="focusLensFields">
         <section class="focusLensField focusLensField--problem">
-          <h3>解决什么问题</h3>
-          <p>${escapeHtml(focusLensText(node.problem, "尚未记录要解决的问题。"))}</p>
+          <h3>问题</h3>
+          <p>${escapeHtml(focusLensText(node.problem, "尚未记录要解决的问题。", 140))}</p>
         </section>
         <section class="focusLensField focusLensField--approach">
-          <h3>思路怎么做</h3>
-          <p>${escapeHtml(focusLensText(node.approach, "尚未记录解决思路。"))}</p>
+          <h3>思路</h3>
+          <p>${escapeHtml(focusLensText(node.approach, "尚未记录解决思路。", 180))}</p>
         </section>
         <section class="focusLensField focusLensField--result">
-          <h3>结果如何</h3>
-          <p>${escapeHtml(focusLensText(node.currentResult, "尚未记录验证结果。"))}</p>
+          <h3>结果</h3>
+          <p>${escapeHtml(focusLensText(node.currentResult, "尚未记录验证结果。", 180))}</p>
         </section>
       </div>
       <details class="focusLensDetails">
-        <summary>完整详情 <span>输入 / 输出 / 评价 / 备注 / 根因 / 证据</span></summary>
+        <summary>更多详情</summary>
         <div class="focusLensDetailsBody">
           ${renderFocusLensDetail("输入", node.input)}
           ${renderFocusLensDetail("输出", node.output)}
@@ -881,10 +932,11 @@ function renderFocusLens() {
   `;
 }
 
-function openFocusLens(nodeId) {
+function openFocusLens(nodeId, { preserveActions = false } = {}) {
   const node = nodes.find((item) => item.id === nodeId) || nodes.find((item) => item.id === selectedId) || nodes[0];
   if (!node || !els.focusLens) return;
   if (els.projectOverviewDialog?.open) els.projectOverviewDialog.close();
+  if (!preserveActions && els.focusLensBody) els.focusLensBody.innerHTML = "";
   focusLensId = node.id;
   focusLensOpen = true;
   selectedId = node.id;
@@ -929,6 +981,17 @@ function overviewFirstLine(value, fallback, maxChars = 180) {
   return clipCardText((line || fallback).replace(/^[-*]\s+/, ""), maxChars);
 }
 
+function overviewGlanceStatus(value, fallback, maxChars = 88) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return fallback;
+  const clauses = text.split(/[。！？；;]/).map((item) => item.trim()).filter(Boolean);
+  let lead = clauses[0] || text;
+  const colon = lead.indexOf("：");
+  if (colon >= 6) lead = lead.slice(0, colon);
+  const gap = clauses.find((item, index) => index > 0 && /(?:^|，)(仍|尚|还|待|缺|未能|未验证)/.test(item));
+  return clipCardText([lead, gap].filter(Boolean).join("；") || fallback, maxChars);
+}
+
 function overviewStatus(node) {
   const status = String(node?.completion || "").trim() || "未开始";
   const focus = [node?.id === currentFocusId ? "Current" : "", node?.id === nextFocusId ? "Next" : ""].filter(Boolean);
@@ -968,6 +1031,9 @@ function overviewDailyStorageKey() {
 
 function maybeOpenDailyProjectOverview() {
   if (snapshotMode || embedMode || workspaceMode !== "main" || !isViewingActiveMethodTree() || nodes.length < 2) return;
+  const anotherModalIsOpen = [...document.querySelectorAll("dialog[open]")]
+    .some((dialog) => dialog !== els.projectOverviewDialog);
+  if (anotherModalIsOpen) return;
   try {
     const key = overviewDailyStorageKey();
     if (localStorage.getItem(key)) return;
@@ -1744,6 +1810,7 @@ function startFloatingPanelResize(event, panel, nodeId) {
 
 function renderVersions() {
   if (!els.versionList) return;
+  syncPaneSummaryBar();
   if (!versions.length) {
     els.versionList.innerHTML = `<div class="versionEmpty">还没有历史版本。编辑时会自动维护顶部的「当前版本」快照。</div>`;
     return;
@@ -3732,7 +3799,12 @@ function nodeHeightById(id) {
 
 function layoutNodeHeightById(id) {
   const node = nodes.find((item) => item.id === id);
-  return node ? displayNodeHeight(node) : card.height;
+  if (!node) return card.height;
+  if (usesContentSizedCard(node)) {
+    const focus = node.id === currentFocusId || node.id === nextFocusId;
+    return focus ? card.compactFocusMaxHeight : card.compactMaxHeight;
+  }
+  return displayNodeHeight(node);
 }
 
 function getFocusHighlights() {
@@ -3906,7 +3978,7 @@ function wireChainLoopHelp() {
 
 function renderChainLoopCmdBar() {
   if (!els.chainLoopCmdBar) return;
-  const show = chainAutoAdvance || parseChainIds(chainText).length > 0 || workspaceMode === "subtree";
+  const show = !chainDockCollapsed && (chainAutoAdvance || parseChainIds(chainText).length > 0 || workspaceMode === "subtree");
   els.chainLoopCmdBar.classList.toggle("hidden", !show);
   const text = buildChainLoopPromptText({
     subtreePath: workspaceMode === "subtree" ? activeSubtreePath : ""
@@ -3916,6 +3988,7 @@ function renderChainLoopCmdBar() {
 
 function renderChainDock() {
   if (!els.chainSlot) return;
+  applyChainDockCollapseState({ persist: false });
   renderChainLoopCmdBar();
   const ids = parseChainIds(chainText);
   if (els.chainAutoAdvanceBtn) {
@@ -3923,8 +3996,11 @@ function renderChainDock() {
     els.chainAutoAdvanceBtn.setAttribute("aria-pressed", chainAutoAdvance ? "true" : "false");
   }
   const statusHint = chainRunStatus === "done" ? " · 链已跑完" : chainRunStatus === "running" ? " · 运行中" : "";
+  if (els.chainDockSummary) {
+    els.chainDockSummary.textContent = `${ids.length} 个节点${statusHint}`;
+  }
   if (!ids.length) {
-    els.chainSlot.innerHTML = `<div class="chainSlotEmpty">点击节点上的 ⊕ 加入执行链，拖动卡片调整顺序 · 点「循环说明」配置 Codex loop${statusHint}</div>`;
+    els.chainSlot.innerHTML = `<div class="chainSlotEmpty">从节点上的 ⊕ 添加任务${statusHint}</div>`;
     return;
   }
   els.chainSlot.innerHTML = ids.map((id, index) => {
@@ -4074,6 +4150,7 @@ function updateEdgeField(edgeId, field, value, shouldRender) {
 }
 
 function loadFromMarkdown(markdown, options = {}) {
+  const preservedLensId = options.preserveLens && focusLensOpen ? focusLensId : "";
   closeFocusLens({ locate: false });
   const parsed = parseMarkdown(markdown);
   const incoming = parsed.graphState;
@@ -4107,8 +4184,9 @@ function loadFromMarkdown(markdown, options = {}) {
   chainAutoAdvance = incoming.chainAutoAdvance === true;
   chainForceNext = incoming.chainForceNext || "";
   chainRunStatus = incoming.chainRunStatus || "";
-  selectedId = nodes[0]?.id || null;
+  selectedId = nodes.some((node) => node.id === preservedLensId) ? preservedLensId : nodes[0]?.id || null;
   renderTree();
+  if (preservedLensId && nodes.some((node) => node.id === preservedLensId)) openFocusLens(preservedLensId, { preserveActions: true });
   if (options.fitView || shouldAutoFitView) {
     scheduleFitGraphToViewport();
     shouldAutoFitView = false;
@@ -4680,6 +4758,7 @@ function renderKnowledgePanel() {
         : "daemon 未启动（检索时会自动拉起）"
     : "";
   els.knowledgeState.textContent = knowledgeLoading ? "处理中..." : knowledgeError ? "出错" : `${total} chunks`;
+  syncPaneSummaryBar();
   if (els.kbEnvInfo) {
     const libraries = config.libraries || knowledgeIndex?.libraries || [];
     const libraryRoot = config.libraryRoot || config.docsDir || "knowledge";
@@ -4891,7 +4970,7 @@ async function pollTreeChanges() {
     if (!response.ok) return;
     const data = await response.json();
     if (data.markdown === lastLoadedMarkdown || data.markdown === lastSavedMarkdown) return;
-    loadFromMarkdown(data.markdown, { skipUserGraphStateLock: true, skipRestoreSave: true, markSaved: true });
+    loadFromMarkdown(data.markdown, { skipUserGraphStateLock: true, skipRestoreSave: true, markSaved: true, preserveLens: true });
     setSaveState("已从子树文件刷新");
     await loadVersions();
     return;
@@ -4900,7 +4979,7 @@ async function pollTreeChanges() {
   if (!response.ok) return;
   const data = await response.json();
   if (data.markdown === lastLoadedMarkdown || data.markdown === lastSavedMarkdown) return;
-  loadFromMarkdown(data.markdown, { skipUserGraphStateLock: !isViewingActiveMethodTree() });
+  loadFromMarkdown(data.markdown, { skipUserGraphStateLock: !isViewingActiveMethodTree(), preserveLens: true });
   writeCurrentVersionSnapshot(data.markdown).catch(() => {});
   setSaveState("已从 Markdown 刷新");
   await loadVersions();
@@ -4982,6 +5061,7 @@ async function loadVersions() {
     }
   } catch (error) {
     if (els.versionState) els.versionState.textContent = "读取失败";
+    syncPaneSummaryBar();
   }
 }
 
@@ -5411,6 +5491,7 @@ async function getMeasureNodeContentHeight() {
 function displayNodeHeight(node) {
   const saved = nodeHeight(node);
   if (graphExportSession) return saved;
+  if (usesContentSizedCard(node)) return saved;
   if (nodeCardCompact && node.id !== editNodeId) {
     const focus = node.id === nextFocusId || node.id === currentFocusId;
     const detailsOpen = nodeDetailsOpenIds.has(node.id);
@@ -5450,12 +5531,157 @@ function hasSize(node) {
   return Number.isFinite(node.width) && Number.isFinite(node.height);
 }
 
-function nodeWidth(node) {
+function usesContentSizedCard(node) {
+  return Boolean(nodeCardCompact && !graphExportSession && node?.id !== editNodeId);
+}
+
+function cardTextUnits(value) {
+  let units = 0;
+  for (const char of String(value || "")) {
+    if (/\s/.test(char)) units += 0.35;
+    else if (char.codePointAt(0) <= 0x00ff) units += 0.58;
+    else units += 1;
+  }
+  return units;
+}
+
+function compactNodeAutoWidth(node) {
+  const titleUnits = cardTextUnits(node.title || node.id);
+  const fields = [
+    clipCardText(node.problem, 150),
+    clipCardText(node.approach, 180),
+    clipCardText(node.currentResult, 180)
+  ];
+  const fieldUnits = fields.map(cardTextUnits);
+  const longest = Math.max(0, ...fieldUnits);
+  const total = fieldUnits.reduce((sum, value) => sum + value, 0);
+  let width = card.compactMinWidth;
+  if (titleUnits > 12 || longest > 34 || total > 85) width = 380;
+  if (titleUnits > 18 || longest > 64 || total > 160) width = 420;
+  if (longest > 105 || total > 260) width = 460;
+  if (node.id === currentFocusId || node.id === nextFocusId) width = Math.max(width, 420);
+  return clamp(Math.round(width / 20) * 20, card.compactMinWidth, card.compactMaxWidth);
+}
+
+function semanticZoomMode() {
+  if (graphView.scale < 0.44) return "overview";
+  if (graphView.scale < 0.72) return "macro";
+  return "detail";
+}
+
+function compactNodeMeasureKey(node, width) {
+  const mode = semanticZoomMode();
+  const titleSize = mode === "detail" ? 15 : Math.round(clamp(16 / graphView.scale, 27, 88));
+  return [
+    mode,
+    titleSize,
+    width,
+    node.title,
+    node.problem,
+    node.approach,
+    node.currentResult,
+    node.nextIdea,
+    node.id === nextFocusId ? nextPlan : "",
+    isNodeFolded(node) ? "folded" : "open",
+    nodeDetailsOpenIds.has(node.id) ? "details" : "summary",
+    node.id === currentFocusId ? "current" : "",
+    node.id === nextFocusId ? "next" : ""
+  ].join("\x1f");
+}
+
+function compactNodeHeightBounds(node) {
+  if (semanticZoomMode() !== "detail") {
+    const titleSize = clamp(16 / graphView.scale, 27, 88);
+    return {
+      min: Math.max(112, Math.ceil(titleSize * 1.2 + 38)),
+      max: 420
+    };
+  }
+  const focus = node.id === currentFocusId || node.id === nextFocusId;
+  return {
+    min: card.compactMinHeight,
+    max: focus ? card.compactFocusMaxHeight : card.compactMaxHeight
+  };
+}
+
+function estimateCompactNodeHeight(node, width) {
+  const bounds = compactNodeHeightBounds(node);
+  if (semanticZoomMode() !== "detail") {
+    const titleSize = clamp(16 / graphView.scale, 27, 88);
+    const available = Math.max(80, width - 44);
+    const titleWidth = cardTextUnits(node.title || node.id) * titleSize * 0.94;
+    const lines = Math.max(1, Math.ceil(titleWidth / available));
+    return clamp(Math.ceil(38 + lines * titleSize * 1.14), bounds.min, bounds.max);
+  }
+
+  const charsPerLine = Math.max(10, Math.floor((width - 92) / 13));
+  const summaryLines = [node.problem, node.approach, node.currentResult]
+    .map((value) => Math.max(1, Math.min(2, Math.ceil(cardTextUnits(value || "未填写") / charsPerLine))))
+    .reduce((sum, value) => sum + value, 0);
+  const focus = node.id === currentFocusId || node.id === nextFocusId;
+  const estimated = 178 + summaryLines * 19 + (focus ? 112 : 0) + (node.id === nextFocusId ? 72 : 0);
+  return clamp(estimated, bounds.min, bounds.max);
+}
+
+function measureRenderedCompactNodes() {
+  if (!nodeCardCompact || graphExportSession || !els.nodesLayer) return false;
+  let changed = false;
+  for (const nodeCard of els.nodesLayer.querySelectorAll(".graphNode.compactCard")) {
+    const node = nodes.find((item) => item.id === nodeCard.dataset.nodeId);
+    if (!node || !usesContentSizedCard(node)) continue;
+    const width = nodeWidth(node);
+    const key = compactNodeMeasureKey(node, width);
+    const bounds = compactNodeHeightBounds(node);
+    nodeCard.style.height = "auto";
+    const measured = clamp(Math.ceil(nodeCard.scrollHeight + 2), bounds.min, bounds.max);
+    const previous = renderedCompactNodeSizes.get(node.id);
+    renderedCompactNodeSizes.set(node.id, { key, width, height: measured });
+    nodeCard.style.height = `${measured}px`;
+    if (!previous || previous.key !== key || previous.height !== measured || previous.width !== width) changed = true;
+  }
+  return changed;
+}
+
+function scheduleCompactNodeMeasure() {
+  if (!nodeCardCompact || graphExportSession || compactNodeMeasureFrame) return;
+  compactNodeMeasureFrame = requestAnimationFrame(() => {
+    compactNodeMeasureFrame = 0;
+    if (!measureRenderedCompactNodes()) return;
+    updateGraphCanvasSize();
+    rerenderEdges();
+  });
+}
+
+function storedNodeWidth(node) {
   return Math.max(card.minWidth, Number.isFinite(node.width) ? node.width : card.width);
 }
 
-function nodeHeight(node) {
+function storedNodeHeight(node) {
   return Math.max(card.minHeight, Number.isFinite(node.height) ? node.height : card.height);
+}
+
+function nodeWidth(node) {
+  return usesContentSizedCard(node) ? compactNodeAutoWidth(node) : storedNodeWidth(node);
+}
+
+function nodeHeight(node) {
+  if (!usesContentSizedCard(node)) return storedNodeHeight(node);
+  const width = nodeWidth(node);
+  const key = compactNodeMeasureKey(node, width);
+  const cached = renderedCompactNodeSizes.get(node.id);
+  if (cached?.key === key && cached.width === width) return cached.height;
+  return estimateCompactNodeHeight(node, width);
+}
+
+function updateGraphCanvasSize() {
+  const canvasWidth = Math.max(5000, ...nodes.map((node) => (node.x || 0) + nodeWidth(node) + 420));
+  const canvasHeight = Math.max(3200, ...nodes.map((node) => (node.y || 0) + displayNodeHeight(node) + 360));
+  els.graphCanvas.style.width = `${canvasWidth}px`;
+  els.graphCanvas.style.height = `${canvasHeight}px`;
+  els.edges.setAttribute("width", canvasWidth);
+  els.edges.setAttribute("height", canvasHeight);
+  els.edges.setAttribute("viewBox", `0 0 ${canvasWidth} ${canvasHeight}`);
+  return { canvasWidth, canvasHeight };
 }
 
 function hasEdgeLabelPosition(edge) {
@@ -5527,6 +5753,7 @@ function applyGraphTransform() {
   els.graphPane?.classList.toggle("semanticZoomOverview", overview);
   els.graphPane?.style.setProperty("--semantic-title-size", `${clamp(16 / graphView.scale, 27, 88)}px`);
   if (els.graphPane) els.graphPane.dataset.zoomLevel = overview ? "宏观" : macro ? "结构" : "细节";
+  scheduleCompactNodeMeasure();
 }
 
 function clamp(value, min, max) {
@@ -5786,36 +6013,68 @@ function wireLeftPaneResize() {
 function applyPaneCollapseState() {
   els.layoutMain?.classList.toggle("is-left-pane-collapsed", leftPaneCollapsed);
   els.layoutMain?.classList.toggle("is-right-pane-collapsed", rightPaneCollapsed);
+  document.querySelector(".knowledgePane")?.setAttribute("aria-hidden", leftPaneCollapsed ? "true" : "false");
+  document.querySelector(".versionPane")?.setAttribute("aria-hidden", rightPaneCollapsed ? "true" : "false");
   applyLeftPaneWidth();
   if (els.toggleLeftPaneBtn) {
-    els.toggleLeftPaneBtn.textContent = leftPaneCollapsed ? "›" : "‹";
+    const chevron = els.toggleLeftPaneBtn.querySelector(".workspaceSummaryChevron");
+    if (chevron) chevron.textContent = leftPaneCollapsed ? "›" : "‹";
     els.toggleLeftPaneBtn.title = leftPaneCollapsed ? "展开知识库" : "收起知识库";
     els.toggleLeftPaneBtn.setAttribute("aria-expanded", leftPaneCollapsed ? "false" : "true");
   }
   if (els.toggleRightPaneBtn) {
-    els.toggleRightPaneBtn.textContent = rightPaneCollapsed ? "‹" : "›";
+    const chevron = els.toggleRightPaneBtn.querySelector(".workspaceSummaryChevron");
+    if (chevron) chevron.textContent = rightPaneCollapsed ? "‹" : "›";
     els.toggleRightPaneBtn.title = rightPaneCollapsed ? "展开版本树" : "收起版本树";
     els.toggleRightPaneBtn.setAttribute("aria-expanded", rightPaneCollapsed ? "false" : "true");
   }
+  syncPaneSummaryBar();
   try {
-    localStorage.setItem("taskTree.leftPaneCollapsed", leftPaneCollapsed ? "1" : "0");
-    localStorage.setItem("taskTree.rightPaneCollapsed", rightPaneCollapsed ? "1" : "0");
+    localStorage.setItem(LEFT_PANE_COLLAPSED_STORAGE_KEY, leftPaneCollapsed ? "1" : "0");
+    localStorage.setItem(RIGHT_PANE_COLLAPSED_STORAGE_KEY, rightPaneCollapsed ? "1" : "0");
   } catch {
     // ignore storage errors
   }
 }
 
+function syncPaneSummaryBar() {
+  const knowledgeSummary = knowledgeLoading
+    ? "处理中"
+    : knowledgeError
+      ? "出错"
+      : !knowledgeConfig && !knowledgeIndex
+        ? "未配置"
+        : knowledgeIndex?.totalChunks
+          ? `${knowledgeIndex.totalChunks} 块`
+          : "索引为空";
+  const versionState = String(els.versionState?.textContent || "");
+  const versionSummary = /失败|出错/.test(versionState)
+    ? "读取失败"
+    : versions.length
+      ? `${versions.length} 条`
+      : "无历史";
+
+  if (els.knowledgePaneSummary) els.knowledgePaneSummary.textContent = knowledgeSummary;
+  if (els.versionPaneSummary) els.versionPaneSummary.textContent = versionSummary;
+  if (els.toggleLeftPaneBtn) {
+    els.toggleLeftPaneBtn.classList.toggle("is-open", !leftPaneCollapsed);
+    els.toggleLeftPaneBtn.setAttribute("aria-label", `${leftPaneCollapsed ? "展开" : "收起"}知识库，${knowledgeSummary}`);
+  }
+  if (els.toggleRightPaneBtn) {
+    els.toggleRightPaneBtn.classList.toggle("is-open", !rightPaneCollapsed);
+    els.toggleRightPaneBtn.setAttribute("aria-label", `${rightPaneCollapsed ? "展开" : "收起"}版本树，${versionSummary}`);
+  }
+}
+
 function initPaneCollapseState() {
   try {
-    // Embedded in a chat there is barely room for the graph, let alone two side panes, so they
-    // start out of the way - but only as a default: a choice made inside the widget still sticks.
     const stored = (key) => localStorage.getItem(key);
-    leftPaneCollapsed = stored("taskTree.leftPaneCollapsed") === "1" || (embedMode && stored("taskTree.leftPaneCollapsed") === null);
-    rightPaneCollapsed = stored("taskTree.rightPaneCollapsed") === "1" || (embedMode && stored("taskTree.rightPaneCollapsed") === null);
+    leftPaneCollapsed = stored(LEFT_PANE_COLLAPSED_STORAGE_KEY) !== "0";
+    rightPaneCollapsed = stored(RIGHT_PANE_COLLAPSED_STORAGE_KEY) !== "0";
     leftPaneWidth = readStoredLeftPaneWidth();
   } catch {
-    leftPaneCollapsed = embedMode;
-    rightPaneCollapsed = embedMode;
+    leftPaneCollapsed = true;
+    rightPaneCollapsed = true;
     leftPaneWidth = null;
   }
   applyPaneCollapseState();
@@ -5833,6 +6092,37 @@ function toggleLeftPane() {
 function toggleRightPane() {
   rightPaneCollapsed = !rightPaneCollapsed;
   applyPaneCollapseState();
+}
+
+function applyChainDockCollapseState({ persist = true } = {}) {
+  els.chainDock?.classList.toggle("is-collapsed", chainDockCollapsed);
+  if (els.toggleChainDockBtn) {
+    els.toggleChainDockBtn.textContent = chainDockCollapsed ? "⌃" : "⌄";
+    els.toggleChainDockBtn.title = chainDockCollapsed ? "展开执行链" : "收起执行链";
+    els.toggleChainDockBtn.setAttribute("aria-expanded", chainDockCollapsed ? "false" : "true");
+  }
+  if (persist) {
+    try {
+      localStorage.setItem(CHAIN_DOCK_COLLAPSED_STORAGE_KEY, chainDockCollapsed ? "1" : "0");
+    } catch {
+      // ignore storage errors
+    }
+  }
+  renderChainLoopCmdBar();
+}
+
+function initChainDockCollapseState() {
+  try {
+    chainDockCollapsed = localStorage.getItem(CHAIN_DOCK_COLLAPSED_STORAGE_KEY) !== "0";
+  } catch {
+    chainDockCollapsed = true;
+  }
+  applyChainDockCollapseState({ persist: false });
+}
+
+function toggleChainDock() {
+  chainDockCollapsed = !chainDockCollapsed;
+  applyChainDockCollapseState();
 }
 
 function attr(value) {
@@ -5925,6 +6215,7 @@ async function runCodex(body = {}) {
   const buttons = [
     els.openInCodexBtn,
     els.codexThreadsBtn,
+    els.codexParallelBtn,
     els.chainRunBtn,
     els.focusLensBody?.querySelector("[data-focus-lens-action='run-agent']")
   ].filter(Boolean);
@@ -6033,61 +6324,770 @@ function codexAskBox() {
 
 let codexParallelRunId = "";
 let codexParallelPollTimer = null;
+let codexParallelRun = null;
+const codexParallelDraftEdits = new Map();
+const codexParallelStorageKey = `task-tree:codex-parallel:${location.origin}${location.pathname}`;
 
-function parallelNodeRow(node) {
-  const row = document.createElement("tr");
-  row.dataset.nodeId = node.id;
-  const enabledCell = document.createElement("td");
-  const enabled = document.createElement("input");
-  enabled.type = "checkbox";
-  enabled.className = "codexParallelEnabled";
-  enabled.checked = node.id === nextFocusId;
-  enabledCell.append(enabled);
+function parallelRunTerminal(run) {
+  if (["rejected", "failed"].includes(run?.status)) return true;
+  if (run?.status !== "accepted") return false;
+  const treeSync = run.review?.treeSync?.status;
+  const cleanup = run.review?.cleanup?.status;
+  return !["queued", "running"].includes(treeSync) && !["queued", "running"].includes(cleanup);
+}
 
-  const nodeCell = document.createElement("td");
-  const nodeLabel = document.createElement("strong");
-  nodeLabel.textContent = node.id;
-  const nodeTitle = document.createElement("span");
-  nodeTitle.textContent = node.title || "";
-  nodeCell.append(nodeLabel, nodeTitle);
+function parallelRunNeedsPolling(run) {
+  if (["planning", "approved", "preparing", "running", "coordinating", "auditing"].includes(run?.status)) return true;
+  if (run?.status !== "accepted") return false;
+  return ["queued", "running"].includes(run.review?.treeSync?.status)
+    || ["queued", "running"].includes(run.review?.cleanup?.status);
+}
 
-  const taskCell = document.createElement("td");
-  const task = document.createElement("textarea");
-  task.className = "codexParallelInstruction";
-  task.rows = 2;
-  task.value = node.nextIdea || node.problem || "";
-  task.setAttribute("aria-label", `${node.id} 任务`);
-  taskCell.append(task);
+function rememberCodexParallelRun(run) {
+  if (!run?.id) return;
+  try {
+    if (parallelRunTerminal(run)) localStorage.removeItem(codexParallelStorageKey);
+    else localStorage.setItem(codexParallelStorageKey, run.id);
+  } catch {
+    // Embedded and private contexts may disable localStorage; the in-memory run still works.
+  }
+}
 
-  const scopeCell = document.createElement("td");
-  const scope = document.createElement("input");
-  scope.type = "text";
-  scope.className = "codexParallelWriteSet";
-  scope.placeholder = "server/**, public/app.js";
-  scope.setAttribute("aria-label", `${node.id} 独占写集`);
-  scopeCell.append(scope);
-  row.append(enabledCell, nodeCell, taskCell, scopeCell);
+function rememberedCodexParallelRunId() {
+  try {
+    return localStorage.getItem(codexParallelStorageKey) || "";
+  } catch {
+    return "";
+  }
+}
+
+function forgetCodexParallelRun() {
+  try { localStorage.removeItem(codexParallelStorageKey); } catch { /* optional persistence */ }
+}
+
+const parallelStatusLabels = {
+  planned: "待审核",
+  queued: "排队",
+  preparing: "准备隔离区",
+  running: "执行中",
+  completed: "已集成",
+  failed: "失败",
+  blocked: "被依赖阻塞"
+};
+
+const parallelStageOrder = ["planning", "execution", "summary", "review", "applied"];
+
+function parallelStageFor(run) {
+  if (["approved", "preparing", "running"].includes(run?.status)) return "execution";
+  if (run?.status === "coordinating") return "summary";
+  if (["auditing", "review"].includes(run?.status)) return "review";
+  if (run?.status === "accepted") return "applied";
+  return "planning";
+}
+
+function renderParallelStageRail(run = { status: "planning" }) {
+  const rail = els.codexParallelStageRail;
+  if (!rail) return;
+  const activeStage = parallelStageFor(run);
+  const activeIndex = parallelStageOrder.indexOf(activeStage);
+  rail.classList.toggle("is-error", ["failed", "rejected"].includes(run?.status));
+  rail.querySelectorAll(".codexParallelStage").forEach((stage, index) => {
+    stage.classList.toggle("is-complete", index < activeIndex);
+    stage.classList.toggle("is-active", index === activeIndex);
+    stage.setAttribute("aria-current", index === activeIndex ? "step" : "false");
+  });
+}
+
+function humanizeParallelTitle(value, fallback = "并行任务") {
+  return String(value || fallback)
+    .replace(/业务场景代理夹具/g, "业务测试场景")
+    .replace(/根目标语义回归/g, "目标一致性校验")
+    .replace(/状态同步提示契约/g, "状态同步规则")
+    .replace(/契约/g, "规则")
+    .replace(/夹具/g, "测试场景")
+    .replace(/语义回归/g, "目标校验")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 20);
+}
+
+function parallelTaskSummary(job) {
+  const text = String(job?.summary || job?.instruction || "").replace(/\s+/g, " ").trim();
+  const first = text.split(/[。！？；;]/)[0] || text;
+  const colon = first.indexOf("：");
+  return (colon > 8 ? first.slice(0, colon) : first).slice(0, 36) || "等待补充任务说明";
+}
+
+function parallelGoalView(run) {
+  const assessment = run.review?.goalAssessment || {};
+  if (run.status === "auditing" || run.review?.goalAudit?.status === "running") {
+    return { status: "正在核验", result: "对照根目标、阶段目标和实际改动" };
+  }
+  if (assessment.continuity === "baseline" && run.goal?.history?.length) {
+    return { status: "目标连续性冲突", result: "已有历史运行，必须重新核验是否仍服务同一个根本目标" };
+  }
+  if (assessment.continuity === "drifted") return { status: "长期目标漂移", result: assessment.remaining || "这轮结果可能只完成了局部实现，没有保持长期目标" };
+  if (assessment.continuity !== "baseline" && assessment.continuity !== "stable") {
+    return { status: "目标连续性待核验", result: assessment.remaining || "还不能判断这轮是否继续服务同一个根本目标" };
+  }
+  if (assessment.alignment === "off_target") return { status: "偏离目标", result: assessment.remaining || "当前改动没有对准本轮目标" };
+  if (assessment.alignment !== "aligned") return { status: "待核验", result: "尚不能判断这些改动是否真正推进目标" };
+  if (assessment.progress === "reached") return { status: "目标已达到", result: assessment.achieved || "完成判据已有充分证据" };
+  if (assessment.progress === "progress") {
+    const achieved = assessment.achieved ? `已推进：${assessment.achieved}` : "已有可验证推进";
+    return { status: assessment.continuity === "baseline" ? "首次基线 · 方向一致" : "长期连续 · 方向一致", result: assessment.remaining ? `${achieved}；仍缺：${assessment.remaining}` : achieved };
+  }
+  return { status: "没有有效推进", result: assessment.remaining || "改动尚未形成可验证的目标进展" };
+}
+
+function parallelField(labelText, control, wide = false) {
+  const label = document.createElement("label");
+  label.className = `codexParallelField${wide ? " wide" : ""}`;
+  const caption = document.createElement("span");
+  caption.textContent = labelText;
+  label.append(caption, control);
+  return label;
+}
+
+function parallelContextOptionsForRun(runOptions = []) {
+  const merged = new Map();
+  for (const option of [...runOptions, ...codexParallelContextOptions]) {
+    if (!option?.contextKey || !option?.threadId) continue;
+    const key = String(option.contextKey);
+    if (!merged.has(key)) merged.set(key, option);
+  }
+  return [...merged.values()];
+}
+
+function parallelContextBadgeText(job, option = null) {
+  if (option?.value === "new") return "新建对话";
+  const threadId = option?.dataset?.contextThreadId || job.contextThreadId || "";
+  const title = option?.dataset?.contextLabel || job.contextLabel || job.title || job.nodeId || "分支";
+  return threadId ? `复用 · ${humanizeParallelTitle(title, job.nodeId)}` : "首次建立";
+}
+
+function parallelContextLifecycleLabel(job, fallback = "") {
+  const generation = Number(job?.contextGeneration) || 1;
+  const status = {
+    active: "当前",
+    near_limit: "偏长",
+    ready_to_rotate: "待换代",
+    rotating: "换代中",
+    archived: "已归档"
+  }[job?.contextStatus] || fallback;
+  return `第${generation}代${status ? ` · ${status}` : ""}`;
+}
+
+function parallelContextLine({ title = "", state = "", threadId = "" } = {}) {
+  const row = document.createElement("div");
+  row.className = "codexParallelContextLine";
+  const name = document.createElement("strong");
+  name.textContent = title || "未命名上下文";
+  const status = document.createElement("span");
+  status.textContent = state;
+  row.append(name, status);
+  if (threadId) {
+    const open = document.createElement("a");
+    open.href = `codex://threads/${encodeURIComponent(threadId)}`;
+    open.textContent = "↗";
+    open.title = `打开${title || "上下文"}`;
+    open.setAttribute("aria-label", open.title);
+    row.append(open);
+  }
   return row;
 }
 
-function openCodexParallelDialog() {
-  closeCodexThreadMenu();
-  clearTimeout(codexParallelPollTimer);
-  codexParallelRunId = "";
-  els.codexParallelRows.textContent = "";
-  for (const node of nodes.filter((item) => item.id !== "ROOT" && item.completion !== "已完成")) {
-    els.codexParallelRows.append(parallelNodeRow(node));
+function renderParallelContextOverview(run, contextOptions = []) {
+  const jobs = run?.jobs || [];
+  const reused = jobs.filter((job) => job.contextThreadId).length;
+  const fresh = jobs.length - reused;
+  const parts = [`${reused} 个复用`];
+  if (fresh) parts.push(`${fresh} 个新建`);
+  parts.push(`${contextOptions.length} 个可选`);
+  els.codexParallelContextSummary.textContent = parts.join(" · ");
+  els.codexParallelContextAssignments.textContent = "";
+  els.codexParallelContextPool.textContent = "";
+
+  if (run?.planner?.threadId) {
+    els.codexParallelContextAssignments.append(parallelContextLine({
+      title: "规划上下文",
+      state: run.planner.contextResumed ? "已复用" : "当前",
+      threadId: run.planner.threadId
+    }));
   }
-  els.codexParallelState.textContent = "选择 2 至 4 个节点";
+  for (const job of jobs) {
+    els.codexParallelContextAssignments.append(parallelContextLine({
+      title: humanizeParallelTitle(job.title, job.taskId),
+      state: parallelContextLifecycleLabel(job, job.contextThreadId ? "复用" : "首次建立"),
+      threadId: job.threadId || job.contextThreadId || ""
+    }));
+  }
+
+  const assignedThreads = new Set(jobs.map((job) => job.contextThreadId).filter(Boolean));
+  for (const option of contextOptions.filter((item) => !assignedThreads.has(item.threadId))) {
+    const source = option.source === "codex" ? "项目对话" : (option.nodeId || "历史分支");
+    els.codexParallelContextPool.append(parallelContextLine({
+      title: option.title || option.nodeId || "历史上下文",
+      state: source,
+      threadId: option.threadId
+    }));
+  }
+  els.codexParallelContexts.hidden = !(jobs.length || contextOptions.length || run?.planner?.threadId);
+}
+
+function parallelContextSelect(job, contextOptions = [], onChange = null) {
+  const select = document.createElement("select");
+  select.className = "codexParallelContextSelect";
+  select.setAttribute("aria-label", `${job.taskId} 上下文`);
+  select.dataset.contextKey = job.contextKey || "";
+  select.dataset.contextThreadId = job.contextThreadId || "";
+
+  const reuse = document.createElement("option");
+  reuse.value = "reuse";
+  reuse.textContent = job.contextThreadId ? "沿用此分支已有对话" : "此分支上下文（首次建立，之后复用）";
+  reuse.dataset.contextKey = job.contextKey || "";
+  reuse.dataset.contextThreadId = job.contextThreadId || "";
+    reuse.dataset.contextSource = job.contextSource || "parallel";
+    reuse.dataset.contextPreview = job.contextPreview || "";
+    reuse.dataset.contextLabel = job.contextLabel || job.title || job.nodeId || "";
+    reuse.dataset.contextGeneration = String(job.contextGeneration || 1);
+  select.append(reuse);
+
+  const fresh = document.createElement("option");
+  fresh.value = "new";
+  fresh.textContent = "新建独立对话";
+  fresh.dataset.contextLabel = "新建独立对话";
+  select.append(fresh);
+
+  for (const option of contextOptions) {
+    if (!option?.contextKey || !option?.threadId) continue;
+    const item = document.createElement("option");
+    item.value = `selected:${option.contextKey}`;
+    item.dataset.contextKey = option.contextKey;
+    item.dataset.contextThreadId = option.threadId;
+    item.dataset.contextSource = option.source || "parallel";
+    item.dataset.contextPreview = option.preview || "";
+    item.dataset.contextLabel = option.title || option.nodeId || "";
+    item.dataset.contextGeneration = String(option.generation || 1);
+    const source = option.source === "codex" ? "已有对话" : "历史分支";
+    const detail = [option.nodeId, option.preview].filter(Boolean).join(" · ");
+    item.textContent = `${source} · ${option.title || option.nodeId || "未命名"}${detail ? ` · ${detail}` : ""}`;
+    select.append(item);
+  }
+
+  if (job.contextPolicy === "selected" && job.contextKey) select.value = `selected:${job.contextKey}`;
+  else select.value = job.contextPolicy === "new" ? "new" : "reuse";
+  select.addEventListener("change", () => {
+    validateParallelContextChoices();
+    onChange?.(select.selectedOptions?.[0] || null);
+  });
+  return select;
+}
+
+function parallelContextState(job) {
+  const state = document.createElement("span");
+  state.className = "codexParallelContextState";
+  state.textContent = job.contextThreadId
+    ? `对话：${job.contextResumed ? "已继承" : "已建立"} · ${parallelContextLifecycleLabel(job)}`
+    : `对话：首次建立 · ${parallelContextLifecycleLabel(job)}`;
+  if (Array.isArray(job.contextHistory) && job.contextHistory.length) {
+    state.title = `上一代对话已归档，可在 Codex 历史中查看；交接：${job.contextHandoffPath || "已生成"}`;
+  }
+  return state;
+}
+
+function parallelScopeOverlaps(left, right) {
+  const a = String(left || "").replace(/\\/g, "/").toLowerCase();
+  const b = String(right || "").replace(/\\/g, "/").toLowerCase();
+  const base = (value) => value.split(/[*!?\[]/, 1)[0].replace(/[^/]*$/, "");
+  const aBase = base(a);
+  const bBase = base(b);
+  if (!aBase || !bBase || aBase === bBase) return true;
+  const aDirectory = /[*!?\[]|\/$/.test(a);
+  const bDirectory = /[*!?\[]|\/$/.test(b);
+  return (aDirectory && b.startsWith(aBase)) || (bDirectory && a.startsWith(bBase));
+}
+
+function parallelNodeWriteSet(node, jobs = []) {
+  const codeLoc = String(node?.codeLoc || "");
+  const fromCode = codeLoc.split(/[\n,;]+/)
+    .map((item) => item.trim().replace(/\\/g, "/").split(":")[0])
+    .filter((item) => /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.*-]+)+$/.test(item));
+  const text = `${node?.title || ""} ${node?.problem || ""}`;
+  const preferred = fromCode.length
+    ? fromCode.slice(0, 3)
+    : /界面|前端|编辑器|可视化|UI/i.test(text)
+      ? ["public/**"]
+      : /测试|验证|回归/i.test(text)
+        ? ["scripts/**"]
+        : /文档|研究|说明/i.test(text)
+          ? ["docs/**"]
+          : ["server/**"];
+  const occupied = jobs
+    .filter((job) => job.status !== "completed")
+    .flatMap((job) => job.writeSet || []);
+  const free = preferred.find((scope) => !occupied.some((item) => parallelScopeOverlaps(scope, item)));
+  if (free) return [free];
+  const fallbacks = ["server/**", "public/**", "scripts/**", "docs/**"];
+  return [fallbacks.find((scope) => !occupied.some((item) => parallelScopeOverlaps(scope, item))) || "docs/**"];
+}
+
+function parallelJobFromNode(node, taskId, jobs = []) {
+  const instruction = String(node?.nextIdea || node?.problem || node?.approach || `推进${node?.title || node?.id || "当前节点"}`).trim();
+  return {
+    taskId,
+    nodeId: node?.id || "",
+    title: humanizeParallelTitle(node?.title || node?.id || "继续推进"),
+    summary: parallelTaskSummary({ instruction }),
+    instruction,
+    writeSet: parallelNodeWriteSet(node, jobs),
+    dependsOn: [],
+    tests: [],
+    dependencyPrompt: "开始前确认节点接口和依赖分支已满足；没有依赖时写无。",
+    acceptancePrompt: "说明解决了什么问题、如何验证、还缺什么。",
+    contextPolicy: "new",
+    contextKey: "",
+    contextThreadId: "",
+    contextLabel: node?.title || node?.id || "并行分支"
+  };
+}
+
+function syncParallelAppendNodeOptions(run) {
+  const select = els.codexParallelAppendNode;
+  if (!select) return;
+  const previous = select.value;
+  select.textContent = "";
+  const candidates = nodes.filter((node) => node.id !== "ROOT");
+  const fallbackId = run.goal?.stageNodeId || nextFocusId || currentFocusId || candidates[0]?.id || "";
+  for (const node of candidates.length ? candidates : [{ id: fallbackId, title: fallbackId }]) {
+    const option = document.createElement("option");
+    option.value = node.id;
+    option.textContent = `${node.id} · ${humanizeParallelTitle(node.title || node.id)}`;
+    select.append(option);
+  }
+  select.value = candidates.some((node) => node.id === previous)
+    ? previous
+    : (candidates.some((node) => node.id === fallbackId) ? fallbackId : select.options[0]?.value || "");
+}
+
+function parallelJobRow(job, editable, index, contextOptions = [], initiallyOpen = false) {
+  const row = document.createElement("tr");
+  row.dataset.taskId = job.taskId;
+  row.dataset.nodeId = job.nodeId;
+  if (editable && ["failed", "blocked"].includes(job.status)) row.classList.add("codexParallelRetryableRow");
+
+  const statusCell = document.createElement("td");
+  const status = document.createElement("span");
+  status.className = `codexParallelJobStatus ${job.status || "planned"}`;
+  status.textContent = parallelStatusLabels[job.status] || job.status || "待审核";
+  statusCell.append(status);
+
+  const nodeCell = document.createElement("td");
+  const branchHead = document.createElement("div");
+  branchHead.className = "codexParallelBranchHead";
+  const branchNumber = document.createElement("span");
+  branchNumber.className = "codexParallelBranchNumber";
+  branchNumber.textContent = String(index + 1).padStart(2, "0");
+  const nodeTitle = document.createElement("strong");
+  nodeTitle.className = "codexParallelBranchTitle";
+  nodeTitle.textContent = humanizeParallelTitle(job.title, job.taskId);
+  branchHead.append(branchNumber, nodeTitle);
+  let remove = null;
+  if (editable) {
+    remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "codexParallelRemoveBranch";
+    remove.textContent = "\u00d7";
+    remove.title = `删除${nodeTitle.textContent}`;
+    remove.setAttribute("aria-label", `删除${nodeTitle.textContent}`);
+    remove.addEventListener("click", () => removeCodexParallelBranch(job.taskId));
+    branchHead.append(remove);
+  }
+  if (job.threadId) {
+    const threadLink = document.createElement("a");
+    threadLink.className = "codexParallelThreadLink";
+    threadLink.href = job.deepLink || `codex://threads/${encodeURIComponent(job.threadId)}`;
+    threadLink.textContent = "进入对话";
+    threadLink.title = "打开这个 Codex 任务";
+    threadLink.setAttribute("aria-label", `打开${nodeTitle.textContent}`);
+    threadLink.addEventListener("click", async (event) => {
+      event.preventDefault();
+      try {
+        const response = await fetch(`/api/codex/parallel/${encodeURIComponent(codexParallelRunId)}/thread/${encodeURIComponent(job.taskId)}/open`, { method: "POST" });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+      } catch {
+        window.location.href = threadLink.href;
+      }
+    });
+    branchHead.append(threadLink);
+  }
+  nodeCell.append(branchHead);
+  const contextBadge = document.createElement("span");
+  contextBadge.className = "codexParallelContextBadge";
+  contextBadge.textContent = parallelContextBadgeText(job);
+  nodeCell.append(contextBadge);
+
+  const taskCell = document.createElement("td");
+  const taskSummary = document.createElement("div");
+  taskSummary.className = "codexParallelTaskText";
+  taskSummary.textContent = parallelTaskSummary(job);
+  taskCell.append(taskSummary);
+  if (job.error) {
+    const error = document.createElement("div");
+    error.className = "codexParallelJobError";
+    error.textContent = job.error;
+    taskCell.append(error);
+  }
+
+  const settings = document.createElement("details");
+  settings.className = "codexParallelJobSettings";
+  settings.open = initiallyOpen;
+  const settingsSummary = document.createElement("summary");
+  const settingsSummaryText = document.createElement("span");
+  settingsSummaryText.textContent = initiallyOpen
+    ? (editable ? "收起修改" : "收起详情")
+    : (editable ? "查看与修改" : "查看详情");
+  settingsSummary.append(settingsSummaryText);
+  settings.addEventListener("toggle", () => {
+    settingsSummaryText.textContent = settings.open
+      ? (editable ? "收起修改" : "收起详情")
+      : (editable ? "查看与修改" : "查看详情");
+  });
+  const meta = document.createElement("div");
+  meta.className = "codexParallelJobMeta";
+  if (editable) {
+    const titleInput = document.createElement("input");
+    titleInput.className = "codexParallelTitleInput";
+    titleInput.value = job.title || "";
+    titleInput.placeholder = `分支 ${String(index + 1).padStart(2, "0")}`;
+    titleInput.setAttribute("aria-label", `${job.taskId} 分支名称`);
+    titleInput.addEventListener("input", () => {
+      nodeTitle.textContent = humanizeParallelTitle(titleInput.value, job.taskId);
+      remove.title = `删除${nodeTitle.textContent}`;
+      remove.setAttribute("aria-label", remove.title);
+    });
+    const nodeInput = document.createElement("input");
+    nodeInput.className = "codexParallelNodeId";
+    nodeInput.value = job.nodeId || "";
+    nodeInput.placeholder = "N3";
+    nodeInput.setAttribute("aria-label", `${job.taskId} 节点 ID`);
+    meta.append(parallelField("分支名称", titleInput), parallelField("节点 ID", nodeInput));
+  }
+  const fullTask = document.createElement(editable ? "textarea" : "div");
+  fullTask.className = editable ? "codexParallelInstruction codexParallelFullTask" : "codexParallelFullTask";
+  if (editable) {
+    fullTask.rows = 4;
+    fullTask.value = job.instruction || "";
+    fullTask.setAttribute("aria-label", `${job.taskId} 任务`);
+    fullTask.addEventListener("input", () => {
+      taskSummary.textContent = parallelTaskSummary({ instruction: fullTask.value });
+    });
+  } else {
+    fullTask.textContent = job.instruction || "";
+  }
+  const ids = document.createElement("div");
+  ids.className = "codexParallelJobIds";
+  ids.textContent = editable ? `任务 ${job.taskId}` : `节点 ${job.nodeId} · 任务 ${job.taskId}`;
+  const dependency = document.createElement(editable ? "input" : "span");
+  dependency.className = "codexParallelDependsOn";
+  const dependencyText = (job.dependsOn || []).join(", ");
+  if (editable) {
+    dependency.value = dependencyText;
+    dependency.placeholder = "依赖：无";
+    dependency.setAttribute("aria-label", `${job.taskId} 依赖`);
+  } else {
+    dependency.textContent = `依赖：${dependencyText || "无"}`;
+  }
+  const dependencyPrompt = document.createElement(editable ? "textarea" : "span");
+  dependencyPrompt.className = "codexParallelDependencyPrompt";
+  if (editable) {
+    dependencyPrompt.rows = 2;
+    dependencyPrompt.value = job.dependencyPrompt || "";
+    dependencyPrompt.placeholder = "开始前要确认哪些条件？没有依赖就写无。";
+    dependencyPrompt.setAttribute("aria-label", `${job.taskId} 依赖说明`);
+  } else {
+    dependencyPrompt.textContent = `依赖说明：${job.dependencyPrompt || "未填写"}`;
+  }
+  const tests = document.createElement(editable ? "input" : "span");
+  tests.className = "codexParallelJobTests";
+  const testsText = (job.tests || []).join(" ; ");
+  if (editable) {
+    tests.value = testsText;
+    tests.placeholder = "验收命令";
+    tests.setAttribute("aria-label", `${job.taskId} 验收`);
+  } else {
+    tests.textContent = testsText || "未配置分支验收";
+  }
+  const acceptancePrompt = document.createElement(editable ? "textarea" : "span");
+  acceptancePrompt.className = "codexParallelAcceptancePrompt";
+  if (editable) {
+    acceptancePrompt.rows = 3;
+    acceptancePrompt.value = job.acceptancePrompt || "";
+    acceptancePrompt.placeholder = "如何证明问题已解决？还缺什么？";
+    acceptancePrompt.setAttribute("aria-label", `${job.taskId} 验收提示`);
+  } else {
+    acceptancePrompt.textContent = `验收提示：${job.acceptancePrompt || "未填写"}`;
+  }
+  if (editable) {
+    const contextSelect = parallelContextSelect(job, contextOptions, (selected) => {
+      contextBadge.textContent = parallelContextBadgeText(job, selected);
+    });
+    meta.append(
+      parallelField("完整任务", fullTask, true),
+      parallelField("上下文对话（每个分支独立选择）", contextSelect, true),
+      parallelField("依赖说明", dependencyPrompt, true),
+      parallelField("验收提示", acceptancePrompt, true)
+    );
+  } else {
+    meta.append(fullTask, parallelContextState(job), ids, dependency, dependencyPrompt, acceptancePrompt, tests);
+  }
+  const scope = document.createElement(editable ? "input" : "div");
+  scope.className = "codexParallelWriteSet";
+  if (editable) {
+    scope.type = "text";
+    scope.value = (job.writeSet || []).join(", ");
+    scope.placeholder = "server/**";
+    scope.setAttribute("aria-label", `${job.taskId} 分支负责修改的文件范围`);
+  } else {
+    scope.textContent = (job.writeSet || []).join(", ");
+  }
+  if (editable) {
+    meta.append(
+      parallelField("分支负责修改的文件范围", scope, true),
+      parallelField("机器依赖 taskId", dependency),
+      parallelField("验收命令", tests),
+      ids
+    );
+  } else {
+    meta.append(scope);
+  }
+  settings.append(settingsSummary, meta);
+  taskCell.append(settings);
+  row.append(statusCell, nodeCell, taskCell);
+  return row;
+}
+
+function validateParallelContextChoices() {
+  const owners = new Map();
+  let duplicate = "";
+  for (const row of els.codexParallelRows.querySelectorAll("tr")) {
+    const select = row.querySelector(".codexParallelContextSelect");
+    const selected = select?.selectedOptions?.[0];
+    const threadId = selected?.dataset.contextThreadId || "";
+    if (!threadId || select?.value === "new") continue;
+    const owner = owners.get(threadId);
+    if (owner) duplicate = `${owner} 和 ${row.dataset.taskId} 不能选择同一个 Codex 对话`;
+    else owners.set(threadId, row.dataset.taskId);
+  }
+  if (duplicate) els.codexParallelState.textContent = duplicate;
+  return duplicate ? { message: duplicate } : null;
+}
+
+function resetParallelDialog() {
+  codexParallelDraftEdits.clear();
+  els.codexParallelRows.textContent = "";
+  els.codexParallelGoalReview.hidden = true;
+  els.codexParallelGoalLabel.textContent = "本轮目标";
+  els.codexParallelGoalText.textContent = "";
+  els.codexParallelGoalStatus.textContent = "";
+  els.codexParallelGoalResult.textContent = "";
+  els.codexParallelContexts.hidden = true;
+  els.codexParallelContexts.open = false;
+  els.codexParallelContextSummary.textContent = "";
+  els.codexParallelContextAssignments.textContent = "";
+  els.codexParallelContextPool.textContent = "";
+  els.codexParallelPlanTools.hidden = true;
+  els.codexParallelAddBranch.disabled = false;
+  els.codexParallelTableWrap.hidden = false;
+  els.codexParallelObjectiveBar.hidden = false;
+  els.codexParallelSummary.hidden = true;
+  els.codexParallelSummary.open = false;
+  els.codexParallelSummaryText.textContent = "";
+  els.codexParallelReview.hidden = true;
+  els.codexParallelFiles.textContent = "";
+  els.codexParallelTests.textContent = "";
+  els.codexParallelPatch.textContent = "";
+  els.codexParallelReviewWarning.hidden = true;
+  els.codexParallelReviewWarning.textContent = "";
   els.codexParallelOpen.hidden = true;
-  els.codexParallelStart.disabled = false;
-  els.codexParallelDialog.showModal();
+  els.codexParallelRetry.hidden = true;
+  els.codexParallelRetry.disabled = false;
+  els.codexParallelReject.hidden = true;
+  els.codexParallelReject.disabled = false;
+  els.codexParallelAccept.hidden = true;
+  els.codexParallelMore.hidden = true;
+  els.codexParallelMore.open = false;
+  els.codexParallelRegenerate.hidden = false;
+  els.codexParallelRegenerate.disabled = false;
+  els.codexParallelStart.hidden = false;
+  els.codexParallelStart.disabled = true;
+  els.codexParallelStart.textContent = "确认开始并行";
+  els.codexParallelAudit.hidden = true;
+  els.codexParallelAudit.disabled = false;
+  renderParallelStageRail();
 }
 
 function parallelStatusText(run) {
-  const workers = run.jobs.map((job) => `${job.nodeId}: ${job.status}`).join(" · ");
-  const coordinator = run.coordinator ? ` · coordinator: ${run.coordinator.status}` : "";
-  return `${workers}${coordinator}${run.error ? ` · ${run.error}` : ""}`;
+  if (run.error) return run.error;
+  if (run.status === "draft") return `${run.jobs.length} 个分支待确认`;
+  if (["approved", "preparing"].includes(run.status)) return "正在准备隔离工作区";
+  if (run.status === "running") {
+    const done = run.jobs.filter((job) => job.status === "completed").length;
+    const active = run.jobs.filter((job) => ["preparing", "running"].includes(job.status)).length;
+    const queued = run.jobs.filter((job) => ["planned", "queued"].includes(job.status)).length;
+    return `${done}/${run.jobs.length} 已完成 · ${active} 执行中${queued ? ` · ${queued} 等待` : ""}`;
+  }
+  if (run.status === "coordinating") return "分支已完成 · 正在汇总验证";
+  if (run.status === "review") {
+    const failed = run.review?.failedTasks?.length || 0;
+    if (failed) return `${failed} 个分支待修复`;
+    return run.review?.readyToAccept ? "目标一致 · 可应用" : "暂不可应用";
+  }
+  if (run.status === "auditing") return "正在核验目标";
+  if (run.status === "accepted") {
+    if (["queued", "running"].includes(run.review?.treeSync?.status)) return "已应用 · 正在同步任务树";
+    if (run.review?.treeSync?.status === "failed") return "已应用 · 任务树同步失败";
+    return "已应用";
+  }
+  if (run.status === "rejected") return "已丢弃，当前项目没有被修改";
+  if (run.status === "failed") return `运行失败：${run.error || "请检查协调任务"}`;
+  return "正在自动规划并行分支…";
+}
+
+function renderParallelRun(run, { focusTaskId = "" } = {}) {
+  captureParallelDraftEdits(run);
+  for (const taskId of [...codexParallelPendingAppendJobs.keys()]) {
+    if ((run.jobs || []).some((job) => job.taskId === taskId && !job.pendingAppend) || ["accepted", "rejected"].includes(run.status)) {
+      codexParallelPendingAppendJobs.delete(taskId);
+    }
+  }
+  const openTaskIds = new Set([...els.codexParallelRows.querySelectorAll("tr")]
+    .filter((row) => row.querySelector(".codexParallelJobSettings")?.open)
+    .map((row) => row.dataset.taskId));
+  if (focusTaskId) openTaskIds.add(focusTaskId);
+  const scrollTop = els.codexParallelTableWrap.scrollTop;
+  const scrollLeft = els.codexParallelTableWrap.scrollLeft;
+  const activeRow = document.activeElement?.closest?.("tr");
+  const activeClass = [...(document.activeElement?.classList || [])].find((name) => name.startsWith("codexParallel")) || "";
+  const activeWasSummary = document.activeElement?.tagName === "SUMMARY";
+  const mergeDraft = (job) => {
+    const edits = codexParallelDraftEdits.get(job.taskId);
+    if (!edits || !(run.status === "draft" || job.pendingAppend || codexParallelPendingAppendJobs.has(job.taskId))) return job;
+    return { ...job, ...edits, status: job.status, pendingAppend: job.pendingAppend };
+  };
+  const baseJobs = (run.jobs || []).filter((job) => !job.pendingAppend).map(mergeDraft);
+  const pendingJobs = run.status === "draft" ? [] : [...codexParallelPendingAppendJobs.values()]
+    .filter((job) => !baseJobs.some((item) => item.taskId === job.taskId))
+    .map(mergeDraft);
+  const displayedRun = pendingJobs.length || baseJobs.length !== (run.jobs || []).length
+    ? { ...run, jobs: [...baseJobs, ...pendingJobs] }
+    : run;
+  codexParallelRun = displayedRun;
+  codexParallelRunId = displayedRun.id;
+  renderParallelStageRail(displayedRun);
+  rememberCodexParallelRun(displayedRun);
+  const editable = displayedRun.status === "draft";
+  const reviewing = displayedRun.status === "review";
+  const failedTaskIds = new Set(displayedRun.review?.failedTasks || []);
+  const displayedObjective = displayedRun.objective || displayedRun.goal?.immediate || "";
+  if (displayedObjective && document.activeElement !== els.codexParallelObjective) {
+    els.codexParallelObjective.value = displayedObjective;
+  }
+  els.codexParallelObjectiveBar.hidden = !["planning", "draft", "failed"].includes(displayedRun.status);
+  els.codexParallelObjective.disabled = !["planning", "draft", "failed"].includes(displayedRun.status);
+  els.codexParallelRows.textContent = "";
+  const contextOptions = parallelContextOptionsForRun(displayedRun.contextOptions || []);
+  renderParallelContextOverview(displayedRun, contextOptions);
+  for (const [index, job] of (displayedRun.jobs || []).entries()) {
+    const jobEditable = editable || (reviewing && failedTaskIds.has(job.taskId)) || codexParallelPendingAppendJobs.has(job.taskId);
+    els.codexParallelRows.append(parallelJobRow(job, jobEditable, index, contextOptions, openTaskIds.has(job.taskId)));
+  }
+  requestAnimationFrame(() => {
+    const targetTaskId = focusTaskId || activeRow?.dataset.taskId || "";
+    const targetRow = targetTaskId
+      ? [...els.codexParallelRows.querySelectorAll("tr")].find((row) => row.dataset.taskId === targetTaskId)
+      : null;
+    if (focusTaskId) targetRow?.querySelector(".codexParallelJobSettings")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    else {
+      els.codexParallelTableWrap.scrollTop = scrollTop;
+      els.codexParallelTableWrap.scrollLeft = scrollLeft;
+    }
+    const focusTarget = activeWasSummary
+      ? targetRow?.querySelector(".codexParallelJobSettings summary")
+      : (activeClass ? targetRow?.querySelector(`.${activeClass}`) : null);
+    focusTarget?.focus?.({ preventScroll: true });
+  });
+  const summary = displayedRun.summary;
+  els.codexParallelSummary.hidden = !summary || !editable;
+  els.codexParallelSummaryText.textContent = summary || "";
+  const goalVisible = Boolean(displayedRun.goal) && ["planning", "draft", "review", "auditing", "accepted"].includes(displayedRun.status);
+  els.codexParallelGoalReview.hidden = !goalVisible;
+  if (goalVisible) {
+    if (["planning", "draft"].includes(displayedRun.status)) {
+      els.codexParallelGoalLabel.textContent = "根本目标";
+      els.codexParallelGoalText.textContent = displayedRun.goal.root || "尚未记录根本目标";
+      els.codexParallelGoalStatus.textContent = "阶段目标";
+      els.codexParallelGoalResult.textContent = displayedRun.goal.stage || "尚未记录阶段目标";
+    } else {
+      const goalView = parallelGoalView(displayedRun);
+      els.codexParallelGoalLabel.textContent = "本轮目标";
+      els.codexParallelGoalText.textContent = displayedRun.goal.immediate || "尚未记录本轮目标";
+      els.codexParallelGoalStatus.textContent = goalView.status;
+      els.codexParallelGoalResult.textContent = goalView.result;
+    }
+  }
+  els.codexParallelTableWrap.hidden = ["accepted", "rejected"].includes(displayedRun.status);
+  syncParallelAppendNodeOptions(displayedRun);
+  const appendable = ["draft", "approved", "preparing", "running", "coordinating", "review", "failed"].includes(displayedRun.status);
+  els.codexParallelPlanTools.hidden = !appendable;
+  els.codexParallelAddBranch.disabled = !appendable || codexParallelBranchPlanning;
+  els.codexParallelAddBranch.title = editable ? "让模型按选中节点生成一个分支草案" : "让模型按选中节点生成一个待审核分支";
+  els.codexParallelState.textContent = parallelStatusText(displayedRun);
+  els.codexParallelStart.hidden = !editable;
+  els.codexParallelStart.disabled = !editable;
+  els.codexParallelRegenerate.hidden = !["draft", "failed"].includes(displayedRun.status);
+  els.codexParallelRegenerate.disabled = !["draft", "failed"].includes(displayedRun.status);
+  els.codexParallelAppendConfirm.hidden = codexParallelPendingAppendJobs.size === 0;
+  els.codexParallelAppendConfirm.disabled = codexParallelBranchPlanning;
+  els.codexParallelAppendConfirm.textContent = codexParallelPendingAppendJobs.size
+    ? `确认加入 ${codexParallelPendingAppendJobs.size} 个分支`
+    : "确认加入分支";
+  const requiredContinuity = displayedRun.goal?.history?.length ? "stable" : "baseline";
+  const auditVisible = reviewing && (!displayedRun.review?.goalAssessment
+    || displayedRun.review.goalAssessment.alignment !== "aligned"
+    || displayedRun.review.goalAssessment.continuity !== requiredContinuity
+    || displayedRun.review?.goalAudit?.status === "failed");
+  els.codexParallelAudit.hidden = !auditVisible;
+  els.codexParallelAudit.disabled = !auditVisible;
+  els.codexParallelOpen.hidden = !displayedRun.coordinator?.threadId;
+  els.codexParallelMore.hidden = !displayedRun.coordinator?.threadId && !auditVisible;
+  els.codexParallelReview.hidden = !reviewing;
+  els.codexParallelRetry.hidden = !reviewing || failedTaskIds.size === 0;
+  els.codexParallelRetry.disabled = !reviewing || failedTaskIds.size === 0;
+  els.codexParallelReject.hidden = !reviewing;
+  els.codexParallelReject.disabled = false;
+  els.codexParallelAccept.hidden = !reviewing;
+  els.codexParallelAccept.disabled = !displayedRun.review?.readyToAccept;
+  els.codexParallelAccept.title = displayedRun.review?.readyToAccept
+    ? "接受并应用；任务树同步在后台进行"
+    : (displayedRun.review?.warnings?.[0] || "实现、目标推进和长期目标连续性都通过后才能接受");
+  if (reviewing) {
+    const files = displayedRun.review.changedFiles || [];
+    const tests = [
+      ...(displayedRun.jobs || []).flatMap((job) => job.testResults || []),
+      ...(displayedRun.integrationTestResults || [])
+    ];
+    const passed = tests.filter((test) => test.ok).length;
+    els.codexParallelFiles.textContent = `${files.length} 个文件`;
+    els.codexParallelFiles.title = files.join("\n");
+    els.codexParallelTests.textContent = tests.length ? `${passed}/${tests.length} 通过` : "未配置命令";
+    els.codexParallelTests.title = tests.map((test) => `${test.ok ? "PASS" : "FAIL"} ${test.command}`).join("\n");
+    els.codexParallelPatch.textContent = displayedRun.review.patchPreview || "没有文本差异";
+    const warnings = displayedRun.review.warnings || [];
+    els.codexParallelReviewWarning.hidden = warnings.length === 0;
+    els.codexParallelReviewWarning.textContent = warnings.join("；");
+  }
 }
 
 async function pollCodexParallelRun() {
@@ -6097,46 +7097,363 @@ async function pollCodexParallelRun() {
     const payload = await res.json();
     if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
     const run = payload.run;
-    els.codexParallelState.textContent = parallelStatusText(run);
-    const done = run.status === "completed" || run.status === "failed";
-    els.codexParallelStart.disabled = !done;
-    els.codexParallelOpen.hidden = !run.coordinator?.threadId;
-    if (!done) codexParallelPollTimer = setTimeout(pollCodexParallelRun, 1500);
+    renderParallelRun(run);
+    if (parallelRunNeedsPolling(run)) codexParallelPollTimer = setTimeout(pollCodexParallelRun, 1200);
   } catch (error) {
     els.codexParallelState.textContent = `读取状态失败: ${error.message}`;
-    els.codexParallelStart.disabled = false;
   }
 }
 
-async function startCodexParallel(event) {
-  event.preventDefault();
-  const jobs = [...els.codexParallelRows.querySelectorAll("tr")]
-    .filter((row) => row.querySelector(".codexParallelEnabled")?.checked)
-    .map((row) => {
-      const node = nodes.find((item) => item.id === row.dataset.nodeId);
-      return {
-        nodeId: row.dataset.nodeId,
-        title: node?.title || "",
-        instruction: row.querySelector(".codexParallelInstruction").value.trim(),
-        writeSet: row.querySelector(".codexParallelWriteSet").value.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean)
-      };
-    });
-  els.codexParallelStart.disabled = true;
-  els.codexParallelState.textContent = "正在创建 worker...";
+async function generateCodexParallelPlan() {
+  const objective = els.codexParallelObjective?.value.trim() || "";
+  clearTimeout(codexParallelPollTimer);
+  codexParallelPendingAppendJobs.clear();
+  codexParallelBranchPlanning = false;
+  codexParallelRunId = "";
+  codexParallelRun = null;
+  forgetCodexParallelRun();
+  resetParallelDialog();
+  els.codexParallelRegenerate.disabled = true;
+  els.codexParallelState.textContent = "正在生成并行草案；模型较慢时会自动使用保守计划…";
   try {
-    const res = await fetch("/api/codex/parallel", {
+    const res = await fetch("/api/codex/parallel/plan", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ objective })
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    renderParallelRun(payload.run);
+    if (payload.run.status === "planning") codexParallelPollTimer = setTimeout(pollCodexParallelRun, 600);
+  } catch (error) {
+    els.codexParallelState.textContent = error.message;
+    els.codexParallelRegenerate.disabled = false;
+  }
+}
+
+async function resumeCodexParallelRun() {
+  const savedId = rememberedCodexParallelRunId();
+  if (!savedId) return false;
+  try {
+    const res = await fetch(`/api/codex/parallel/${savedId}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const payload = await res.json();
+    if (!payload.run) throw new Error("运行记录为空");
+    renderParallelRun(payload.run);
+    if (parallelRunNeedsPolling(payload.run)) {
+      codexParallelPollTimer = setTimeout(pollCodexParallelRun, payload.run.status === "planning" ? 600 : 400);
+    }
+    return true;
+  } catch {
+    forgetCodexParallelRun();
+    return false;
+  }
+}
+
+async function loadParallelContextOptions() {
+  try {
+    const res = await fetch("/api/codex/threads");
+    const payload = await res.json();
+    if (!res.ok) return;
+    codexParallelContextOptions = (payload.threads || []).map((thread) => ({
+      contextKey: `codex-${thread.id}`,
+      threadId: thread.id,
+      title: thread.name || thread.preview || thread.id.slice(0, 8),
+      preview: thread.name ? thread.preview : "",
+      source: "codex",
+      updatedAt: thread.updatedAt || 0
+    }));
+    if (codexParallelRun) renderParallelRun(codexParallelRun);
+  } catch {
+    // A missing history list must not block the user from starting new independent branches.
+  }
+}
+
+async function openCodexParallelDialog() {
+  closeCodexThreadMenu();
+  clearTimeout(codexParallelPollTimer);
+  resetParallelDialog();
+  if (!els.codexParallelDialog.open) els.codexParallelDialog.showModal();
+  loadParallelContextOptions();
+  if (!(await resumeCodexParallelRun())) {
+    els.codexParallelObjective.value = "";
+    generateCodexParallelPlan();
+  }
+}
+
+function editableControlValue(row, selector, fallback = "") {
+  const control = row.querySelector(selector);
+  return control && "value" in control ? control.value.trim() : String(fallback || "").trim();
+}
+
+function captureParallelDraftEdits(run) {
+  if (!codexParallelRun || codexParallelRun.id !== run?.id) return;
+  if (codexParallelRun.status !== "draft" && codexParallelPendingAppendJobs.size === 0) return;
+  for (const job of collectParallelJobs()) codexParallelDraftEdits.set(job.taskId, job);
+}
+
+function collectParallelJobs() {
+  return [...els.codexParallelRows.querySelectorAll("tr")].map((row) => {
+    const previous = codexParallelRun?.jobs?.find((job) => job.taskId === row.dataset.taskId) || {};
+    const instruction = editableControlValue(row, ".codexParallelInstruction", previous.instruction);
+    const writeSet = editableControlValue(row, ".codexParallelWriteSet", (previous.writeSet || []).join(", "));
+    const dependsOn = editableControlValue(row, ".codexParallelDependsOn", (previous.dependsOn || []).join(", "));
+    const dependencyPrompt = editableControlValue(row, ".codexParallelDependencyPrompt", previous.dependencyPrompt);
+    const acceptancePrompt = editableControlValue(row, ".codexParallelAcceptancePrompt", previous.acceptancePrompt);
+    const tests = editableControlValue(row, ".codexParallelJobTests", (previous.tests || []).join(" ; "));
+    const title = editableControlValue(row, ".codexParallelTitleInput", previous.title);
+    const nodeId = editableControlValue(row, ".codexParallelNodeId", previous.nodeId || row.dataset.nodeId);
+    const context = row.querySelector(".codexParallelContextSelect");
+    const selectedContext = context?.selectedOptions?.[0];
+    const contextPolicy = context?.value === "new"
+      ? "new"
+      : (context?.value?.startsWith("selected:") ? "selected" : (previous.contextPolicy || "reuse"));
+    const contextKey = contextPolicy === "selected"
+      ? (selectedContext?.dataset.contextKey || "")
+      : (contextPolicy === "new" ? "" : (context?.dataset.contextKey || previous.contextKey || ""));
+    const contextThreadId = contextPolicy === "selected"
+      ? (selectedContext?.dataset.contextThreadId || "")
+      : (contextPolicy === "new" ? "" : (context?.dataset.contextThreadId || previous.contextThreadId || ""));
+    const contextSource = contextPolicy === "selected"
+      ? (selectedContext?.dataset.contextSource || "codex")
+      : (contextPolicy === "new" ? "parallel" : (context?.dataset.contextSource || previous.contextSource || "parallel"));
+    const contextPreview = contextPolicy === "selected"
+      ? (selectedContext?.dataset.contextPreview || "")
+      : (context?.dataset.contextPreview || previous.contextPreview || "");
+    return {
+      taskId: row.dataset.taskId,
+      nodeId,
+      title,
+      summary: previous.summary || "",
+      instruction,
+      dependencyPrompt,
+      acceptancePrompt,
+      writeSet: writeSet.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
+      dependsOn: dependsOn.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean),
+      tests: tests.split(/\s*;\s*/).map((item) => item.trim()).filter(Boolean),
+      contextPolicy,
+      contextKey,
+      contextThreadId,
+      contextSource,
+      contextPreview,
+      contextLabel: previous.contextLabel || title || nodeId
+    };
+  });
+}
+
+async function planCodexParallelBranch() {
+  if (!codexParallelRunId || !codexParallelRun || codexParallelBranchPlanning) return;
+  const nodeId = els.codexParallelAppendNode?.value || codexParallelRun.goal?.stageNodeId || "";
+  const existingJobs = collectParallelJobs();
+  codexParallelBranchPlanning = true;
+  els.codexParallelAddBranch.disabled = true;
+  els.codexParallelState.textContent = `正在让模型按 ${nodeId} 生成一个可审核分支…`;
+  try {
+    const res = await fetch(`/api/codex/parallel/${codexParallelRunId}/branch-plan`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        nodeId,
+        objective: els.codexParallelObjective?.value.trim() || codexParallelRun.objective || "",
+        existingJobs
+      })
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    const job = { ...payload.proposal.job, status: "planned", testResults: [], pendingAppend: codexParallelRun.status !== "draft" };
+    if (codexParallelRun.status === "draft") {
+      const jobs = collectParallelJobs();
+      jobs.push(job);
+      renderParallelRun({ ...codexParallelRun, jobs }, { focusTaskId: job.taskId });
+    } else {
+      codexParallelPendingAppendJobs.set(job.taskId, job);
+      renderParallelRun(codexParallelRun, { focusTaskId: job.taskId });
+    }
+    els.codexParallelState.textContent = payload.proposal.summary || "已生成分支草案，请审核后确认加入";
+  } catch (error) {
+    els.codexParallelState.textContent = error.message;
+  } finally {
+    codexParallelBranchPlanning = false;
+    els.codexParallelAddBranch.disabled = false;
+    els.codexParallelAppendConfirm.disabled = false;
+  }
+}
+
+async function appendPendingCodexParallelBranches() {
+  if (!codexParallelRunId || !codexParallelPendingAppendJobs.size) return;
+  const contextError = validateParallelContextChoices();
+  if (contextError) return;
+  const jobs = collectParallelJobs().filter((job) => codexParallelPendingAppendJobs.has(job.taskId));
+  codexParallelBranchPlanning = true;
+  els.codexParallelState.textContent = "正在把已审核的新增分支加入调度队列…";
+  try {
+    const res = await fetch(`/api/codex/parallel/${codexParallelRunId}/append`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jobs })
     });
     const payload = await res.json();
     if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
-    codexParallelRunId = payload.run.id;
-    els.codexParallelState.textContent = parallelStatusText(payload.run);
-    codexParallelPollTimer = setTimeout(pollCodexParallelRun, 500);
+    for (const job of jobs) {
+      codexParallelPendingAppendJobs.delete(job.taskId);
+      codexParallelDraftEdits.delete(job.taskId);
+    }
+    renderParallelRun(payload.run, { focusTaskId: jobs[0]?.taskId || "" });
+    if (parallelRunNeedsPolling(payload.run)) codexParallelPollTimer = setTimeout(pollCodexParallelRun, 400);
+  } catch (error) {
+    els.codexParallelState.textContent = error.message;
+  } finally {
+    codexParallelBranchPlanning = false;
+    els.codexParallelAddBranch.disabled = false;
+    els.codexParallelAppendConfirm.disabled = false;
+  }
+}
+
+function removeCodexParallelBranch(taskId) {
+  if (codexParallelPendingAppendJobs.has(taskId)) {
+    codexParallelPendingAppendJobs.delete(taskId);
+    renderParallelRun(codexParallelRun);
+    return;
+  }
+  if (codexParallelRun?.status !== "draft") return;
+  const jobs = collectParallelJobs();
+  if (jobs.length <= 2) {
+    els.codexParallelState.textContent = "并行计划至少保留 2 个分支";
+    return;
+  }
+  const nextJobs = jobs
+    .filter((job) => job.taskId !== taskId)
+    .map((job) => ({ ...job, dependsOn: job.dependsOn.filter((id) => id !== taskId) }));
+  renderParallelRun({ ...codexParallelRun, jobs: nextJobs });
+}
+
+function parallelDraftError(jobs) {
+  if (jobs.length < 2) return "并行计划至少需要 2 个分支";
+  const contextError = validateParallelContextChoices();
+  if (contextError) return contextError.message;
+  for (const job of jobs) {
+    if (!job.nodeId) return { taskId: job.taskId, selector: ".codexParallelNodeId", message: `${job.title || job.taskId} 需要填写节点 ID` };
+    if (!job.instruction) return { taskId: job.taskId, selector: ".codexParallelInstruction", message: `${job.title || job.taskId} 需要填写完整任务` };
+    if (!job.writeSet.length) return { taskId: job.taskId, selector: ".codexParallelWriteSet", message: `${job.title || job.taskId} 需要填写分支负责修改的文件范围` };
+  }
+  return null;
+}
+
+function showParallelDraftError(error) {
+  if (typeof error === "string") {
+    els.codexParallelState.textContent = error;
+    return;
+  }
+  const row = [...els.codexParallelRows.querySelectorAll("tr")].find((item) => item.dataset.taskId === error.taskId);
+  const details = row?.querySelector(".codexParallelJobSettings");
+  const control = row?.querySelector(error.selector);
+  if (details) details.open = true;
+  if (control) {
+    control.setAttribute("aria-invalid", "true");
+    control.focus();
+    control.scrollIntoView({ block: "center", inline: "nearest" });
+  }
+  els.codexParallelState.textContent = error.message;
+}
+
+async function startCodexParallel(event) {
+  event.preventDefault();
+  if (!codexParallelRunId || codexParallelRun?.status !== "draft") return;
+  els.codexParallelRows.querySelectorAll('[aria-invalid="true"]').forEach((control) => control.removeAttribute("aria-invalid"));
+  const jobs = collectParallelJobs();
+  const draftError = parallelDraftError(jobs);
+  if (draftError) {
+    showParallelDraftError(draftError);
+    return;
+  }
+  els.codexParallelStart.disabled = true;
+  els.codexParallelRegenerate.disabled = true;
+  els.codexParallelState.textContent = "正在冻结审核计划和当前工作区快照…";
+  try {
+    const res = await fetch(`/api/codex/parallel/${codexParallelRunId}/approve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        objective: els.codexParallelObjective?.value.trim() || "",
+        jobs,
+        integrationTests: codexParallelRun.integrationTests || []
+      })
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    codexParallelDraftEdits.clear();
+    renderParallelRun(payload.run);
+    codexParallelPollTimer = setTimeout(pollCodexParallelRun, 400);
   } catch (error) {
     els.codexParallelState.textContent = error.message;
     els.codexParallelStart.disabled = false;
+    els.codexParallelRegenerate.disabled = false;
+  }
+}
+
+async function retryFailedCodexParallel() {
+  if (!codexParallelRunId || codexParallelRun?.status !== "review" || !codexParallelRun.review?.failedTasks?.length) return;
+  els.codexParallelRetry.disabled = true;
+  els.codexParallelReject.disabled = true;
+  els.codexParallelState.textContent = "正在冻结失败分支修订，已通过分支保持不变…";
+  try {
+    const res = await fetch(`/api/codex/parallel/${codexParallelRunId}/retry`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jobs: collectParallelJobs(), integrationTests: codexParallelRun.integrationTests || [] })
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    renderParallelRun(payload.run);
+    codexParallelPollTimer = setTimeout(pollCodexParallelRun, 400);
+  } catch (error) {
+    els.codexParallelState.textContent = error.message;
+    els.codexParallelRetry.disabled = false;
+    els.codexParallelReject.disabled = false;
+  }
+}
+
+async function finishCodexParallel(action) {
+  if (!codexParallelRunId) return;
+  els.codexParallelAccept.disabled = true;
+  els.codexParallelRetry.disabled = true;
+  els.codexParallelReject.disabled = true;
+  els.codexParallelState.textContent = action === "accept" ? "正在应用已审核的差异…" : "正在丢弃隔离工作区…";
+  try {
+    const res = await fetch(`/api/codex/parallel/${codexParallelRunId}/${action}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}"
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    renderParallelRun(payload.run);
+    if (!parallelRunTerminal(payload.run)) codexParallelPollTimer = setTimeout(pollCodexParallelRun, 400);
+  } catch (error) {
+    els.codexParallelState.textContent = error.message;
+    els.codexParallelAccept.disabled = !codexParallelRun?.review?.readyToAccept;
+    els.codexParallelRetry.disabled = !codexParallelRun?.review?.failedTasks?.length;
+    els.codexParallelReject.disabled = false;
+  }
+}
+
+async function auditCodexParallelGoal() {
+  if (!codexParallelRunId || codexParallelRun?.status !== "review") return;
+  els.codexParallelAudit.disabled = true;
+  els.codexParallelState.textContent = "正在核验目标";
+  try {
+    const res = await fetch(`/api/codex/parallel/${codexParallelRunId}/audit`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}"
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    renderParallelRun(payload.run);
+    codexParallelPollTimer = setTimeout(pollCodexParallelRun, 400);
+  } catch (error) {
+    els.codexParallelState.textContent = error.message;
+    els.codexParallelAudit.disabled = false;
   }
 }
 
@@ -6147,7 +7464,7 @@ async function openParallelCoordinator() {
   if (!res.ok) els.codexParallelState.textContent = payload.error || `HTTP ${res.status}`;
 }
 
-function renderCodexThreadMenu({ threads = [], pinned = "", presets = [] } = {}) {
+function renderCodexThreadMenu({ threads = [], systemThreads = [], systemThreadCount = systemThreads.length, pinned = "", presets = [] } = {}) {
   const menu = els.codexThreadMenu;
   menu.textContent = "";
   menu.append(codexMenuGroup("发什么（发到下面选中的会话）"));
@@ -6219,6 +7536,50 @@ function renderCodexThreadMenu({ threads = [], pinned = "", presets = [] } = {})
     menu.append(empty);
   }
 
+  if (systemThreads.length) {
+    const details = document.createElement("details");
+    details.className = "codexThreadSystemDetails";
+    const summary = document.createElement("summary");
+    summary.textContent = `任务图内部会话（已收纳 ${systemThreadCount} 条）`;
+    details.append(summary);
+    const labels = {
+      planner: "自动规划",
+      "branch-planner": "新增分支规划",
+      worker: "并行分支",
+      coordinator: "结果汇总",
+      sync: "任务树同步",
+      internal: "内部任务"
+    };
+    const grouped = new Map();
+    for (const thread of systemThreads) {
+      const kind = thread.kind || "internal";
+      if (!grouped.has(kind)) grouped.set(kind, []);
+      grouped.get(kind).push(thread);
+    }
+    const visibleSystemThreads = [];
+    for (const [kind, group] of grouped) {
+      if (kind === "worker") visibleSystemThreads.push(...group.map((thread) => ({ thread, kind, count: 1 })));
+      else visibleSystemThreads.push({ thread: group[0], kind, count: group.length });
+    }
+    for (const { thread, kind, count } of visibleSystemThreads) {
+      const item = document.createElement("a");
+      item.className = "codexThreadSystemItem";
+      item.href = `codex://threads/${encodeURIComponent(thread.id)}`;
+      const title = document.createElement("span");
+      title.className = "codexThreadTitle";
+      title.textContent = kind === "worker"
+        ? (thread.name || labels[kind])
+        : labels[kind] || "内部任务";
+      const meta = document.createElement("span");
+      meta.className = "codexThreadMeta";
+      const when = thread.updatedAt ? new Date(thread.updatedAt * 1000).toLocaleString() : "";
+      meta.textContent = [count > 1 ? `${count} 条历史` : "", when, "打开"].filter(Boolean).join(" · ");
+      item.append(title, meta);
+      details.append(item);
+    }
+    menu.append(details);
+  }
+
   const refresh = document.createElement("button");
   refresh.type = "button";
   refresh.className = "codexThreadItem";
@@ -6232,6 +7593,14 @@ async function loadCodexThreadMenu(attempt = 0, refresh = false) {
     const res = await fetch(refresh ? "/api/codex/threads?refresh=1" : "/api/codex/threads");
     const payload = await res.json();
     if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    codexParallelContextOptions = (payload.threads || []).map((thread) => ({
+      contextKey: `codex-${thread.id}`,
+      threadId: thread.id,
+      title: thread.name || thread.preview || thread.id.slice(0, 8),
+      preview: thread.name ? thread.preview : "",
+      source: "codex",
+      updatedAt: thread.updatedAt || 0
+    }));
     renderCodexThreadMenu(payload);
     if ((payload.cache === "warming" || payload.cache === "refreshing") && attempt < 30) {
       const loading = document.createElement("p");
@@ -6263,6 +7632,7 @@ async function openCodexThreadMenu() {
 // default, which only made sense while the chat was where the graph lived; from the full page it
 // would spend a turn to show what is already on screen. It stays in the menu.
 els.openInCodexBtn?.addEventListener("click", () => runCodex({ preset: "next" }));
+els.codexParallelBtn?.addEventListener("click", () => openCodexParallelDialog());
 
 // The loop used to mean "copy this command, switch to Codex, paste, press enter". Now that the
 // page can start a turn itself, the chain bar spends that same turn on one click.
@@ -6352,7 +7722,14 @@ els.codexThreadsBtn?.addEventListener("click", () => {
 });
 els.codexParallelClose?.addEventListener("click", () => els.codexParallelDialog.close());
 els.codexParallelForm?.addEventListener("submit", startCodexParallel);
+els.codexParallelRegenerate?.addEventListener("click", generateCodexParallelPlan);
+els.codexParallelAddBranch?.addEventListener("click", planCodexParallelBranch);
+els.codexParallelAppendConfirm?.addEventListener("click", appendPendingCodexParallelBranches);
 els.codexParallelOpen?.addEventListener("click", openParallelCoordinator);
+els.codexParallelAudit?.addEventListener("click", auditCodexParallelGoal);
+els.codexParallelRetry?.addEventListener("click", retryFailedCodexParallel);
+els.codexParallelReject?.addEventListener("click", () => finishCodexParallel("reject"));
+els.codexParallelAccept?.addEventListener("click", () => finishCodexParallel("accept"));
 els.codexParallelDialog?.addEventListener("close", () => clearTimeout(codexParallelPollTimer));
 
 document.addEventListener("click", (event) => {
@@ -6397,11 +7774,13 @@ els.kbAskBtn?.addEventListener("click", () => askKnowledgeFromPanel());
 els.kbClearHistoryBtn?.addEventListener("click", () => clearKnowledgeHistory());
 els.toggleLeftPaneBtn?.addEventListener("click", () => toggleLeftPane());
 els.toggleRightPaneBtn?.addEventListener("click", () => toggleRightPane());
+els.toggleChainDockBtn?.addEventListener("click", () => toggleChainDock());
 els.chainAutoAdvanceBtn?.addEventListener("click", () => toggleChainAutoAdvance());
 els.chainClearBtn?.addEventListener("click", () => clearChain());
 wireChainLoopHelp();
 
 initPaneCollapseState();
+initChainDockCollapseState();
 initEdgeDimOpacityControl();
 syncNodeCardCompactButton();
 

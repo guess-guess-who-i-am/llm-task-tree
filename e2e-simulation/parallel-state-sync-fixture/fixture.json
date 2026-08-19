@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "parallel-state-sync-business",
+  "purpose": "验证业务项目中的局部自动并行结果可被离线复现和审核，同时保留真实业务使用证据缺口。",
+  "treeFile": "task-tree.md",
+  "rootNodeId": "ROOT",
+  "stageNodeId": "N3",
+  "acceptedRunFile": "accepted-parallel-run.json",
+  "integrationEvidenceFile": "evidence/integration-test.json",
+  "executionConstraints": {
+    "network": false,
+    "browser": false,
+    "humanInput": false
+  },
+  "capabilityAssessment": {
+    "localAutomaticParallel": {
+      "status": "verified",
+      "claim": "局部自动并行能力已验证"
+    },
+    "realBusinessUsage": {
+      "status": "evidence_missing",
+      "goalAchieved": false,
+      "gap": "尚未在真实业务项目中观察规划质量、业务规则正确性和长期使用效果，因此整体目标不能宣称完成。"
+    }
+  }
+}

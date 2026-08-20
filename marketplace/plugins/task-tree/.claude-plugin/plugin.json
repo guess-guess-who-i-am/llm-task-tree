@@ -1,7 +1,7 @@
 {
   "name": "task-tree",
   "displayName": "LLM Task Tree",
-  "version": "0.8.1+codex.20260819134500",
+  "version": "0.8.1+codex.20260820090120",
   "description": "让人与 Agent 通过可视任务图共享项目目标、进度、方法和下一步。",
   "author": {
     "name": "llm-task-tree",
@@ -10,7 +10,12 @@
   "homepage": "https://github.com/guess-guess-who-i-am/llm-task-tree",
   "repository": "https://github.com/guess-guess-who-i-am/llm-task-tree",
   "license": "MIT",
-  "keywords": ["task-tree", "task-graph", "agent-memory", "project-management"],
+  "keywords": [
+    "task-tree",
+    "task-graph",
+    "agent-memory",
+    "project-management"
+  ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json"
 }

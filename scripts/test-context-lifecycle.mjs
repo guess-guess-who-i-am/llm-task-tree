@@ -63,6 +63,13 @@ const startTurn = async (options) => {
       })
     };
   }
+  if (options.prompt.includes("Continuous Supervisor")) {
+    await options.onAccepted?.({ threadId: options.threadId || "supervisor-thread", turnId: "supervisor-turn" });
+    return { threadId: options.threadId || "supervisor-thread", turnId: "supervisor-turn", output: JSON.stringify({ action: "finish", summary: "上下文结果可汇总", reason: "两个分支均已完成", newJobs: [] }) };
+  }
+  if (options.prompt.includes("Supervisor Final Review")) {
+    return { threadId: options.threadId || "supervisor-thread", turnId: "supervisor-final-turn", output: JSON.stringify({ summary: "上下文轮换结果可验证", affectedNodes: ["N2"], evidence: "交接文件与新旧 thread", goalAssessment: { alignment: "aligned", progress: "progress", continuity: "baseline", achieved: "完成上下文轮换", remaining: "仍需真实使用验证" } }) };
+  }
   workerTurn += 1;
   const taskId = options.prompt.match(/Task id: ([^\n]+)/)?.[1] || "worker";
   const generation = options.forceNewThread ? 2 : 1;

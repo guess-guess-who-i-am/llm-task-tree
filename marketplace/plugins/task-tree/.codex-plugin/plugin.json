@@ -1,6 +1,6 @@
 {
   "name": "task-tree",
-  "version": "0.8.1+codex.20260819134500",
+  "version": "0.8.1+codex.20260820090120",
   "description": "\u628a\u9879\u76ee\u7684\u4efb\u52a1\u56fe\uff08\u5173\u7cfb\u56fe / \u6267\u884c\u6d41\u7a0b / \u77e5\u8bc6\u5e93 / \u591a\u6a21\u578b\u534f\u4f5c\uff09\u53d8\u6210 Agent \u53ef\u76f4\u63a5\u8c03\u7528\u7684\u5de5\u5177\uff0c\u5e76\u53ef\u9760\u6253\u5f00\u53ef\u4ea4\u4e92\u4efb\u52a1\u56fe\u754c\u9762\u3002",
   "author": {
     "name": "llm-task-tree",

@@ -207,3 +207,46 @@
 - [协调器回归](../../../../scripts/test-codex-coordinator.mjs)
 - [真实 HTTP 浏览器回归](../../../../scripts/test-codex-parallel-real-ui.mjs)
 - [交接实现](../../../../server/codex-coordinator.js)
+
+## 2026-08-20 主对话持久 checkpoint 与多代续接
+
+- 换代不再只读取 ROOT、N3 和最近若干轮；上一代 checkpoint 会持久保存并与真实用户纠错增量合并。
+- 系统转发、浏览器环境、自动续接提示、checkpoint 提示和只有“继续”的轮次不会被当成用户确认。
+- 新摘要必须通过八个非空栏目、已验证/正在进行分栏和决定来源门禁；无新用户消息时直接复用旧状态，上游异常时可安全降级。
+- 17/17 协议测试和 5410 真实菜单点击通过。两代新会话均恢复 Agent IDE；第二代近期原话为 0，首答约 12 秒。
+- 当前剩余缺口是旧会话被界面占用时可能无法归档；新会话创建和续接不受影响，长期业务目标保持仍需继续验证。
+
+### 本轮证据
+
+- [上下文质量研究与实验](../../../../docs/agent-context-research/context-handoff-quality.zh.md)
+- [持久 checkpoint 编译器](../../../../server/context-handoff.js)
+- [主对话换代 API](../../../../server.js)
+- [真实菜单点击回归](../../../../scripts/test-context-rotate-ui.mjs)
+
+## 2026-08-20 主对话自动换代
+
+- 主发送链路现在持久记录真实 token 占用和压缩事件；70% 只预警，90% 或压缩且当前轮结束后自动换代。
+- 服务每 10 秒只读检查 Codex 会话尾部的生命周期事件，因此用户直接在 Codex 聊天框继续输入也无需回到任务图点击；消息正文不会进入监测结果。
+- 同一代只创建一个继任会话；失败保留旧会话和绑定，手动按钮仅用于提前换代或恢复。
+- 33 项服务回归、两项真实页面测试和 15/15 分发审计通过；5410 已实测读取当前绑定会话的真实占用。
+
+### 本轮证据
+
+- [自动生命周期状态机](../../../../server/main-context-lifecycle.js)
+- [直接 Codex 会话尾部读取](../../../../server/codex-run.js)
+- [无需点击的页面回归](../../../../scripts/test-context-auto-ui.mjs)
+- [阈值、压缩、并发和失败回归](../../../../server/main-context-lifecycle.test.js)
+
+## 2026-08-20 多 Agent 并发隔离架构核验
+
+- 用户提出的 worktree、独立测试、集成 Agent、完整回归和 8898 串行发布方向成立，但 worktree 只能隔离代码工作区。
+- 源码确认现有系统已有 detached worktree、独占写集、4 路依赖调度、串行 cherry-pick、集成测试与接受前文件摘要校验。
+- 本轮 worktree 与 execution scope 两个脚本门禁通过；Supervisor/Coordinator 6 项和 Codex run 15 项测试通过。
+- 当前 P0 缺口是端口/数据库等资源租约、跨运行接受锁和 8898 发布状态机；补齐前不能声称多 Agent 已完全互不干扰。
+
+### 本轮证据
+
+- [并发隔离设计与 10 项故障注入门禁](../../../../docs/subtree-parallel/concurrent-agent-isolation-design.zh.md)
+- [工作区隔离实现](../../../../server/parallel-worktree.js)
+- [并发调度与集成队列](../../../../server/codex-coordinator.js)
+- [既有并行工作流](../../../../docs/subtree-parallel/WORKFLOW.md)

@@ -16,6 +16,7 @@
 
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { open as openFile } from "node:fs/promises";
 import path from "node:path";
 import { OPEN_GRAPH_PROMPT } from "./codex-prompts.js";
 
@@ -290,8 +291,8 @@ export async function startCodexTurn({
   forkThreadId = "",
   threadName = PINNED_THREAD_NAME,
   model = null,
-  sandbox = "read-only",
-  approvalPolicy = "never",
+  sandbox = null,
+  approvalPolicy = null,
   config = null,
   developerInstructions = null,
   environment = null,
@@ -303,6 +304,7 @@ export async function startCodexTurn({
   onContextCompaction = null,
   onNotification = null,
   onAccepted = null,
+  onCompleted = null,
   spawnCodex = spawnAppServer
 } = {}) {
   const session = new AppServerSession(spawnCodex(environment || {}));
@@ -333,8 +335,8 @@ export async function startCodexTurn({
         session.request("thread/fork", {
           threadId: forkThreadId,
           cwd,
-          sandbox,
-          approvalPolicy,
+          ...(sandbox ? { sandbox } : {}),
+          ...(approvalPolicy ? { approvalPolicy } : {}),
           ...(config ? { config } : {}),
           ...(model ? { model } : {}),
           ...(developerInstructions ? { developerInstructions } : {})
@@ -363,8 +365,8 @@ export async function startCodexTurn({
       started = await waitFor(
         session.request("thread/start", {
           cwd,
-          sandbox,
-          approvalPolicy,
+          ...(sandbox ? { sandbox } : {}),
+          ...(approvalPolicy ? { approvalPolicy } : {}),
           ...(config ? { config } : {}),
           ...(model ? { model } : {}),
           ...(developerInstructions ? { developerInstructions } : {})
@@ -380,8 +382,22 @@ export async function startCodexTurn({
     let failure = "";
     let lastTokenUsage = null;
     let contextCompactions = 0;
+    let acceptedTurnId = "";
+    let completionDelivered = false;
     let finish = () => {};
     const completed = new Promise((resolve) => { finish = resolve; });
+    const deliverCompletion = async (turn) => {
+      if (completionDelivered || typeof onCompleted !== "function") return;
+      completionDelivered = true;
+      await onCompleted({
+        threadId,
+        turnId: turn?.id || acceptedTurnId || null,
+        status: turn?.status || (turn?.error || failure ? "failed" : "completed"),
+        error: turn?.error || (failure ? { message: failure } : null),
+        tokenUsage: lastTokenUsage,
+        contextCompactions
+      });
+    };
 
     session.notify = (message) => {
       const params = message.params || {};
@@ -390,11 +406,11 @@ export async function startCodexTurn({
 
       if (message.method === "thread/tokenUsage/updated") {
         lastTokenUsage = normalizeThreadTokenUsage(params);
-        Promise.resolve(onUsage?.(lastTokenUsage)).catch(() => {});
+        Promise.resolve(onUsage?.(lastTokenUsage, { threadId, turnId: acceptedTurnId || null })).catch(() => {});
       }
       if (message.method === "item/completed" && params.item?.type === "contextCompaction") {
         contextCompactions += 1;
-        Promise.resolve(onContextCompaction?.({ threadId, item: params.item })).catch(() => {});
+        Promise.resolve(onContextCompaction?.({ threadId, turnId: acceptedTurnId || null, item: params.item })).catch(() => {});
       }
 
       // A retrying error is Codex narrating a hiccup ("Reconnecting... 1/5"), not a dead turn.
@@ -408,7 +424,17 @@ export async function startCodexTurn({
           items: [],
           error: params.error || null
         });
-        if (!waitForCompletion) session.close();
+        if (!waitForCompletion) {
+          const turn = params.turn || {
+            id: params.turnId || acceptedTurnId || null,
+            status: message.method === "turn/failed" ? "failed" : "completed",
+            error: params.error || null
+          };
+          session.request("thread/unsubscribe", { threadId }).catch(() => {}).finally(() => {
+            session.close();
+            Promise.resolve(deliverCompletion(turn)).catch(() => {});
+          });
+        }
       }
     };
 
@@ -417,6 +443,7 @@ export async function startCodexTurn({
       ACCEPT_TIMEOUT_MS,
       "发起对话"
     );
+    acceptedTurnId = accepted?.turn?.id || "";
     // Naming is cosmetic. Start the real work first so an unsupported or slow naming request
     // cannot consume a planner's entire total timeout before turn/start is even sent.
     if (!resumed) {
@@ -433,13 +460,19 @@ export async function startCodexTurn({
         .map((item) => item.text.trim())
         .filter(Boolean);
       const output = messages.at(-1) || "";
+      await withTimeout(
+        session.request("thread/unsubscribe", { threadId }),
+        ACCEPT_TIMEOUT_MS,
+        "释放 Codex 会话写入租约"
+      ).catch(() => {});
+      session.close();
+      await deliverCompletion(turn).catch(() => {});
       if (turn?.status === "failed" || turn?.error || failure) {
         const error = new Error(turn?.error?.message || failure || "模型这一轮失败了");
         error.threadId = threadId;
         error.turnId = turn?.id || accepted?.turn?.id || null;
         throw error;
       }
-      session.close();
       return {
         threadId,
         turnId: turn?.id || accepted?.turn?.id || null,
@@ -466,14 +499,114 @@ export function threadDeepLink(threadId) {
   return `codex://threads/${threadId}`;
 }
 
+/** Reads the real model-visible turns so context rotation can preserve recent user corrections. */
+export async function readCodexThread(threadId, { spawnCodex = spawnAppServer } = {}) {
+  const id = String(threadId || "").trim();
+  if (!id) throw new Error("threadId is required");
+  return withSession(spawnCodex, async (session) => {
+    const result = await withTimeout(
+      session.request("thread/read", { threadId: id, includeTurns: true }),
+      ACCEPT_TIMEOUT_MS,
+      "读取 Codex 会话"
+    );
+    if (!result?.thread?.id) throw new Error("Codex 没有返回会话内容");
+    return result.thread;
+  });
+}
+
+/** Resolves the local rollout file without requesting model-visible turns. */
+export async function readCodexThreadRolloutPath(threadId, { spawnCodex = spawnAppServer } = {}) {
+  const id = String(threadId || "").trim();
+  if (!id) throw new Error("threadId is required");
+  return withSession(spawnCodex, async (session) => {
+    const result = await withTimeout(
+      session.request("thread/read", { threadId: id, includeTurns: false }),
+      ACCEPT_TIMEOUT_MS,
+      "读取 Codex 会话位置"
+    );
+    const rolloutPath = String(result?.thread?.path || "").trim();
+    if (!rolloutPath) throw new Error("Codex 没有返回会话记录位置");
+    return rolloutPath;
+  });
+}
+
+/**
+ * Reads only lifecycle events from the tail of a Codex rollout. This observes turns typed directly
+ * in the desktop app without loading their message text or taking a writer lease on the thread.
+ */
+export async function readCodexRolloutContextSnapshot(filePath, { maxBytes = 512 * 1024 } = {}) {
+  const target = String(filePath || "").trim();
+  if (!target) throw new Error("rollout path is required");
+  const handle = await openFile(target, "r");
+  try {
+    const info = await handle.stat();
+    const length = Math.min(info.size, Math.max(16 * 1024, Number(maxBytes) || 0));
+    const start = Math.max(0, info.size - length);
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, start);
+    let text = buffer.toString("utf8");
+    if (start > 0) text = text.slice(text.indexOf("\n") + 1);
+    let tokenUsage = null;
+    let latestTaskStartedAt = "";
+    let latestTaskCompletedAt = "";
+    let latestCompactionAt = "";
+    for (const line of text.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+      if (entry?.type !== "event_msg") continue;
+      const type = entry.payload?.type;
+      const timestamp = String(entry.timestamp || "");
+      if (type === "task_started") latestTaskStartedAt = timestamp;
+      if (type === "task_complete") latestTaskCompletedAt = timestamp;
+      if (type === "context_compacted") latestCompactionAt = timestamp;
+      if (type === "token_count") {
+        const usage = entry.payload?.info?.last_token_usage || entry.payload?.info?.total_token_usage || {};
+        tokenUsage = normalizeThreadTokenUsage({
+          tokenUsage: {
+            inputTokens: usage.input_tokens,
+            outputTokens: usage.output_tokens,
+            cachedInputTokens: usage.cached_input_tokens,
+            totalTokens: usage.total_tokens,
+            modelContextWindow: entry.payload?.info?.model_context_window
+          }
+        });
+        tokenUsage.updatedAt = timestamp || tokenUsage.updatedAt;
+      }
+    }
+    return {
+      filePath: target,
+      tokenUsage,
+      latestTaskStartedAt,
+      latestTaskCompletedAt,
+      latestCompactionAt,
+      turnComplete: Boolean(latestTaskCompletedAt && (!latestTaskStartedAt || latestTaskCompletedAt >= latestTaskStartedAt))
+    };
+  } finally {
+    await handle.close();
+  }
+}
+
 /** Archive a completed context generation without deleting its history. */
 export async function archiveCodexThread(threadId, { spawnCodex = spawnAppServer } = {}) {
   const id = String(threadId || "").trim();
   if (!id) return false;
-  await withSession(spawnCodex, async (session) => {
-    await withTimeout(session.request("thread/archive", { threadId: id }), ACCEPT_TIMEOUT_MS, "归档 Codex 上下文");
-  });
-  return true;
+  let lastError;
+  for (let attempt = 0; attempt < 7; attempt += 1) {
+    try {
+      await withSession(spawnCodex, async (session) => {
+        await withTimeout(session.request("thread/archive", { threadId: id }), ACCEPT_TIMEOUT_MS, "归档 Codex 上下文");
+      });
+      return true;
+    } catch (error) {
+      lastError = error;
+      if (!/active writer/i.test(String(error?.message || "")) || attempt === 6) throw error;
+      // Codex can report turn completion before its writer lease is released. The lease normally
+      // clears within a few seconds; bounded backoff avoids deleting history or failing rotation.
+      await new Promise((resolve) => setTimeout(resolve, Math.min(500 * (attempt + 1), 2000)));
+    }
+  }
+  throw lastError;
 }
 
 export function isTaskTreeSystemThread(thread) {
@@ -487,6 +620,7 @@ export function taskTreeSystemThreadKind(thread) {
   if (/Automatic Parallel Planner|自动规划/i.test(text)) return "planner";
   if (/Isolated Parallel Worker|任务图\s*·\s*并行/i.test(text)) return "worker";
   if (/Parallel Coordinator|任务图\s*·\s*汇总/i.test(text)) return "coordinator";
+  if (/Continuous Supervisor|任务图\s*·\s*总控/i.test(text)) return "supervisor";
   if (/状态同步|tree.?sync/i.test(text)) return "sync";
   return "internal";
 }
@@ -500,7 +634,7 @@ export function openInCodex(threadId) {
       ? ["open", [url]]
       : ["xdg-open", [url]];
 
-  const child = spawn(command, args, { stdio: "ignore", detached: true });
+  const child = spawn(command, args, { stdio: "ignore", detached: true, windowsHide: true });
   child.unref();
   return url;
 }

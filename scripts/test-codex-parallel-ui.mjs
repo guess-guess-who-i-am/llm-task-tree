@@ -74,14 +74,39 @@ function fixture(status, { objective = "" } = {}) {
     };
   }
   if (status === "accepted") run.review.appliedFiles = [...run.review.changedFiles];
+  if (!["planning", "draft"].includes(status)) {
+    run.supervisor = {
+      status: status === "running" ? "running" : "completed",
+      threadId: "supervisor-thread",
+      deepLink: "codex://threads/supervisor-thread",
+      rounds: status === "running" ? 1 : 2,
+      paused: false,
+      lastDecision: status === "running" ? "先完成当前两个分支，再判断是否需要新增任务。" : "已有证据足以进入结束审核。",
+      messages: []
+    };
+    run.executionTree = {
+      root: { id: "RUN", title: run.goal.immediate, status },
+      nodes: run.jobs.map((job) => ({ id: job.taskId, taskId: job.taskId, parentId: "RUN", title: job.title, nodeId: job.nodeId, status: job.status })),
+      supervisor: run.supervisor
+    };
+  }
   return run;
 }
 
 async function installRoutes(page, { planStatus = "draft", readStatus = "review" } = {}) {
   const appendedJobs = [];
+  let supervisorPaused = false;
+  const supervisorMessages = [];
   const runFixture = (status, options = {}) => {
     const run = fixture(status, options);
     run.jobs.push(...appendedJobs.map((job) => ({ ...job, status: status === "review" ? "completed" : "queued", testResults: [] })));
+    if (run.supervisor) {
+      run.supervisor.paused = supervisorPaused;
+      run.supervisor.status = supervisorPaused ? "paused" : run.supervisor.status;
+      run.supervisor.messages = [...supervisorMessages];
+      run.executionTree.nodes = run.jobs.map((job) => ({ id: job.taskId, taskId: job.taskId, parentId: "RUN", title: job.title, nodeId: job.nodeId, status: job.status }));
+      run.executionTree.supervisor = run.supervisor;
+    }
     return run;
   };
   await page.route("**/favicon.ico", (route) => route.fulfill({ status: 204, body: "" }));
@@ -134,6 +159,19 @@ async function installRoutes(page, { planStatus = "draft", readStatus = "review"
     return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ run: runFixture(readStatus) }) });
   });
   await page.route(/\/api\/codex\/parallel\/run-12345678\/thread\/[A-Za-z0-9._-]+\/open$/, (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ deepLink: "codex://threads/worker-1" }) }));
+  await page.route("**/api/codex/parallel/run-12345678/supervisor/message", (route) => {
+    supervisorMessages.push({ id: `message-${supervisorMessages.length + 1}`, text: route.request().postDataJSON()?.message || "", status: "queued" });
+    return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ run: runFixture(readStatus) }) });
+  });
+  await page.route("**/api/codex/parallel/run-12345678/supervisor/pause", (route) => {
+    supervisorPaused = true;
+    return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ run: runFixture("paused") }) });
+  });
+  await page.route("**/api/codex/parallel/run-12345678/supervisor/resume", (route) => {
+    supervisorPaused = false;
+    return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ run: runFixture(readStatus) }) });
+  });
+  await page.route("**/api/codex/parallel/run-12345678/supervisor/open", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ deepLink: "codex://threads/supervisor-thread" }) }));
   await page.route("**/api/codex/parallel/run-12345678/accept", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ run: runFixture("accepted") }) }));
   await page.route(/\/api\/codex\/parallel\/run-12345678$/, (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ run: runFixture(readStatus) }) }));
 }
@@ -141,10 +179,12 @@ async function installRoutes(page, { planStatus = "draft", readStatus = "review"
 async function openParallel(page) {
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelectorAll(".graphNode").length > 0);
+  await page.locator("#projectOverviewClose").click({ force: true }).catch(() => {});
   await page.evaluate(() => {
     const overview = document.querySelector("#projectOverviewDialog");
     if (overview?.open) overview.close();
   });
+  await page.waitForFunction(() => !document.querySelector("#projectOverviewDialog")?.open);
   await page.locator("#codexParallelBtn").click();
   await page.locator("#codexParallelRows tr").nth(1).waitFor();
 }
@@ -160,6 +200,10 @@ try {
   desktop.on("response", (response) => { if (response.status() >= 400) failedResponses.push(`${response.status()} ${response.url()}`); });
   await desktop.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await desktop.waitForFunction(() => document.querySelectorAll(".graphNode").length > 0);
+  await desktop.evaluate(() => {
+    const overview = document.querySelector("#projectOverviewDialog");
+    if (overview?.open) overview.close();
+  });
   await desktop.locator("#codexThreadsBtn").click();
   await desktop.locator(".codexThreadSystemDetails").waitFor();
   assert.equal(await desktop.locator(".codexThreadItem .codexThreadTitle").filter({ hasText: "界面讨论" }).count(), 1);
@@ -281,6 +325,26 @@ try {
   await openParallel(runningPage);
   const runningDialog = runningPage.locator("#codexParallelDialog");
   assert.equal(await runningDialog.locator(".codexParallelStage.is-active").innerText(), "执行");
+  assert.equal(await runningDialog.locator("#codexParallelSupervisor").isVisible(), true);
+  assert.match(await runningDialog.locator("#codexParallelSupervisorDecision").innerText(), /完成当前两个分支/);
+  assert.equal(await runningDialog.locator("#codexParallelExecutionTree [role='treeitem']").count(), 3);
+  await runningDialog.locator("#codexParallelSupervisorInput").fill("新增任务前先验证目标缺口");
+  const supervisorMessageRequest = runningPage.waitForRequest("**/supervisor/message");
+  await runningDialog.locator("#codexParallelSupervisorSend").click();
+  assert.equal((await supervisorMessageRequest).postDataJSON().message, "新增任务前先验证目标缺口");
+  assert.equal(await runningDialog.locator("#codexParallelSupervisorInput").inputValue(), "");
+  const supervisorPauseRequest = runningPage.waitForRequest("**/supervisor/pause");
+  await runningDialog.locator("#codexParallelSupervisorToggle").click();
+  await supervisorPauseRequest;
+  await runningDialog.locator("#codexParallelSupervisorToggle").filter({ hasText: "继续" }).waitFor();
+  const supervisorResumeRequest = runningPage.waitForRequest("**/supervisor/resume");
+  await runningDialog.locator("#codexParallelSupervisorToggle").click();
+  await supervisorResumeRequest;
+  await runningDialog.locator("#codexParallelSupervisorToggle").filter({ hasText: "暂停" }).waitFor();
+  await runningDialog.locator("#codexParallelMore summary").click();
+  const supervisorOpenRequest = runningPage.waitForRequest("**/supervisor/open");
+  await runningDialog.locator("#codexParallelSupervisorOpen").click();
+  await supervisorOpenRequest;
   assert.equal(await runningDialog.locator("#codexParallelObjectiveBar").isHidden(), true);
   assert.equal(await runningDialog.locator(".codexParallelThreadLink").count(), 2);
   assert.deepEqual(await runningDialog.locator(".codexParallelThreadLink").allTextContents(), ["进入对话", "进入对话"]);
@@ -344,7 +408,10 @@ try {
   assert.match((await response.json()).error, /共享状态/);
 
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 } });
-  await installRoutes(mobile);
+  await installRoutes(mobile, { readStatus: "running" });
+  await mobile.addInitScript(() => {
+    localStorage.setItem(`task-tree:codex-parallel:${location.origin}${location.pathname}`, "run-12345678");
+  });
   await openParallel(mobile);
   const mobileDialog = mobile.locator("#codexParallelDialog");
   const box = await mobileDialog.boundingBox();
@@ -353,6 +420,11 @@ try {
   await mobileDialog.locator(".codexParallelJobSettings summary").first().click();
   assert.equal(await mobileDialog.locator(".codexParallelJobSettings").first().evaluate((element) => element.open), true);
   assert.equal(await mobileDialog.locator(".codexParallelFullTask").first().isVisible(), true);
+  assert.equal(await mobileDialog.locator("#codexParallelSupervisor").isVisible(), true);
+  const supervisorBox = await mobileDialog.locator("#codexParallelSupervisor").boundingBox();
+  assert.ok(supervisorBox && supervisorBox.x >= 0 && supervisorBox.x + supervisorBox.width <= 390);
+  assert.equal(await mobileDialog.locator(".codexParallelSupervisorMessage").isVisible(), true);
+  assert.equal(await mobileDialog.locator("#codexParallelSupervisor").evaluate((element) => element.scrollWidth <= element.clientWidth), true);
 
   console.log("PASS automatic parallel dialog supports repeated branch addition and reliable editing on desktop and mobile");
 } finally {

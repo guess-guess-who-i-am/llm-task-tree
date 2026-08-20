@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { PassThrough, Writable } from "node:stream";
-import { archiveCodexThread, isTaskTreeSystemThread, normalizeThreadTokenUsage, startCodexTurn } from "./codex-run.js";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { archiveCodexThread, isTaskTreeSystemThread, normalizeThreadTokenUsage, readCodexRolloutContextSnapshot, readCodexThread, readCodexThreadRolloutPath, startCodexTurn } from "./codex-run.js";
 
 function fakeAppServer({ requests = [], resumeCwd = "E:\\project", ignoreMethods = [], tokenUsage = null, completeOnTurn = false } = {}) {
   const child = new EventEmitter();
@@ -26,6 +29,8 @@ function fakeAppServer({ requests = [], resumeCwd = "E:\\project", ignoreMethods
             ? { thread: { id: "thread-forked", cwd: request.params.cwd, forkedFromId: request.params.threadId } }
           : request.method === "thread/resume"
             ? { thread: { id: request.params.threadId, cwd: resumeCwd } }
+          : request.method === "thread/read"
+            ? { thread: { id: request.params.threadId, cwd: resumeCwd, path: "E:\\rollout.jsonl", turns: request.params.includeTurns ? [{ id: "turn-old", items: [] }] : undefined } }
           : request.method === "turn/start"
             ? { turn: { id: "turn-test" } }
             : {};
@@ -132,6 +137,9 @@ test("context rotation starts a successor thread instead of resuming the old one
   assert.equal(result.threadId, "thread-test");
   assert.equal(requests.some((request) => request.method === "thread/resume"), false);
   assert.equal(requests.some((request) => request.method === "thread/start"), true);
+  const started = requests.find((request) => request.method === "thread/start");
+  assert.equal("sandbox" in started.params, false, "a successor must inherit the user's effective sandbox configuration");
+  assert.equal("approvalPolicy" in started.params, false, "a successor must inherit the user's effective approval policy");
 });
 
 test("old context generations are archived without deletion", async () => {
@@ -139,6 +147,54 @@ test("old context generations are archived without deletion", async () => {
   assert.equal(await archiveCodexThread("thread-old", { spawnCodex: () => fakeAppServer({ requests }) }), true);
   assert.ok(requests.some((request) => request.method === "thread/archive" && request.params.threadId === "thread-old"));
   assert.equal(requests.some((request) => request.method === "thread/delete"), false);
+});
+
+test("reads complete turns for a context checkpoint", async () => {
+  const requests = [];
+  const thread = await readCodexThread("thread-old", { spawnCodex: () => fakeAppServer({ requests }) });
+  assert.equal(thread.id, "thread-old");
+  assert.equal(thread.turns[0].id, "turn-old");
+  const read = requests.find((request) => request.method === "thread/read");
+  assert.equal(read.params.includeTurns, true);
+});
+
+test("resolves a rollout path without loading conversation turns", async () => {
+  const requests = [];
+  assert.equal(await readCodexThreadRolloutPath("thread-old", { spawnCodex: () => fakeAppServer({ requests }) }), "E:\\rollout.jsonl");
+  const read = requests.find((request) => request.method === "thread/read");
+  assert.equal(read.params.includeTurns, false);
+});
+
+test("reads direct desktop turn pressure from rollout lifecycle events without message content", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codex-rollout-context-"));
+  const rollout = path.join(root, "rollout.jsonl");
+  const entries = [
+    { timestamp: "2026-08-20T00:00:00.000Z", type: "event_msg", payload: { type: "task_started" } },
+    { timestamp: "2026-08-20T00:00:01.000Z", type: "event_msg", payload: { type: "user_message", message: "must never be returned" } },
+    { timestamp: "2026-08-20T00:00:02.000Z", type: "event_msg", payload: { type: "context_compacted" } },
+    {
+      timestamp: "2026-08-20T00:00:03.000Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          last_token_usage: { input_tokens: 890, output_tokens: 20, cached_input_tokens: 100, total_tokens: 910 },
+          model_context_window: 1000
+        }
+      }
+    },
+    { timestamp: "2026-08-20T00:00:04.000Z", type: "event_msg", payload: { type: "task_complete" } }
+  ];
+  try {
+    await writeFile(rollout, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+    const snapshot = await readCodexRolloutContextSnapshot(rollout);
+    assert.equal(snapshot.tokenUsage.percent, 0.91);
+    assert.equal(snapshot.turnComplete, true);
+    assert.equal(snapshot.latestCompactionAt, "2026-08-20T00:00:02.000Z");
+    assert.doesNotMatch(JSON.stringify(snapshot), /must never be returned/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("a selected project conversation is forked into the isolated worker cwd", async () => {
@@ -159,6 +215,7 @@ test("a selected project conversation is forked into the isolated worker cwd", a
   assert.equal(fork.params.threadId, "thread-source");
   assert.equal(fork.params.cwd, "E:\\isolated-worker");
   assert.equal(fork.params.sandbox, "workspace-write");
+  assert.equal(fork.params.approvalPolicy, "never");
   assert.equal(requests.some((request) => request.method === "thread/start" || request.method === "thread/resume"), false);
 });
 
@@ -192,6 +249,41 @@ test("onAccepted exposes the thread before the model completes", async () => {
   })}\n`);
   const result = await running;
   assert.equal(result.output, "done");
+});
+
+test("interactive turns report final usage and compaction after completion", async () => {
+  const child = fakeAppServer();
+  let resolveCompleted;
+  const completed = new Promise((resolve) => { resolveCompleted = resolve; });
+  const launched = await startCodexTurn({
+    cwd: "E:\\project",
+    prompt: "continue normally",
+    onCompleted: resolveCompleted,
+    spawnCodex: () => child
+  });
+
+  child.stdout.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    method: "thread/tokenUsage/updated",
+    params: { threadId: launched.threadId, tokenUsage: { totalTokens: 910, contextWindow: 1000 } }
+  })}\n`);
+  child.stdout.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    method: "item/completed",
+    params: { threadId: launched.threadId, item: { type: "contextCompaction" } }
+  })}\n`);
+  child.stdout.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    method: "turn/completed",
+    params: { threadId: launched.threadId, turn: { id: launched.turnId, status: "completed", items: [] } }
+  })}\n`);
+
+  const outcome = await completed;
+  assert.equal(outcome.threadId, launched.threadId);
+  assert.equal(outcome.turnId, launched.turnId);
+  assert.equal(outcome.status, "completed");
+  assert.equal(outcome.tokenUsage.percent, 0.91);
+  assert.equal(outcome.contextCompactions, 1);
 });
 
 test("completion timeout closes the app-server session", async () => {

@@ -311,6 +311,23 @@
             <div id="codexParallelContextPool" class="codexParallelContextGroup"></div>
           </div>
         </details>
+        <section id="codexParallelSupervisor" class="codexParallelSupervisor" hidden aria-label="持续总控">
+          <div class="codexParallelSupervisorHead">
+            <div class="codexParallelSupervisorIdentity">
+              <span id="codexParallelSupervisorDot" class="codexParallelSupervisorDot" aria-hidden="true"></span>
+              <strong>持续总控</strong>
+              <span id="codexParallelSupervisorStatus" class="codexParallelSupervisorStatus"></span>
+              <span id="codexParallelSupervisorRounds" class="codexParallelSupervisorRounds"></span>
+            </div>
+            <button type="button" id="codexParallelSupervisorToggle">暂停</button>
+          </div>
+          <p id="codexParallelSupervisorDecision" class="codexParallelSupervisorDecision"></p>
+          <div id="codexParallelExecutionTree" class="codexParallelExecutionTree" role="tree" aria-label="本轮动态运行树"></div>
+          <div class="codexParallelSupervisorMessage">
+            <input id="codexParallelSupervisorInput" type="text" maxlength="4000" placeholder="随时告诉总控要调整什么" aria-label="给持续总控发消息">
+            <button type="button" id="codexParallelSupervisorSend">发送</button>
+          </div>
+        </section>
         <div id="codexParallelPlanTools" class="codexParallelPlanTools" hidden>
           <label class="codexParallelAppendTarget" for="codexParallelAppendNode">
             <span>继续到</span>
@@ -341,6 +358,7 @@
             <summary>更多</summary>
             <div class="codexParallelMorePanel">
               <button type="button" id="codexParallelAudit" hidden>重新核验目标</button>
+              <button type="button" id="codexParallelSupervisorOpen" hidden>打开总控对话</button>
               <button type="button" id="codexParallelOpen" hidden>打开协调任务</button>
             </div>
           </details>

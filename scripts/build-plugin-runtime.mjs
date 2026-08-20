@@ -14,7 +14,7 @@
  */
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -46,6 +46,45 @@ async function runtimeFiles(sourceRoot) {
 
 const digest = (buffer) => createHash("sha256").update(buffer).digest("hex");
 
+async function writeJsonIfChanged(file, value) {
+  const next = `${JSON.stringify(value, null, 2)}\n`;
+  try {
+    if (await readFile(file, "utf8") === next) return;
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  await writeFile(file, next, "utf8");
+}
+
+/** Keep the three installation surfaces on one release identifier. */
+async function syncManifestVersions(sourceRoot, pluginRoot) {
+  const codex = JSON.parse(await readFile(path.join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
+  const version = String(codex.version || "").trim();
+  if (!version) throw new Error(`插件缺少版本号：${pluginRoot}`);
+
+  for (const relative of [".cursor-plugin/plugin.json", ".claude-plugin/plugin.json"]) {
+    const file = path.join(pluginRoot, relative);
+    if (!existsSync(file)) continue;
+    const manifest = JSON.parse(await readFile(file, "utf8"));
+    await writeJsonIfChanged(file, { ...manifest, version });
+  }
+
+  // The repository Claude marketplace is a release surface too. Only update entries that point
+  // at this shared plugin, so multi-plugin marketplaces keep their independent releases.
+  const marketplaceFile = path.join(sourceRoot, ".claude-plugin", "marketplace.json");
+  if (!existsSync(marketplaceFile)) return;
+  const marketplace = JSON.parse(await readFile(marketplaceFile, "utf8"));
+  const pluginName = String(codex.name || "").trim();
+  const plugins = Array.isArray(marketplace.plugins) ? marketplace.plugins : [];
+  let changed = false;
+  const nextPlugins = plugins.map((entry) => {
+    if (entry?.name !== pluginName || entry.version === version) return entry;
+    changed = true;
+    return { ...entry, version };
+  });
+  if (changed) await writeJsonIfChanged(marketplaceFile, { ...marketplace, plugins: nextPlugins });
+}
+
 /**
  * @returns {Promise<{files: string[], bytes: number, stale: string[]}>} `stale` lists the files
  * whose packaged copy differs from the source, and is what `--check` reports.
@@ -71,6 +110,8 @@ export async function buildPluginRuntime({ sourceRoot, pluginRoot, write = true 
     }
     if (!existsSync(to) || digest(await readFile(to)) !== digest(source)) stale.push(rel);
   }
+
+  if (write) await syncManifestVersions(sourceRoot, pluginRoot);
 
   if (!write) {
     // A file the sources no longer have is drift too, and the noisier kind: it keeps working until

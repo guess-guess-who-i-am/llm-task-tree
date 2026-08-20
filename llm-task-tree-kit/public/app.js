@@ -213,6 +213,14 @@ let treeRegistry = { trees: [], activeMethod: "method" };
 let viewTreeId = "";
 let activeMethodTreeId = "method";
 let maintenanceStatus = null;
+const treeMarkdownCache = new Map();
+let treeLoadController = null;
+let treeLoadSequence = 0;
+let modelAgentsLoaded = false;
+let modelAgentsPromise = null;
+let knowledgeConfigLoaded = false;
+let knowledgeConfigPromise = null;
+let serverFeaturesPromise = null;
 let focusLensId = "";
 let focusLensOpen = false;
 let codexParallelContextOptions = [];
@@ -300,6 +308,16 @@ const els = {
   codexParallelContextSummary: document.querySelector("#codexParallelContextSummary"),
   codexParallelContextAssignments: document.querySelector("#codexParallelContextAssignments"),
   codexParallelContextPool: document.querySelector("#codexParallelContextPool"),
+  codexParallelSupervisor: document.querySelector("#codexParallelSupervisor"),
+  codexParallelSupervisorDot: document.querySelector("#codexParallelSupervisorDot"),
+  codexParallelSupervisorStatus: document.querySelector("#codexParallelSupervisorStatus"),
+  codexParallelSupervisorRounds: document.querySelector("#codexParallelSupervisorRounds"),
+  codexParallelSupervisorDecision: document.querySelector("#codexParallelSupervisorDecision"),
+  codexParallelExecutionTree: document.querySelector("#codexParallelExecutionTree"),
+  codexParallelSupervisorInput: document.querySelector("#codexParallelSupervisorInput"),
+  codexParallelSupervisorSend: document.querySelector("#codexParallelSupervisorSend"),
+  codexParallelSupervisorToggle: document.querySelector("#codexParallelSupervisorToggle"),
+  codexParallelSupervisorOpen: document.querySelector("#codexParallelSupervisorOpen"),
   codexParallelPlanTools: document.querySelector("#codexParallelPlanTools"),
   codexParallelAppendNode: document.querySelector("#codexParallelAppendNode"),
   codexParallelAddBranch: document.querySelector("#codexParallelAddBranch"),
@@ -3650,13 +3668,36 @@ function renderTreeSwitcher() {
     els.treeSelect.innerHTML = treeRegistry.trees.map((tree) => {
       const roleLabel = tree.role === "method" ? "方法" : tree.role === "background" ? "背景" : tree.role === "experiments" ? "实验" : tree.role === "architecture" ? "架构" : "参考";
       const activeMark = tree.id === activeMethodTreeId ? " · 活动" : "";
-      return `<option value="${attr(tree.id)}">${escapeHtml(tree.title)}（${roleLabel}${activeMark}）</option>`;
+      const purpose = tree.role === "background"
+        ? "保存背景、痛点、约束和长期证据"
+        : tree.role === "architecture"
+          ? "保存稳定实现契约和系统分层"
+          : tree.role === "method"
+            ? "保存当前方法、执行目标和下一步"
+            : tree.description || "独立任务材料";
+      return `<option value="${attr(tree.id)}" title="${attr(purpose)}">${escapeHtml(tree.title)}（${roleLabel}${activeMark}）</option>`;
     }).join("");
     els.treeSelect.value = viewTreeId;
+    els.treeSelect.title = current
+      ? `${current.title}：${current.description || (current.role === "background" ? "保存背景、痛点、约束和长期证据" : current.role === "architecture" ? "保存稳定实现契约和系统分层" : "保存当前方法、执行目标和下一步")}`
+      : "切换任务树";
   }
   if (els.activeMethodBadge) {
     const active = isViewingActiveMethodTree();
-    els.activeMethodBadge.textContent = active ? "活动方法树 · 绑定执行流" : `${current?.role === "background" ? "背景支撑树" : current?.role || "独立树"} · 不进入执行流`;
+    els.activeMethodBadge.textContent = active
+      ? "方法树 · 当前执行"
+      : current?.role === "background"
+        ? "背景支撑 · 解释为什么做"
+        : current?.role === "architecture"
+          ? "架构支撑 · 解释系统怎么稳定运行"
+          : `${current?.role || "独立树"} · 不进入执行流`;
+    els.activeMethodBadge.title = active
+      ? "当前方法树决定执行目标和执行流程"
+      : current?.role === "background"
+        ? "保存项目背景、用户痛点、设计约束和长期证据；不直接安排执行"
+        : current?.role === "architecture"
+          ? "保存稳定的 schema、界面、kit、flow 等实现契约；不直接安排执行"
+          : "这棵树是独立参考材料，不直接进入执行流程";
     els.activeMethodBadge.classList.toggle("is-background", !active);
   }
   if (els.setActiveMethodBtn) {
@@ -4201,26 +4242,60 @@ function loadFromMarkdown(markdown, options = {}) {
 
 async function loadTree(options = {}) {
   if (!options.registryLoaded) await loadTreeRegistryState();
-  const response = await fetch(treeApiUrl("/api/tree", { t: Date.now() }));
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "加载任务树失败");
-  loadFromMarkdown(data.markdown, {
-    fitView: Boolean(options.fitView),
-    skipUserGraphStateLock: !isViewingActiveMethodTree()
-  });
-  writeCurrentVersionSnapshot(data.markdown).catch(() => {});
-  await loadVersions();
-  await loadModelAgents();
-  await loadKnowledgeConfig();
-  const serverInfo = await probeServerFeatures();
-  if (!serverInfo?.features?.openInEditor) {
-    setSaveState("后台版本过旧或未响应，请重新打开「打开任务图.cmd」后再试检索/打开代码");
+  const treeId = viewTreeId;
+  const sequence = ++treeLoadSequence;
+  treeLoadController?.abort();
+  const controller = new AbortController();
+  treeLoadController = controller;
+  const cached = treeMarkdownCache.get(treeId);
+
+  const applyMarkdown = (markdown, fitView = false) => {
+    if (sequence !== treeLoadSequence || treeId !== viewTreeId) return false;
+    loadFromMarkdown(markdown, {
+      fitView,
+      skipUserGraphStateLock: !isViewingActiveMethodTree(),
+      markSaved: true
+    });
+    renderTreeSwitcher();
+    return true;
+  };
+
+  if (cached?.markdown) {
+    applyMarkdown(cached.markdown, Boolean(options.fitView));
+    setSaveState("已切换 · 正在同步最新内容");
   }
-  renderTree();
-  if (options.fitView) scheduleFitGraphToViewport();
-  renderTreeSwitcher();
-  loadMaintenanceStatus().catch(() => {});
-  if (flowViewApi && isViewingActiveMethodTree()) flowViewApi.reload().catch(() => {});
+
+  const fetchLatest = async () => {
+    const response = await fetch(treeApiUrl("/api/tree"), { cache: "no-store", signal: controller.signal });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "加载任务树失败");
+    treeMarkdownCache.set(treeId, { markdown: data.markdown, loadedAt: Date.now() });
+    if (!cached || cached.markdown !== data.markdown) {
+      applyMarkdown(data.markdown, !cached && Boolean(options.fitView));
+    }
+    if (sequence === treeLoadSequence && treeId === viewTreeId) setSaveState("已加载");
+    return data.markdown;
+  };
+
+  const latestPromise = cached
+    ? fetchLatest().catch((error) => {
+      if (error.name !== "AbortError" && sequence === treeLoadSequence) setSaveState(`同步树失败: ${error.message}`);
+      return null;
+    })
+    : fetchLatest();
+  if (!cached) await latestPromise;
+
+  const secondary = [
+    loadVersions({ treeId, sequence }),
+    loadModelAgents(),
+    loadKnowledgeConfig(),
+    loadServerFeatures(),
+    isViewingActiveMethodTree() ? loadMaintenanceStatus() : Promise.resolve(),
+    flowViewApi && isViewingActiveMethodTree() ? flowViewApi.reload() : Promise.resolve()
+  ];
+  Promise.allSettled(secondary).then(() => {
+    if (sequence === treeLoadSequence && treeId === viewTreeId) renderTreeSwitcher();
+  });
 
   const subtreeParam = new URL(window.location.href).searchParams.get("subtree");
   if (subtreeParam && workspaceMode === "main") {
@@ -4233,38 +4308,70 @@ async function loadTree(options = {}) {
     }
   }
   maybeOpenDailyProjectOverview();
+  return cached ? null : latestPromise;
 }
 
-async function loadModelAgents() {
-  try {
-    const response = await fetch(`/api/model-agents?t=${Date.now()}`);
-    if (!response.ok) throw new Error("读取模型配置失败");
-    const data = await response.json();
-    modelAgents = Array.isArray(data.models) ? data.models : [];
-  } catch (error) {
-    modelPanelError = error.message;
-  }
+async function loadModelAgents({ force = false } = {}) {
+  if (!force && modelAgentsLoaded) return modelAgents;
+  if (!force && modelAgentsPromise) return modelAgentsPromise;
+  modelAgentsPromise = (async () => {
+    try {
+      const response = await fetch(`/api/model-agents?t=${Date.now()}`);
+      if (!response.ok) throw new Error("读取模型配置失败");
+      const data = await response.json();
+      modelAgents = Array.isArray(data.models) ? data.models : [];
+      modelAgentsLoaded = true;
+    } catch (error) {
+      modelPanelError = error.message;
+    } finally {
+      modelAgentsPromise = null;
+    }
+    return modelAgents;
+  })();
+  return modelAgentsPromise;
 }
 
-async function loadKnowledgeConfig() {
-  if (!els.knowledgeState) return;
-  try {
-    const response = await fetch(`/api/knowledge/config?t=${Date.now()}`);
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "读取知识库配置失败");
-    knowledgeConfig = data.config;
-    knowledgeIndex = data.index;
-    knowledgeReindexJob = data.reindex || knowledgeReindexJob;
-    webSearchConfig = data.webSearch || null;
-    openWebSearchStatus = data.openWebSearch || null;
-    knowledgeError = "";
-    syncRetrievalControlsFromConfig();
-    syncLibraryControlsFromConfig();
-    renderKnowledgePanel();
-  } catch (error) {
-    knowledgeError = formatApiFetchError(error, null, "读取知识库配置");
-    renderKnowledgePanel();
-  }
+async function loadKnowledgeConfig({ force = false } = {}) {
+  if (!els.knowledgeState) return null;
+  if (!force && knowledgeConfigLoaded) return knowledgeConfig;
+  if (!force && knowledgeConfigPromise) return knowledgeConfigPromise;
+  knowledgeConfigPromise = (async () => {
+    try {
+      const response = await fetch(`/api/knowledge/config?t=${Date.now()}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "读取知识库配置失败");
+      knowledgeConfig = data.config;
+      knowledgeIndex = data.index;
+      knowledgeReindexJob = data.reindex || knowledgeReindexJob;
+      webSearchConfig = data.webSearch || null;
+      openWebSearchStatus = data.openWebSearch || null;
+      knowledgeError = "";
+      syncRetrievalControlsFromConfig();
+      syncLibraryControlsFromConfig();
+      renderKnowledgePanel();
+      knowledgeConfigLoaded = true;
+    } catch (error) {
+      knowledgeError = formatApiFetchError(error, null, "读取知识库配置");
+      renderKnowledgePanel();
+    } finally {
+      knowledgeConfigPromise = null;
+    }
+    return knowledgeConfig;
+  })();
+  return knowledgeConfigPromise;
+}
+
+async function loadServerFeatures({ force = false } = {}) {
+  if (!force && serverFeaturesPromise) return serverFeaturesPromise;
+  serverFeaturesPromise = probeServerFeatures().then((serverInfo) => {
+    if (!serverInfo?.features?.openInEditor) {
+      setSaveState("后台版本过旧或未响应，请重新打开「打开任务图.cmd」后再试检索/打开代码");
+    }
+    return serverInfo;
+  }).finally(() => {
+    serverFeaturesPromise = null;
+  });
+  return serverFeaturesPromise;
 }
 
 function syncRetrievalControlsFromConfig() {
@@ -4840,7 +4947,7 @@ async function pollKnowledgeReindex() {
     renderKnowledgePanel();
     if (!knowledgeReindexJob?.running) {
       if (knowledgeReindexJob?.error) throw new Error(knowledgeReindexJob.error);
-      await loadKnowledgeConfig();
+      await loadKnowledgeConfig({ force: true });
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 900));
@@ -4979,6 +5086,7 @@ async function pollTreeChanges() {
   if (!response.ok) return;
   const data = await response.json();
   if (data.markdown === lastLoadedMarkdown || data.markdown === lastSavedMarkdown) return;
+  if (viewTreeId) treeMarkdownCache.set(viewTreeId, { markdown: data.markdown, loadedAt: Date.now() });
   loadFromMarkdown(data.markdown, { skipUserGraphStateLock: !isViewingActiveMethodTree(), preserveLens: true });
   writeCurrentVersionSnapshot(data.markdown).catch(() => {});
   setSaveState("已从 Markdown 刷新");
@@ -5026,6 +5134,9 @@ async function saveTree() {
     }
     lastSavedMarkdown = markdown;
     lastLoadedMarkdown = markdown;
+    if (workspaceMode === "main" && viewTreeId) {
+      treeMarkdownCache.set(viewTreeId, { markdown, loadedAt: Date.now() });
+    }
     dirty = false;
     setSaveState(data.flowSync?.changed ? `已保存 · 自动同步 ${data.flowSync.changed} 个 flow 状态` : "已保存");
     await loadVersions();
@@ -5043,15 +5154,16 @@ async function saveTree() {
   }
 }
 
-async function loadVersions() {
+async function loadVersions({ treeId = viewTreeId, sequence = treeLoadSequence } = {}) {
   if (!els.versionList) return;
   try {
     const url = workspaceMode === "subtree" && activeSubtreePath
       ? `/api/subtree-file/versions?path=${encodeURIComponent(activeSubtreePath)}&t=${Date.now()}`
-      : treeApiUrl("/api/versions", { t: Date.now() });
+      : `/api/versions?tree=${encodeURIComponent(treeId)}&t=${Date.now()}`;
     const response = await fetch(url);
     if (!response.ok) throw new Error("Version list failed");
     const data = await response.json();
+    if (workspaceMode === "main" && (treeId !== viewTreeId || sequence !== treeLoadSequence)) return;
     versions = Array.isArray(data.versions) ? data.versions : [];
     renderVersions();
     if (els.versionState) {
@@ -6254,6 +6366,61 @@ async function pinCodexThread(threadId) {
   await openCodexThreadMenu();
 }
 
+async function rotateCodexContext(threadId) {
+  if (!threadId) return;
+  closeCodexThreadMenu();
+  els.openInCodexBtn.disabled = true;
+  els.codexThreadsBtn.disabled = true;
+  setSaveState("正在总结关键决策并建立短上下文会话...");
+  try {
+    const res = await fetch("/api/codex/context/rotate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ threadId, archiveOld: true, open: true })
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    const archiveNote = payload.archiveWarning ? "；旧会话归档失败但仍可继续" : "；旧会话已归档保留";
+    const checkpointNote = payload.checkpointWarning ? "；摘要服务异常，已安全沿用上一代记忆" : "";
+    setSaveState(`已换到短上下文：保留 ${payload.recentTurns} 轮近期纠错${checkpointNote}${archiveNote}`);
+  } catch (error) {
+    setSaveState(`上下文换代失败: ${error.message}`);
+  } finally {
+    els.openInCodexBtn.disabled = false;
+    els.codexThreadsBtn.disabled = false;
+  }
+}
+
+async function pollMainContextLifecycle() {
+  const res = await fetch("/api/codex/context/status", { cache: "no-store" });
+  if (!res.ok) return;
+  const payload = await res.json();
+  const context = payload.context || {};
+  const rotation = context.lastRotation || null;
+  const rotationKey = rotation?.rotatedAt ? `${rotation.threadId}:${rotation.rotatedAt}` : "";
+  const warningKey = context.status === "rotation_failed" && context.warning
+    ? `${context.threadId}:${context.generation}:${context.warning}`
+    : "";
+  let seenRotation = "";
+  let seenWarning = "";
+  try {
+    seenRotation = localStorage.getItem("taskTree.contextRotationSeen") || "";
+    seenWarning = localStorage.getItem("taskTree.contextRotationWarningSeen") || "";
+  } catch {
+    // Status remains useful even when storage is unavailable.
+  }
+  if (rotationKey && rotationKey !== seenRotation) {
+    try { localStorage.setItem("taskTree.contextRotationSeen", rotationKey); } catch {}
+    const reason = rotation.reason === "context_compaction" ? "检测到上下文压缩" : "上下文达到上限";
+    setSaveState(`${reason}，已自动换到短上下文；目标和当前进度已保留`);
+    return;
+  }
+  if (warningKey && warningKey !== seenWarning) {
+    try { localStorage.setItem("taskTree.contextRotationWarningSeen", warningKey); } catch {}
+    setSaveState(context.warning);
+  }
+}
+
 function codexMenuGroup(title) {
   const label = document.createElement("p");
   label.className = "codexThreadGroup";
@@ -6325,6 +6492,8 @@ function codexAskBox() {
 let codexParallelRunId = "";
 let codexParallelPollTimer = null;
 let codexParallelRun = null;
+let codexParallelSupervisorBusy = false;
+let codexParallelPollGeneration = 0;
 const codexParallelDraftEdits = new Map();
 const codexParallelStorageKey = `task-tree:codex-parallel:${location.origin}${location.pathname}`;
 
@@ -6337,10 +6506,17 @@ function parallelRunTerminal(run) {
 }
 
 function parallelRunNeedsPolling(run) {
-  if (["planning", "approved", "preparing", "running", "coordinating", "auditing"].includes(run?.status)) return true;
+  if (["planning", "approved", "preparing", "running", "supervising", "waiting_user", "paused", "coordinating", "auditing"].includes(run?.status)) return true;
   if (run?.status !== "accepted") return false;
   return ["queued", "running"].includes(run.review?.treeSync?.status)
     || ["queued", "running"].includes(run.review?.cleanup?.status);
+}
+
+function parallelPollDelay(run) {
+  if (run?.status === "planning") return 600;
+  if (run?.status === "waiting_user") return 8000;
+  if (run?.status === "paused") return 15000;
+  return 1200;
 }
 
 function rememberCodexParallelRun(run) {
@@ -6375,14 +6551,102 @@ const parallelStatusLabels = {
   blocked: "被依赖阻塞"
 };
 
+const parallelSupervisorStatusLabels = {
+  idle: "待调度",
+  running: "调度中",
+  supervising: "调度中",
+  waiting_user: "等你决定",
+  paused: "已暂停",
+  finalizing: "收尾中",
+  completed: "已完成",
+  failed: "需处理"
+};
+
 const parallelStageOrder = ["planning", "execution", "summary", "review", "applied"];
 
 function parallelStageFor(run) {
-  if (["approved", "preparing", "running"].includes(run?.status)) return "execution";
+  if (["approved", "preparing", "running", "supervising", "waiting_user", "paused"].includes(run?.status)) return "execution";
   if (run?.status === "coordinating") return "summary";
   if (["auditing", "review"].includes(run?.status)) return "review";
   if (run?.status === "accepted") return "applied";
   return "planning";
+}
+
+function parallelExecutionTreeRows(tree) {
+  const nodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
+  const byParent = new Map();
+  for (const node of nodes) {
+    const parentId = String(node.parentId || tree?.root?.id || "RUN");
+    const children = byParent.get(parentId) || [];
+    children.push(node);
+    byParent.set(parentId, children);
+  }
+  const rows = [];
+  const visited = new Set();
+  const visit = (parentId, depth) => {
+    for (const node of byParent.get(parentId) || []) {
+      if (!node?.id || visited.has(node.id)) continue;
+      visited.add(node.id);
+      rows.push({ node, depth });
+      visit(node.id, depth + 1);
+    }
+  };
+  visit(tree?.root?.id || "RUN", 1);
+  for (const node of nodes) {
+    if (!node?.id || visited.has(node.id)) continue;
+    rows.push({ node, depth: 1 });
+    visited.add(node.id);
+    visit(node.id, 2);
+  }
+  return rows;
+}
+
+function renderParallelExecutionTree(tree) {
+  if (!els.codexParallelExecutionTree) return;
+  els.codexParallelExecutionTree.textContent = "";
+  if (!tree?.root) return;
+  const rows = [{ node: tree.root, depth: 0, root: true }, ...parallelExecutionTreeRows(tree)];
+  for (const { node, depth, root = false } of rows) {
+    const row = document.createElement("div");
+    row.className = `codexParallelExecutionNode${root ? " is-root" : ""}`;
+    row.style.setProperty("--tree-depth", String(Math.min(depth, 6)));
+    row.setAttribute("role", "treeitem");
+    row.setAttribute("aria-level", String(depth + 1));
+    const title = document.createElement(root ? "strong" : "span");
+    title.className = "codexParallelExecutionTitle";
+    title.textContent = root
+      ? humanizeParallelTitle(node.title, "本轮自动并行")
+      : humanizeParallelTitle(node.title, node.id || "并行分支");
+    title.title = node.title || title.textContent;
+    const status = document.createElement("span");
+    status.className = `codexParallelExecutionStatus ${node.status || "planned"}`;
+    status.textContent = root
+      ? parallelStatusText({ ...codexParallelRun, status: node.status || codexParallelRun?.status })
+      : (parallelStatusLabels[node.status] || node.status || "待调度");
+    row.append(title, status);
+    els.codexParallelExecutionTree.append(row);
+  }
+}
+
+function renderParallelSupervisor(run) {
+  if (!els.codexParallelSupervisor) return;
+  const supervisor = run?.supervisor || run?.executionTree?.supervisor;
+  const visible = Boolean(supervisor || run?.executionTree) && !["planning", "draft"].includes(run?.status);
+  els.codexParallelSupervisor.hidden = !visible;
+  if (!visible) return;
+  const statusKey = supervisor?.paused ? "paused" : (supervisor?.status || run.status || "idle");
+  const paused = statusKey === "paused" || run.status === "paused";
+  const terminal = ["accepted", "rejected"].includes(run.status);
+  els.codexParallelSupervisor.dataset.status = statusKey;
+  els.codexParallelSupervisorStatus.textContent = parallelSupervisorStatusLabels[statusKey] || statusKey;
+  els.codexParallelSupervisorRounds.textContent = `${Number(supervisor?.rounds) || 0} 轮`;
+  els.codexParallelSupervisorDecision.textContent = supervisor?.lastDecision || (paused ? "自动推进已暂停。" : "总控正在等待第一轮结果。");
+  els.codexParallelSupervisorToggle.textContent = paused ? "继续" : "暂停";
+  els.codexParallelSupervisorToggle.title = paused ? "继续自动调度" : "暂停新增调度；正在执行的分支会完成当前工作";
+  els.codexParallelSupervisorToggle.disabled = terminal || codexParallelSupervisorBusy;
+  els.codexParallelSupervisorInput.disabled = terminal || codexParallelSupervisorBusy;
+  els.codexParallelSupervisorSend.disabled = terminal || codexParallelSupervisorBusy;
+  renderParallelExecutionTree(run.executionTree);
 }
 
 function renderParallelStageRail(run = { status: "planning" }) {
@@ -6478,7 +6742,7 @@ function parallelContextLifecycleLabel(job, fallback = "") {
   return `第${generation}代${status ? ` · ${status}` : ""}`;
 }
 
-function parallelContextLine({ title = "", state = "", threadId = "" } = {}) {
+function parallelContextLine({ title = "", state = "", threadId = "", threadIds = [] } = {}) {
   const row = document.createElement("div");
   row.className = "codexParallelContextLine";
   const name = document.createElement("strong");
@@ -6486,13 +6750,19 @@ function parallelContextLine({ title = "", state = "", threadId = "" } = {}) {
   const status = document.createElement("span");
   status.textContent = state;
   row.append(name, status);
-  if (threadId) {
-    const open = document.createElement("a");
-    open.href = `codex://threads/${encodeURIComponent(threadId)}`;
-    open.textContent = "↗";
-    open.title = `打开${title || "上下文"}`;
-    open.setAttribute("aria-label", open.title);
-    row.append(open);
+  const links = [...new Set([threadId, ...threadIds].filter(Boolean))];
+  if (links.length) {
+    const linkGroup = document.createElement("span");
+    linkGroup.className = "codexParallelContextLinks";
+    links.forEach((id, index) => {
+      const open = document.createElement("a");
+      open.href = `codex://threads/${encodeURIComponent(id)}`;
+      open.textContent = "↗";
+      open.title = `打开${title || "上下文"}${links.length > 1 ? `（${index === 0 ? "提问" : "回答"}）` : ""}`;
+      open.setAttribute("aria-label", open.title);
+      linkGroup.append(open);
+    });
+    row.append(linkGroup);
   }
   return row;
 }
@@ -6520,6 +6790,13 @@ function renderParallelContextOverview(run, contextOptions = []) {
       title: humanizeParallelTitle(job.title, job.taskId),
       state: parallelContextLifecycleLabel(job, job.contextThreadId ? "复用" : "首次建立"),
       threadId: job.threadId || job.contextThreadId || ""
+    }));
+  }
+  for (const message of run?.peerMessages || []) {
+    els.codexParallelContextAssignments.append(parallelContextLine({
+      title: `${message.fromTaskId} → ${message.toTaskId}`,
+      state: message.status === "answered" ? `已回答 · ${message.question}` : `${message.status || "排队"} · ${message.question}`,
+      threadIds: [message.fromThreadId, message.toThreadId]
     }));
   }
 
@@ -6897,6 +7174,18 @@ function resetParallelDialog() {
   els.codexParallelContextSummary.textContent = "";
   els.codexParallelContextAssignments.textContent = "";
   els.codexParallelContextPool.textContent = "";
+  els.codexParallelSupervisor.hidden = true;
+  els.codexParallelSupervisor.removeAttribute("data-status");
+  els.codexParallelSupervisorStatus.textContent = "";
+  els.codexParallelSupervisorRounds.textContent = "";
+  els.codexParallelSupervisorDecision.textContent = "";
+  els.codexParallelExecutionTree.textContent = "";
+  els.codexParallelSupervisorInput.value = "";
+  els.codexParallelSupervisorInput.disabled = false;
+  els.codexParallelSupervisorSend.disabled = false;
+  els.codexParallelSupervisorToggle.disabled = false;
+  els.codexParallelSupervisorOpen.hidden = true;
+  codexParallelSupervisorBusy = false;
   els.codexParallelPlanTools.hidden = true;
   els.codexParallelAddBranch.disabled = false;
   els.codexParallelTableWrap.hidden = false;
@@ -6938,6 +7227,9 @@ function parallelStatusText(run) {
     const queued = run.jobs.filter((job) => ["planned", "queued"].includes(job.status)).length;
     return `${done}/${run.jobs.length} 已完成 · ${active} 执行中${queued ? ` · ${queued} 等待` : ""}`;
   }
+  if (run.status === "supervising") return "总控正在评估结果并安排下一轮";
+  if (run.status === "waiting_user") return "总控需要你的决定";
+  if (run.status === "paused") return "自动推进已暂停";
   if (run.status === "coordinating") return "分支已完成 · 正在汇总验证";
   if (run.status === "review") {
     const failed = run.review?.failedTasks?.length || 0;
@@ -6987,6 +7279,7 @@ function renderParallelRun(run, { focusTaskId = "" } = {}) {
   codexParallelRunId = displayedRun.id;
   renderParallelStageRail(displayedRun);
   rememberCodexParallelRun(displayedRun);
+  renderParallelSupervisor(displayedRun);
   const editable = displayedRun.status === "draft";
   const reviewing = displayedRun.status === "review";
   const failedTaskIds = new Set(displayedRun.review?.failedTasks || []);
@@ -7039,7 +7332,7 @@ function renderParallelRun(run, { focusTaskId = "" } = {}) {
   }
   els.codexParallelTableWrap.hidden = ["accepted", "rejected"].includes(displayedRun.status);
   syncParallelAppendNodeOptions(displayedRun);
-  const appendable = ["draft", "approved", "preparing", "running", "coordinating", "review", "failed"].includes(displayedRun.status);
+  const appendable = ["draft", "approved", "preparing", "running", "supervising", "waiting_user", "paused", "coordinating", "review", "failed"].includes(displayedRun.status);
   els.codexParallelPlanTools.hidden = !appendable;
   els.codexParallelAddBranch.disabled = !appendable || codexParallelBranchPlanning;
   els.codexParallelAddBranch.title = editable ? "让模型按选中节点生成一个分支草案" : "让模型按选中节点生成一个待审核分支";
@@ -7061,7 +7354,8 @@ function renderParallelRun(run, { focusTaskId = "" } = {}) {
   els.codexParallelAudit.hidden = !auditVisible;
   els.codexParallelAudit.disabled = !auditVisible;
   els.codexParallelOpen.hidden = !displayedRun.coordinator?.threadId;
-  els.codexParallelMore.hidden = !displayedRun.coordinator?.threadId && !auditVisible;
+  els.codexParallelSupervisorOpen.hidden = !displayedRun.supervisor?.threadId;
+  els.codexParallelMore.hidden = !displayedRun.coordinator?.threadId && !displayedRun.supervisor?.threadId && !auditVisible;
   els.codexParallelReview.hidden = !reviewing;
   els.codexParallelRetry.hidden = !reviewing || failedTaskIds.size === 0;
   els.codexParallelRetry.disabled = !reviewing || failedTaskIds.size === 0;
@@ -7092,15 +7386,19 @@ function renderParallelRun(run, { focusTaskId = "" } = {}) {
 
 async function pollCodexParallelRun() {
   if (!codexParallelRunId || !els.codexParallelDialog.open) return;
+  const generation = codexParallelPollGeneration;
   try {
     const res = await fetch(`/api/codex/parallel/${codexParallelRunId}`);
     const payload = await res.json();
     if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    if (generation !== codexParallelPollGeneration) return;
     const run = payload.run;
     renderParallelRun(run);
-    if (parallelRunNeedsPolling(run)) codexParallelPollTimer = setTimeout(pollCodexParallelRun, 1200);
+    if (parallelRunNeedsPolling(run)) codexParallelPollTimer = setTimeout(pollCodexParallelRun, parallelPollDelay(run));
   } catch (error) {
+    if (generation !== codexParallelPollGeneration) return;
     els.codexParallelState.textContent = `读取状态失败: ${error.message}`;
+    if (parallelRunNeedsPolling(codexParallelRun)) codexParallelPollTimer = setTimeout(pollCodexParallelRun, 5000);
   }
 }
 
@@ -7141,7 +7439,7 @@ async function resumeCodexParallelRun() {
     if (!payload.run) throw new Error("运行记录为空");
     renderParallelRun(payload.run);
     if (parallelRunNeedsPolling(payload.run)) {
-      codexParallelPollTimer = setTimeout(pollCodexParallelRun, payload.run.status === "planning" ? 600 : 400);
+      codexParallelPollTimer = setTimeout(pollCodexParallelRun, parallelPollDelay(payload.run));
     }
     return true;
   } catch {
@@ -7464,6 +7762,64 @@ async function openParallelCoordinator() {
   if (!res.ok) els.codexParallelState.textContent = payload.error || `HTTP ${res.status}`;
 }
 
+async function postParallelSupervisorAction(action, body = {}) {
+  if (!codexParallelRunId || codexParallelSupervisorBusy) return null;
+  codexParallelSupervisorBusy = true;
+  const generation = ++codexParallelPollGeneration;
+  renderParallelSupervisor(codexParallelRun);
+  clearTimeout(codexParallelPollTimer);
+  try {
+    const res = await fetch(`/api/codex/parallel/${encodeURIComponent(codexParallelRunId)}/supervisor/${action}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    if (payload.run && generation === codexParallelPollGeneration) renderParallelRun(payload.run);
+    return payload;
+  } catch (error) {
+    els.codexParallelState.textContent = error.message;
+    return null;
+  } finally {
+    codexParallelSupervisorBusy = false;
+    if (codexParallelRun) renderParallelSupervisor(codexParallelRun);
+    if (parallelRunNeedsPolling(codexParallelRun)) {
+      codexParallelPollTimer = setTimeout(pollCodexParallelRun, parallelPollDelay(codexParallelRun));
+    }
+  }
+}
+
+async function sendParallelSupervisorMessage() {
+  const message = els.codexParallelSupervisorInput?.value.trim() || "";
+  if (!message) {
+    els.codexParallelSupervisorInput?.focus();
+    return;
+  }
+  els.codexParallelSupervisorInput.value = "";
+  const payload = await postParallelSupervisorAction("message", { message });
+  if (!payload) {
+    els.codexParallelSupervisorInput.value = message;
+    els.codexParallelSupervisorInput.focus();
+    return;
+  }
+  els.codexParallelState.textContent = "消息已交给总控";
+}
+
+async function toggleParallelSupervisor() {
+  const supervisor = codexParallelRun?.supervisor || {};
+  const paused = supervisor.paused || supervisor.status === "paused" || codexParallelRun?.status === "paused";
+  const payload = await postParallelSupervisorAction(paused ? "resume" : "pause");
+  if (payload) els.codexParallelState.textContent = paused ? "自动推进已继续" : "自动推进已暂停";
+}
+
+async function openParallelSupervisor() {
+  if (!codexParallelRunId) return;
+  const payload = await postParallelSupervisorAction("open");
+  if (!payload) return;
+  els.codexParallelMore.open = false;
+}
+
 function renderCodexThreadMenu({ threads = [], systemThreads = [], systemThreadCount = systemThreads.length, pinned = "", presets = [] } = {}) {
   const menu = els.codexThreadMenu;
   menu.textContent = "";
@@ -7506,6 +7862,21 @@ function renderCodexThreadMenu({ threads = [], systemThreads = [], systemThreadC
   fresh.textContent = `${pinned ? "" : "● "}＋ 新开一条会话`;
   fresh.addEventListener("click", () => pinCodexThread(""));
   menu.append(fresh);
+
+  if (pinned) {
+    const rotate = document.createElement("button");
+    rotate.type = "button";
+    rotate.className = "codexThreadItem";
+    const title = document.createElement("span");
+    title.className = "codexThreadTitle";
+    title.textContent = "⇢ 总结并换到短上下文";
+    const meta = document.createElement("span");
+    meta.className = "codexThreadMeta";
+    meta.textContent = "保留目标、产品方向、最新纠错、决策、证据和下一步";
+    rotate.append(title, meta);
+    rotate.addEventListener("click", () => rotateCodexContext(pinned));
+    menu.append(rotate);
+  }
 
   for (const thread of threads) {
     const item = document.createElement("button");
@@ -7726,6 +8097,14 @@ els.codexParallelRegenerate?.addEventListener("click", generateCodexParallelPlan
 els.codexParallelAddBranch?.addEventListener("click", planCodexParallelBranch);
 els.codexParallelAppendConfirm?.addEventListener("click", appendPendingCodexParallelBranches);
 els.codexParallelOpen?.addEventListener("click", openParallelCoordinator);
+els.codexParallelSupervisorOpen?.addEventListener("click", openParallelSupervisor);
+els.codexParallelSupervisorSend?.addEventListener("click", sendParallelSupervisorMessage);
+els.codexParallelSupervisorToggle?.addEventListener("click", toggleParallelSupervisor);
+els.codexParallelSupervisorInput?.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  sendParallelSupervisorMessage();
+});
 els.codexParallelAudit?.addEventListener("click", auditCodexParallelGoal);
 els.codexParallelRetry?.addEventListener("click", retryFailedCodexParallel);
 els.codexParallelReject?.addEventListener("click", () => finishCodexParallel("reject"));
@@ -8090,4 +8469,8 @@ if (!snapshotMode) {
   setInterval(() => {
     loadMaintenanceStatus().catch(() => {});
   }, 15000 * pace);
+  pollMainContextLifecycle().catch(() => {});
+  setInterval(() => {
+    pollMainContextLifecycle().catch(() => {});
+  }, 8000 * pace);
 }

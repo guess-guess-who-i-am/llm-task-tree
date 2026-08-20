@@ -1,0 +1,52 @@
+{
+  "schema": "flow-step/v1",
+  "nodeId": "N11",
+  "blockId": "",
+  "updatedAt": "2026-08-19T08:27:24.045Z",
+  "title": "重构多树上下文与 Agent 维护闭环",
+  "reportZh": "report.zh.md",
+  "substeps": [
+    {
+      "title": "优化多树切换关键路径",
+      "functions": [
+        {
+          "path": "public/app.js",
+          "name": "loadTree"
+        },
+        {
+          "path": "public/app.js",
+          "name": "renderTreeSwitcher"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "task-trees.json"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "scripts/test-tree-switch-performance.mjs"
+        }
+      ]
+    },
+    {
+      "title": "回归多树与工作区",
+      "functions": [
+        {
+          "path": "scripts/test-tree-switch-performance.mjs"
+        },
+        {
+          "path": "scripts/test-multitree-maintenance.mjs"
+        },
+        {
+          "path": "scripts/test-tree-first-workspace.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "public/app.js"
+        }
+      ]
+    }
+  ]
+}

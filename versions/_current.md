@@ -48,14 +48,14 @@
 - Metrics:
 - Notes:
 - CodeLoc:
-- CurrentResult: 节点内尺寸已收敛：窄节点操作栏单行29px，宽节点两行55px；左标签轨道40–52px，正文宽度至少为其3倍。14节点摘要与内容自适应回归通过（宏观6、细节8、手机9种尺寸），标题无裁切、节点无重叠。仍待用户实用验证，“一眼看清并直接编辑”未达到。
-- RootCauseAnalysis: 固定 Size 跨层复用会让短节点空白、长节点受限；节点内又用固定42px标签和3×3操作块，导致不同宽度下左右比例失衡。宏观排版需预留细节高度，否则放大后重叠。
+- CurrentResult: 节点尺寸按内容自适应，宏观、细节和手机回归通过；标题无裁切、节点无重叠。仍待用户实用验证，“一眼看清并直接编辑”未达到。
+- RootCauseAnalysis: 固定尺寸与固定操作栏造成短节点空白、长节点受限；宏观排版还需为细节高度预留空间。
 - CaseStudy:
 - NextIdea:
 - SelectedSkills:
 
 ## N4 - 分析本地 skill 仓库与自动调用机制
-- Position: 2533,557
+- Position: 2544,550
 - Size: 470,750
 - Completion: 已完成
 - Problem: 如何从项目、kit 与全局目录自动选择相关且不重复的 skill？
@@ -129,17 +129,17 @@
 - Position: 2103,557
 - Size: 488,953
 - Completion: 进行中
-- Problem: 如何复用并呈现并行分支上下文，同时抓住根目标？
-- Approach: 继承当前配置；相容分支复用旧对话且可改选；系统会话可进入；隔离执行，双审核写树。
-- Input: 任务树、本轮目标、当前配置。
-- Output: 可复用、可追踪的双审核结果。
-- Metrics: 分支上下文可改选；系统会话可进入；接受前主目录不变；两轮业务保持根目标。
+- Problem: 多个 Agent 如何并发修改代码和运行服务，又不互相覆盖或污染共享状态？
+- Approach: 写集/资源租约隔离运行，带来源 JSON 和 scope 隔离语义；共享目标和证据；接受/发布串行加锁、校验与回滚。
+- Input: 现有并发源码、任务树、官方工程实践和用户方案。
+- Output: 并发与上下文协议见 docs/subtree-parallel/、docs/agent-context-research/。
+- Metrics: 写集/资源零越界、无来源事实零误入；新会话恢复目标/焦点；并发接受仅一成功，发布失败不破坏旧版。
 - Notes:
 - CodeLoc:
-- CurrentResult: 已验证：90%后自动换代；新代在隔离worktree读取交接包，旧thread归档、输入清理。核心回归通过并发布GitHub v0.8.1；两轮真实业务待验证，N3进行中。
-- RootCauseAnalysis: 隔离worktree读不到主目录交接路径，且档案缺少上一代结果；现已投送分支内交接包并保存摘要。
+- CurrentResult: 第三代读树7ms、36.1秒恢复五项；第四代在树已记录审查完成后仍继承“尚未核验”，知识更新未闭环。代码/写集隔离已验证；资源租约、跨运行锁和发布状态机仍缺，根目标未达成。
+- RootCauseAnalysis: 污染来自两层：写集不隔离端口/数据库/发布锁；自由摘要无来源，会把临时指令升级为长期事实。
 - CaseStudy:
-- NextIdea: 用当前配置连续运行两轮真实业务，检查根目标是否保持。
+- NextIdea: 实现资源租约注册表与 Worker 环境清单，并用双 Worker 端口、数据库及崩溃回收实验验证。
 - SelectedSkills:
 - Folded: true
 - SubtreeFile: subtrees/N3-subtree.md
@@ -207,18 +207,16 @@
 - Size: 0,720
 - Completion: 进行中
 - Problem: 如何让人借助任务图舒适地形成局面感、恢复上下文并保持对模型的控制？
-- Approach:
-  - 默认展示任务树和三项精炼状态；知识库、版本和执行链按需展开并记住布局。
-  - 总览看目标、进度、问题；透镜看节点问题、思路、结果和上下游。
+- Approach: 方法树管长期目标与当前结论；支撑树管背景约束；架构树管稳定契约。每轮先由总控按树拆成可验收独立分支，临时任务只进运行树；Worker 隔离执行，总控持续派发、汇总并在审核边界协调。
 - Input:
-- Output: 界面与回归：public/，scripts/test-tree-first-workspace.mjs。
-- Metrics: 能否快速说出项目目标、当前问题和焦点依据；缩放与切换全貌后是否保持方向感。
+- Output: 界面与回归：public/、scripts/。
+- Metrics: 能否快速说出根目标、当前问题和焦点依据；并行任务是否独立可验、动态变化可见且不污染方法树；切换与恢复是否保持方向感。
 - Notes:
 - CodeLoc:
-- CurrentResult: 首屏以20字短状态保留知识库、版本和执行链线索，全页389字；桌面和手机回归通过。仍待实用验证，舒适使用目标未达到。
-- RootCauseAnalysis: 完整面板挤压画布，完全隐藏丢失线索；首屏只保留可判断摘要。
+- CurrentResult: 三类树职责已在界面和切换链路中分开；持续 Supervisor 已实现同会话派发、动态加任务、运行树实时状态、用户消息与暂停/恢复。自动并行模拟和真实隔离回归通过；真实长期业务中的目标保持与主树汇总仍待验证。
+- RootCauseAnalysis: 旧切换串行等待版本、模型、知识库等无关请求，还会写快照；树的职责只写在注册表，界面没有说明。
 - CaseStudy:
-- NextIdea: 请用户完成一次项目回顾和节点推进，记录仍需追问或主动展开的内容。
+- NextIdea: 在真实项目中启动一轮 2 个不同写集的分支，观察运行树变化、总控消息、动态加任务和结束汇总，再核对方法树未被临时任务污染。
 - SelectedSkills:
 
 ## N7 - 集成 Markdown 知识库检索面板
@@ -249,8 +247,8 @@
 - Metrics:
 - Notes:
 - CodeLoc:
-- CurrentResult: 新版 README 演示已发布至 GitHub main 提交 9f6e7b1：01 固定项目局面，02 展示主干方向，03 演示 NextIdea→Codex→CurrentResult。远端 MP4 为 2,113,213 bytes，Git blob 与本地一致，jsDelivr SHA-256 相同；Edge 实测 readyState=4、1600×900、20 秒并正常播放。仍待真实观众比较理解与采用，采用目标不能宣称达到。
-- RootCauseAnalysis: 01 和旧 03 都用“左侧列表逐项切换、右侧卡片逐项高亮”，虽然层级不同，读者感知仍是重复说明。根因是按界面字段分段，而非按叙事功能分工。
+- CurrentResult: 新版 README 演示已发布并通过远端播放校验；仍待真实观众比较理解与采用，采用目标不能宣称达到。
+- RootCauseAnalysis: 01 与旧 03 的叙事都按界面字段分段，读者感知重复；应按叙事功能分工。
 - CaseStudy:
 - NextIdea:
 - SelectedSkills:

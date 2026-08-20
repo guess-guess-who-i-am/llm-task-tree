@@ -1,3 +1,7 @@
+# Subtree Work Site
+
+> 本 Agent 的唯一权威任务文件内容。只改此子树 md 及对应代码。
+
 # LLM Task Graph Subtree
 
 > Fold root: N3
@@ -7,27 +11,27 @@
 - Position: 2052,950
 - Size: 400,420
 - Completion: 进行中
-- Problem: 自动并行如何复用分支上下文并持续抓住根目标？
+- Problem: 多个 Agent 如何并发修改代码和运行服务，又不互相覆盖或污染共享状态？
 - Approach:
-  - 继承用户当前配置，兼容分支默认复用旧对话且可改选。
-  - 规划、分支、汇总和同步会话可见可进入；用户可按节点持续追加。
-  - worker 在独立 worktree 执行，双审核后同步任务树。
-  - 长上下文生成短交接包，新代继续旧分支并归档旧thread。
-- Input: 当前任务树、本轮目标、用户配置、可审核草案。
-- Output: 可追踪的分支上下文、隔离并行、失败重跑和接受后同步。
-- Metrics: 分支可改选；接受前主工作区不变；交接可读；连续两轮保持根目标。
-- Notes: 机制和回归已通过，长期连续性待真实试跑。
+  - Supervisor 先生成任务 DAG、独占写集和资源租约；同一写集改为串行依赖。
+  - Worker 使用 detached worktree 和独立端口、数据库、容器、缓存及浏览器目录。
+  - 确定性队列串行集成；集成 Agent 只修复语义兼容并重跑双方验收。
+  - 接受与 8898 发布分别加全局锁、基线校验、预检和失败回滚。
+- Input: 现有自动并行源码、任务树状态、官方工程实践和用户并发方案。
+- Output: 并发隔离设计与故障注入门禁；docs/subtree-parallel/concurrent-agent-isolation-design.zh.md。
+- Metrics: 写集和共享资源零越界；并发接受最多一个成功；发布失败不影响 8898 旧版本，成功可追溯到接受提交。
+- Notes: 先完成 P0 资源租约、接受锁和发布状态机；集成 Agent 冲突修复置于 P1。
 - CodeLoc:
   - server/codex-run.js
   - server/codex-coordinator.js
   - server/parallel-worktree.js
   - public/app.js
-- CurrentResult: 已验证90%后自动换代；新代在隔离worktree读取交接包，旧thread归档、输入清理。核心回归通过并发布GitHub v0.8.1；两轮真实业务待验证。
-- RootCauseAnalysis: 隔离worktree读不到主目录交接路径，且档案缺少上一代结果；现已投送分支内交接包并保存摘要。
+- CurrentResult: 已核实现有 detached worktree、独占写集、4路调度、串行集成和接受前文件校验；本轮4组回归全通过。尚无运行资源租约、跨运行接受锁和8898发布状态机，故只能保证代码结果在接受前隔离，不能声称多 Agent 已完全互不干扰，根目标未达成。
+- RootCauseAnalysis: 工作树隔离只能处理文件系统，不能隔离端口、数据库、缓存和发布环境；现有写集检查也不能替代跨运行的接受与发布锁。
 - CaseStudy:
-  - case 1: 主目录相对路径 → 新代无法读取 → 投送分支内交接包。
-  - case 2: 交接只有文件无结果 → 新代缺少连续性 → 保存上一代结果摘要。
-- NextIdea: 用当前配置连续运行两轮真实业务，检查根目标是否保持。
+  - case 1: 两任务改同一文件 → 规划期拒绝或串行，不把可预见冲突留给集成 Agent。
+  - case 2: 两任务改不同文件但共用数据库 → Git 无冲突仍会互扰，必须分配资源命名空间。
+- NextIdea: 先实现资源租约注册表与 Worker 环境清单，并用双 Worker 端口、数据库及崩溃回收实验验证。
 - SelectedSkills: codex:skill-creator
 
 # GraphState

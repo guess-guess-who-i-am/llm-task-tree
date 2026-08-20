@@ -15,8 +15,12 @@ import { getFlowStep, listStepPackIndex, putFlowStep } from "./server/flow-step.
 import { addTree, findTree, loadTreeRegistry, resolveTreeFile, setActiveMethod, starterTreeMarkdown } from "./server/tree-registry.js";
 import { auditTurnMaintenance, maskAdvisoryNextPlan, syncMethodFlowStatus } from "./server/maintenance.js";
 import {
+  archiveCodexThread,
   listProjectThreads,
   openInCodex,
+  readCodexThread,
+  readCodexRolloutContextSnapshot,
+  readCodexThreadRolloutPath,
   readPinnedThread,
   isTaskTreeSystemThread,
   startCodexTurn,
@@ -24,6 +28,19 @@ import {
   threadDeepLink,
   writePinnedThread
 } from "./server/codex-run.js";
+import {
+  buildContextCheckpointPrompt,
+  buildContextResumePrompt,
+  extractRecentConversation
+} from "./server/context-handoff.js";
+import {
+  canReuseCheckpoint,
+  compileCheckpointState,
+  contextTreeFingerprint,
+  renderCheckpointMarkdown,
+  validateCheckpointState
+} from "./server/context-checkpoint.js";
+import { applyCodexRolloutSnapshot, createMainContextLifecycle } from "./server/main-context-lifecycle.js";
 import {
   buildAcceptedParallelStateSyncPrompt,
   buildPresetPrompt,
@@ -141,6 +158,203 @@ let openWebSearchDaemonPromise = null;
 const CODEX_THREAD_CACHE_TTL_MS = 30 * 1000;
 const CODEX_THREAD_CACHE_MAX = 60;
 const codexThreadCacheFile = path.join(projectRoot, ".task-tree-threads.json");
+const contextCheckpointJsonFile = path.join(projectRoot, ".task-tree-maintenance", "context-checkpoint.json");
+const contextCheckpointViewFile = path.join(projectRoot, ".task-tree-maintenance", "context-checkpoint.md");
+
+async function readStoredContextCheckpoint() {
+  try {
+    return JSON.parse(await readFile(contextCheckpointJsonFile, "utf8"));
+  } catch (error) {
+    if (error?.code === "ENOENT") return "";
+    throw error;
+  }
+}
+
+async function writeStoredContextCheckpoint(state) {
+  await mkdir(path.dirname(contextCheckpointJsonFile), { recursive: true });
+  const suffix = `${process.pid}.${Date.now()}.tmp`;
+  const jsonTemp = `${contextCheckpointJsonFile}.${suffix}`;
+  const viewTemp = `${contextCheckpointViewFile}.${suffix}`;
+  const view = [
+    "<!-- task-tree context checkpoint: generated view; JSON is the canonical derived checkpoint -->",
+    `<!-- source-thread: ${String(state?.sourceThreadId || "unknown").replace(/--/g, "")} -->`,
+    "",
+    renderCheckpointMarkdown(state),
+    ""
+  ].join("\n");
+  await Promise.all([
+    writeFile(jsonTemp, `${JSON.stringify(state, null, 2)}\n`, "utf8"),
+    writeFile(viewTemp, view, "utf8")
+  ]);
+  await rename(jsonTemp, contextCheckpointJsonFile);
+  await rename(viewTemp, contextCheckpointViewFile);
+  return { json: contextCheckpointJsonFile, view: contextCheckpointViewFile };
+}
+
+async function rotateMainCodexContext({
+  sourceThreadId,
+  dryRun = false,
+  openSuccessor = true,
+  archiveOld = true,
+  automatic = false,
+  reason = "manual"
+} = {}) {
+  const sourceId = String(sourceThreadId || "").trim();
+  if (!sourceId) {
+    const error = new Error("请先选择一条要换代的 Codex 会话");
+    error.status = 400;
+    throw error;
+  }
+
+  const [sourceThread, state, anchors, previousState] = await Promise.all([
+    readCodexThread(sourceId),
+    readCodexPromptState(),
+    readContextRoleAnchors(),
+    readStoredContextCheckpoint()
+  ]);
+  const recent = extractRecentConversation(sourceThread);
+  const treeFingerprint = contextTreeFingerprint({ focus: state.focus, anchors });
+  if (sourceThread.path) mainContextRolloutPaths?.set?.(sourceId, sourceThread.path);
+  const checkpointPrompt = buildContextCheckpointPrompt({ focus: state.focus, anchors, recent, previousState });
+  const reuse = canReuseCheckpoint(previousState, { recent, treeFingerprint, focus: state.focus });
+  if (dryRun) {
+    return {
+      dryRun: true,
+      sourceThreadId: sourceId,
+      recentTurns: recent.length,
+      previousCheckpointFacts: previousState?.facts?.length || 0,
+      treeFingerprint,
+      reuse,
+      checkpointPrompt
+    };
+  }
+
+  let checkpointState = null;
+  let checkpointWarning = "";
+  let checkpointMode = "compiled";
+  const previousInspection = previousState
+    ? validateCheckpointState(previousState, { previousState, focus: state.focus })
+    : { ok: false, errors: ["missing_state"] };
+  if (reuse.ok) {
+    checkpointState = previousState;
+    checkpointMode = "reused";
+  } else try {
+    const checkpointTurn = await startCodexTurn({
+      cwd: projectRoot,
+      threadId: sourceId,
+      prompt: checkpointPrompt,
+      sandbox: "read-only",
+      approvalPolicy: "never",
+      waitForCompletion: true
+    });
+    checkpointState = compileCheckpointState(checkpointTurn.output, {
+      previousState,
+      sourceThreadId: sourceId,
+      treeFingerprint
+    });
+  } catch (error) {
+    if (!previousInspection.ok || previousState?.sourceTreeFingerprint !== treeFingerprint) throw error;
+    checkpointState = previousState;
+    checkpointMode = "fallback";
+    checkpointWarning = `本轮结构化编译失败；树锚点未变化，已沿用上一代 checkpoint 并附加最新用户原话：${error.message}`;
+  }
+  const inspection = validateCheckpointState(checkpointState, { recent, previousState, focus: state.focus });
+  if (!inspection.ok) {
+    const error = new Error(`旧会话生成的 checkpoint 未通过事实门禁：${inspection.errors.join("、") || "无有效事实"}`);
+    error.status = 422;
+    error.inspection = inspection;
+    throw error;
+  }
+
+  if (checkpointMode === "compiled") await writeStoredContextCheckpoint(checkpointState);
+  const checkpoint = renderCheckpointMarkdown(checkpointState);
+  const resumePrompt = buildContextResumePrompt({ checkpointState, checkpoint, focus: state.focus, anchors, recent, sourceThreadId: sourceId });
+  const successor = await startCodexTurn({
+    cwd: projectRoot,
+    forceNewThread: true,
+    prompt: resumePrompt,
+    threadName: automatic ? "任务图工作台 · 自动短上下文" : "任务图工作台 · 短上下文换代"
+  });
+
+  // An automatic rotation must not steal focus if the user selected another conversation while
+  // the checkpoint was being compiled. The successor remains available for inspection either way.
+  const bound = !automatic || readPinnedThread(projectRoot) === sourceId;
+  if (bound) writePinnedThread(projectRoot, successor.threadId);
+  if (bound && openSuccessor) openInCodex(successor.threadId);
+
+  let archived = false;
+  let archiveWarning = "";
+  if (archiveOld) {
+    try {
+      archived = await archiveCodexThread(sourceId);
+    } catch (error) {
+      archiveWarning = error.message;
+    }
+  }
+  return {
+    sourceThreadId: sourceId,
+    threadId: successor.threadId,
+    turnId: successor.turnId,
+    recentTurns: recent.length,
+    checkpointChars: checkpoint.length,
+    resumePromptChars: resumePrompt.length,
+    archived,
+    archiveWarning,
+    inspection,
+    checkpointMode,
+    checkpointWarning,
+    checkpointFile: path.relative(projectRoot, contextCheckpointJsonFile).replace(/\\/g, "/"),
+    checkpointViewFile: path.relative(projectRoot, contextCheckpointViewFile).replace(/\\/g, "/"),
+    deepLink: threadDeepLink(successor.threadId),
+    automatic,
+    reason,
+    bound
+  };
+}
+
+const mainContextLifecycle = createMainContextLifecycle({
+  projectRoot,
+  readPinnedThread: () => readPinnedThread(projectRoot),
+  rotateContext: ({ sourceThreadId, reason, automatic }) => rotateMainCodexContext({
+    sourceThreadId,
+    reason,
+    automatic,
+    openSuccessor: false,
+    archiveOld: true
+  })
+});
+
+const mainContextRolloutPaths = new Map();
+let mainContextWatcherPromise = null;
+let mainContextWatcherLastAt = 0;
+
+async function refreshMainContextFromCodexRollout({ force = false } = {}) {
+  if (mainContextWatcherPromise) return mainContextWatcherPromise;
+  if (!force && Date.now() - mainContextWatcherLastAt < 5000) return mainContextLifecycle.status();
+  mainContextWatcherLastAt = Date.now();
+  mainContextWatcherPromise = (async () => {
+    const threadId = readPinnedThread(projectRoot);
+    if (!threadId) return mainContextLifecycle.status();
+    let state = await mainContextLifecycle.status();
+    if (state.threadId !== threadId) state = await mainContextLifecycle.observeAccepted({ threadId });
+    let rolloutPath = mainContextRolloutPaths.get(threadId) || "";
+    if (!rolloutPath) {
+      rolloutPath = await readCodexThreadRolloutPath(threadId);
+      mainContextRolloutPaths.set(threadId, rolloutPath);
+    }
+    const snapshot = await readCodexRolloutContextSnapshot(rolloutPath);
+    await applyCodexRolloutSnapshot({ lifecycle: mainContextLifecycle, threadId, snapshot });
+    return mainContextLifecycle.status();
+  })().catch(async (error) => ({ ...(await mainContextLifecycle.status()), watcherWarning: error.message })).finally(() => {
+    mainContextWatcherPromise = null;
+  });
+  return mainContextWatcherPromise;
+}
+
+const mainContextWatcherTimer = setInterval(() => {
+  refreshMainContextFromCodexRollout().catch(() => {});
+}, 10_000);
+mainContextWatcherTimer.unref?.();
 
 function loadCodexThreadCache() {
   try {
@@ -2403,6 +2617,30 @@ async function readCodexPromptState() {
   };
 }
 
+/** Stable role trees are compact project memory; only their ROOT anchors enter a new context. */
+async function readContextRoleAnchors() {
+  treeRegistry = await loadTreeRegistry({ projectRoot, registryFile: treeRegistryFile });
+  const entries = (treeRegistry.trees || []).filter((entry) => ["background", "architecture"].includes(entry.role));
+  const anchors = [];
+  for (const entry of entries) {
+    try {
+      const markdown = await readFile(resolveTreeFile(projectRoot, entry), "utf8");
+      const root = parseTreeNodeFields(markdown).find((node) => node.id === "ROOT" || node.id === "ARCH") || null;
+      if (!root) continue;
+      anchors.push({
+        id: entry.id,
+        title: entry.title || root.title || entry.id,
+        problem: root.fields?.Problem || "",
+        approach: root.fields?.Approach || "",
+        currentResult: root.fields?.CurrentResult || ""
+      });
+    } catch {
+      // Missing optional role memory must remain visible as an absent anchor, not block rotation.
+    }
+  }
+  return anchors;
+}
+
 async function writeChainStepContextFile(markdown, meta = {}) {
   const context = buildChainStepContext(markdown);
   const chainRunDir = path.resolve(projectRoot, ".chain-run");
@@ -4132,6 +4370,7 @@ const handleRequest = async (req, res) => {
           systemThreadCount: allSystemThreads.length,
           cache,
           pinned: readPinnedThread(projectRoot),
+          context: await mainContextLifecycle.status(),
           presets: describePresets(await readCodexPromptState())
         });
       } catch (error) {
@@ -4144,7 +4383,33 @@ const handleRequest = async (req, res) => {
       const body = req.headers["content-length"] ? JSON.parse(await readBody(req)) : {};
       const threadId = typeof body.threadId === "string" ? body.threadId.trim() : "";
       writePinnedThread(projectRoot, threadId);
+      if (threadId) await mainContextLifecycle.observeAccepted({ threadId });
       jsonResponse(res, 200, { pinned: readPinnedThread(projectRoot) });
+      return;
+    }
+
+    if (reqPath === "/api/codex/context/status" && req.method === "GET") {
+      jsonResponse(res, 200, { context: await refreshMainContextFromCodexRollout() });
+      return;
+    }
+
+    if (reqPath === "/api/codex/context/rotate" && req.method === "POST") {
+      const body = req.headers["content-length"] ? JSON.parse(await readBody(req)) : {};
+      const sourceThreadId = (typeof body.threadId === "string" && body.threadId.trim()) || readPinnedThread(projectRoot);
+      try {
+        const result = await rotateMainCodexContext({
+          sourceThreadId,
+          dryRun: body.dryRun === true,
+          openSuccessor: body.open !== false,
+          archiveOld: body.archiveOld !== false,
+          automatic: false,
+          reason: "manual"
+        });
+        if (!result.dryRun) await mainContextLifecycle.recordManualRotation({ sourceThreadId, result });
+        jsonResponse(res, result.dryRun ? 200 : 201, result);
+      } catch (error) {
+        jsonResponse(res, error.status || 502, { error: error.message, sourceThreadId, ...(error.inspection ? { inspection: error.inspection } : {}) });
+      }
       return;
     }
 
@@ -4174,10 +4439,25 @@ const handleRequest = async (req, res) => {
       }
 
       try {
-        const { threadId, turnId, resumed } = await startCodexTurn({ prompt, cwd: projectRoot, threadId: wanted });
+        const { threadId, turnId, resumed } = await startCodexTurn({
+          prompt,
+          cwd: projectRoot,
+          threadId: wanted,
+          onAccepted: (accepted) => mainContextLifecycle.observeAccepted(accepted),
+          onUsage: (tokenUsage, meta) => mainContextLifecycle.observeUsage({ ...meta, tokenUsage }),
+          onContextCompaction: (event) => mainContextLifecycle.observeCompaction(event),
+          onCompleted: (completed) => mainContextLifecycle.completeTurn(completed)
+        });
         writePinnedThread(projectRoot, threadId);
         if (body.open !== false) openInCodex(threadId);
-        jsonResponse(res, 200, { threadId, turnId, resumed, prompt, deepLink: threadDeepLink(threadId) });
+        jsonResponse(res, 200, {
+          threadId,
+          turnId,
+          resumed,
+          prompt,
+          deepLink: threadDeepLink(threadId),
+          context: await mainContextLifecycle.status()
+        });
       } catch (error) {
         jsonResponse(res, 502, { error: error.message, threadId: error.threadId || null });
       }
@@ -4267,6 +4547,35 @@ const handleRequest = async (req, res) => {
       return;
     }
 
+    const parallelSupervisor = reqPath.match(/^\/api\/codex\/parallel\/([A-Za-z0-9-]+)\/supervisor(?:\/(message|pause|resume|open))?$/);
+    if (parallelSupervisor && req.method === "GET" && !parallelSupervisor[2]) {
+      const run = await parallelCodex.get(parallelSupervisor[1]);
+      if (!run) jsonResponse(res, 404, { error: "找不到这次并行运行" });
+      else jsonResponse(res, 200, { supervisor: run.supervisor, executionTree: run.executionTree });
+      return;
+    }
+    if (parallelSupervisor && req.method === "POST" && parallelSupervisor[2]) {
+      try {
+        const action = parallelSupervisor[2];
+        if (action === "open") {
+          const opened = await parallelCodex.openSupervisor(parallelSupervisor[1]);
+          openInCodex(opened.threadId);
+          jsonResponse(res, 200, opened);
+          return;
+        }
+        const body = JSON.parse(await readBody(req));
+        const run = action === "message"
+          ? await parallelCodex.supervisorMessage(parallelSupervisor[1], body.message)
+          : action === "pause"
+            ? await parallelCodex.pause(parallelSupervisor[1])
+            : await parallelCodex.resume(parallelSupervisor[1]);
+        jsonResponse(res, 202, { run });
+      } catch (error) {
+        jsonResponse(res, error.code === "THREAD_NOT_READY" ? 409 : 400, { error: error.message });
+      }
+      return;
+    }
+
     const parallelMatch = reqPath.match(/^\/api\/codex\/parallel\/([A-Za-z0-9-]+)(?:\/(open))?$/);
     if (parallelMatch && req.method === "GET") {
       const run = await parallelCodex.get(parallelMatch[1]);
@@ -4290,6 +4599,7 @@ const handleRequest = async (req, res) => {
 
     if (reqPath === "/api/shutdown" && req.method === "POST") {
       jsonResponse(res, 200, { ok: true, message: "shutting down task tree server and local background services" });
+      clearInterval(mainContextWatcherTimer);
       setTimeout(async () => {
         // Armed before awaiting: a background service that never resolves used to leave the
         // process alive holding the kit directory, while the caller was told it stopped.

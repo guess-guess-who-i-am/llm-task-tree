@@ -3411,8 +3411,10 @@ button.chainAddBtn.active {
 }
 
 .codexParallelDialog {
+  box-sizing: border-box;
   width: min(980px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
+  overflow: auto;
   padding: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -3621,6 +3623,197 @@ button.chainAddBtn.active {
   display: none;
 }
 
+.codexParallelSupervisor {
+  padding: 10px 14px 12px;
+  border-bottom: 1px solid var(--line);
+  background: #f8fbfa;
+}
+
+.codexParallelSupervisor[hidden] {
+  display: none;
+}
+
+.codexParallelSupervisorHead,
+.codexParallelSupervisorIdentity,
+.codexParallelSupervisorMessage {
+  display: flex;
+  align-items: center;
+}
+
+.codexParallelSupervisorHead {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.codexParallelSupervisorIdentity {
+  min-width: 0;
+  gap: 7px;
+}
+
+.codexParallelSupervisorIdentity strong {
+  font-size: 13px;
+}
+
+.codexParallelSupervisorDot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #177f72;
+}
+
+.codexParallelSupervisor[data-status="waiting_user"] .codexParallelSupervisorDot,
+.codexParallelSupervisor[data-status="paused"] .codexParallelSupervisorDot {
+  background: #b48235;
+}
+
+.codexParallelSupervisor[data-status="failed"] .codexParallelSupervisorDot {
+  background: #b8534d;
+}
+
+.codexParallelSupervisorStatus,
+.codexParallelSupervisorRounds {
+  color: #4f625c;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.codexParallelSupervisorRounds::before {
+  content: "·";
+  margin-right: 7px;
+  color: #a1aba7;
+}
+
+#codexParallelSupervisorToggle {
+  flex: 0 0 auto;
+  min-width: 52px;
+  padding: 5px 9px;
+  color: #315a51;
+  font-size: 12px;
+}
+
+.codexParallelSupervisorDecision {
+  margin: 7px 0 8px 15px;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codexParallelExecutionTree {
+  display: grid;
+  gap: 2px;
+  max-height: 174px;
+  margin-bottom: 9px;
+  overflow: auto;
+}
+
+.codexParallelExecutionNode {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  min-height: 27px;
+  align-items: center;
+  margin-left: calc(var(--tree-depth) * 18px);
+  padding: 2px 6px 2px 16px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.codexParallelExecutionNode::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 1px;
+  background: #cbd8d3;
+  content: "";
+}
+
+.codexParallelExecutionNode:not(.is-root)::after {
+  position: absolute;
+  top: 50%;
+  left: 5px;
+  width: 7px;
+  height: 1px;
+  background: #cbd8d3;
+  content: "";
+}
+
+.codexParallelExecutionNode.is-root {
+  margin-left: 0;
+  padding-left: 6px;
+  background: #edf4f1;
+}
+
+.codexParallelExecutionNode.is-root::before {
+  display: none;
+}
+
+.codexParallelExecutionTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codexParallelExecutionStatus {
+  color: #71817c;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.codexParallelExecutionStatus.running,
+.codexParallelExecutionStatus.preparing,
+.codexParallelExecutionStatus.supervising {
+  color: #12685e;
+}
+
+.codexParallelExecutionStatus.completed,
+.codexParallelExecutionStatus.accepted {
+  color: #24643c;
+}
+
+.codexParallelExecutionStatus.failed,
+.codexParallelExecutionStatus.blocked {
+  color: #94413c;
+}
+
+.codexParallelSupervisorMessage {
+  gap: 7px;
+  padding-left: 15px;
+}
+
+.codexParallelSupervisorMessage input {
+  box-sizing: border-box;
+  min-width: 0;
+  flex: 1;
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+
+.codexParallelSupervisorMessage input:focus {
+  border-color: #177f72;
+  outline: 2px solid rgba(23, 127, 114, 0.12);
+}
+
+#codexParallelSupervisorSend {
+  flex: 0 0 auto;
+  height: 32px;
+  border-color: #176b5b;
+  color: #176b5b;
+  font-weight: 700;
+}
+
 .codexParallelContexts summary {
   display: flex;
   align-items: center;
@@ -3709,6 +3902,12 @@ button.chainAddBtn.active {
 
 .codexParallelContextLine a:hover {
   background: #e5f1ed;
+}
+
+.codexParallelContextLinks {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .codexParallelObjective {
@@ -4231,6 +4430,38 @@ div.codexParallelWriteSet {
 }
 
 @media (max-width: 760px) {
+  .codexParallelDialog {
+    width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
+  }
+
+  .codexParallelSupervisor {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .codexParallelSupervisorDecision {
+    margin-left: 0;
+  }
+
+  .codexParallelExecutionTree {
+    max-height: 138px;
+  }
+
+  .codexParallelExecutionNode {
+    margin-left: calc(var(--tree-depth) * 12px);
+  }
+
+  .codexParallelSupervisorMessage {
+    padding-left: 0;
+  }
+
+  .codexParallelSupervisorStatus {
+    max-width: 82px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .codexParallelGoalReview {
     grid-template-columns: 1fr;
     gap: 10px;

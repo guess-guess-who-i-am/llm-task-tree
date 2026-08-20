@@ -58,7 +58,8 @@ async function prepareFixture() {
   await git(["commit", "-m", "fixture base"]);
 }
 
-async function fakeCodexTurn({ prompt, cwd }) {
+async function fakeCodexTurn(options) {
+  const { prompt, cwd } = options;
   if (prompt.includes("Automatic Parallel Planner")) {
     planGeneration += 1;
     return {
@@ -106,6 +107,15 @@ async function fakeCodexTurn({ prompt, cwd }) {
     }
     await writeFile(path.join(cwd, "server", "parallel-api.txt"), `api run ${planGeneration}\n`);
     return { threadId: `worker-api-${planGeneration}`, turnId: "worker-api-turn", output: '{"event":"completed","changedFiles":["server/parallel-api.txt"],"affectedNodes":["N3"],"evidence":"fixture"}' };
+  }
+  if (prompt.includes("Continuous Supervisor")) {
+    await pause(100);
+    await options.onAccepted?.({ threadId: options.threadId || `supervisor-${planGeneration}`, turnId: `supervisor-turn-${planGeneration}` });
+    return { threadId: options.threadId || `supervisor-${planGeneration}`, turnId: `supervisor-turn-${planGeneration}`, output: JSON.stringify({ action: "finish", summary: "当前分支可进入集成", reason: "两个分支均已完成", newJobs: [] }) };
+  }
+  if (prompt.includes("Supervisor Final Review")) {
+    const continuity = prompt.includes("no previous accepted or reviewed run") ? "baseline" : "stable";
+    return { threadId: options.threadId || `supervisor-${planGeneration}`, turnId: `supervisor-final-${planGeneration}`, output: JSON.stringify({ event: "completed", summary: "两个隔离分支均已集成并通过测试", affectedNodes: ["N2", "N3"], evidence: "3/3 tests passed", goalAssessment: { alignment: "aligned", progress: "progress", continuity, achieved: "并行分支形成可验证结果", remaining: "仍需长期业务观察" } }) };
   }
   if (prompt.includes("Integration Coordinator")) {
     await pause(200);
@@ -237,6 +247,7 @@ try {
 
   await click("#codexParallelClose");
   await page.locator("#codexParallelDialog").waitFor({ state: "hidden" });
+  await page.evaluate(() => localStorage.removeItem(`task-tree:codex-parallel:${location.origin}${location.pathname}`));
   clicks = 0;
   await click("#codexParallelBtn");
   await page.waitForFunction(() => {

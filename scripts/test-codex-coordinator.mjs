@@ -174,6 +174,14 @@ const startTurn = async (options) => {
     await options.onAccepted?.({ threadId: "audit-thread", turnId: "audit-turn" });
     return { threadId: "audit-thread", turnId: "audit-turn", output: JSON.stringify(auditAssessment) };
   }
+  if (options.prompt.includes("Continuous Supervisor")) {
+    await options.onAccepted?.({ threadId: options.threadId || "supervisor-thread", turnId: "supervisor-turn" });
+    return { threadId: options.threadId || "supervisor-thread", turnId: "supervisor-turn", output: JSON.stringify({ action: "finish", summary: "当前证据可进入集成", reason: "已审核分支完成", newJobs: [] }) };
+  }
+  if (options.prompt.includes("Supervisor Final Review")) {
+    const continuity = options.prompt.includes("no previous accepted or reviewed run") ? "baseline" : "stable";
+    return { threadId: options.threadId || "supervisor-thread", turnId: "supervisor-final-turn", output: JSON.stringify({ event: "completed", summary: "已核验集成结果", affectedNodes: ["N2", "N3"], evidence: "tests passed", goalAssessment: { alignment: "aligned", progress: "progress", continuity, achieved: "前后端闭环可运行", remaining: "仍需真实使用验证" } }) };
+  }
   if (options.threadName.includes("汇总")) {
     await options.onAccepted?.({ threadId: "coordinator-thread", turnId: "coordinator-turn" });
     const continuity = options.prompt.includes("no previous accepted or reviewed run") ? "baseline" : "stable";
@@ -508,7 +516,7 @@ try {
   }, null, 2)}\n`, "utf8");
   const coordinatorRestartedManager = createParallelCodexCoordinator({ projectRoot, startTurn, workspace });
   const coordinatorResuming = await coordinatorRestartedManager.get(coordinatorInterruptedId);
-  assert.ok(["approved", "running", "coordinating"].includes(coordinatorResuming.status));
+  assert.ok(["approved", "running", "supervising", "coordinating"].includes(coordinatorResuming.status));
   const coordinatorRecovered = await coordinatorRestartedManager.wait(coordinatorInterruptedId);
   assert.equal(coordinatorRecovered.status, "review");
   assert.equal(coordinatorRecovered.coordinator.threadId, "coordinator-thread");
@@ -531,6 +539,13 @@ try {
     projectRoot,
     workspace: concurrencyWorkspace,
     startTurn: async (options) => {
+      if (options.prompt.includes("Continuous Supervisor")) {
+        await options.onAccepted?.({ threadId: options.threadId || "many-supervisor", turnId: "many-supervisor-turn" });
+        return { threadId: options.threadId || "many-supervisor", turnId: "many-supervisor-turn", output: JSON.stringify({ action: "finish", summary: "七个分支可汇总", reason: "全部完成", newJobs: [] }) };
+      }
+      if (options.prompt.includes("Supervisor Final Review")) {
+        return { threadId: options.threadId || "many-supervisor", turnId: "many-supervisor-final", output: JSON.stringify({ event: "completed", summary: "七个分支已汇总", affectedNodes: queuedJobs.map((job) => job.nodeId), evidence: "并发峰值已记录", goalAssessment: { alignment: "aligned", progress: "progress", continuity: "stable", achieved: "多分支排队完成", remaining: "" } }) };
+      }
       if (options.threadName.includes("汇总")) {
         await options.onAccepted?.({ threadId: "many-coordinator", turnId: "many-coordinator-turn" });
         return {
@@ -580,6 +595,13 @@ try {
     projectRoot,
     workspace: appendWorkspace,
     startTurn: async (options) => {
+      if (options.prompt.includes("Continuous Supervisor")) {
+        await options.onAccepted?.({ threadId: options.threadId || "append-supervisor", turnId: "append-supervisor-turn" });
+        return { threadId: options.threadId || "append-supervisor", turnId: "append-supervisor-turn", output: JSON.stringify({ action: "finish", summary: "追加分支可汇总", reason: "当前前沿完成", newJobs: [] }) };
+      }
+      if (options.prompt.includes("Supervisor Final Review")) {
+        return { threadId: options.threadId || "append-supervisor", turnId: "append-supervisor-final", output: JSON.stringify({ event: "completed", summary: "追加分支已汇总", affectedNodes: ["N2", "N3"], evidence: "追加调度完成", goalAssessment: { alignment: "aligned", progress: "progress", continuity: "stable", achieved: "动态追加闭环完成", remaining: "" } }) };
+      }
       if (options.threadName.includes("汇总")) {
         await options.onAccepted?.({ threadId: "append-coordinator", turnId: "append-coordinator-turn" });
         return {

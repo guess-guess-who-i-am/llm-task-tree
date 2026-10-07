@@ -16,6 +16,25 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 let rotateBody = null;
 
 try {
+  await page.route("**/api/codex/threads", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        threads: [{
+          id: "source-thread",
+          name: "上下文轮换测试会话",
+          preview: "保留任务树目标和最新进度",
+          updatedAt: Math.floor(Date.now() / 1000)
+        }],
+        systemThreads: [],
+        systemThreadCount: 0,
+        pinned: "source-thread",
+        presets: []
+      })
+    });
+  });
+
   await page.route("**/api/codex/context/rotate", async (route) => {
     rotateBody = route.request().postDataJSON();
     await route.fulfill({

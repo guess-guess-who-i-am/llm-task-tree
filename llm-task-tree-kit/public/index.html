@@ -19,7 +19,7 @@
             <p id="subtitle">Markdown-backed shared task memory</p>
           </div>
           <div class="projectSwitch">
-            <button id="projectSwitchBtn" type="button" class="projectSwitchBtn" title="切到本机其它装过任务图的项目；每个项目有自己固定的地址和自己的 Codex 会话" aria-haspopup="menu" aria-expanded="false">
+            <button id="projectSwitchBtn" type="button" class="projectSwitchBtn" title="切到本机其它装过任务图的项目；每个项目有自己固定的地址和自己的 DeepSeek 会话" aria-haspopup="menu" aria-expanded="false">
               <span id="projectSwitchName">项目</span><span class="projectSwitchCaret">▾</span>
             </button>
             <div id="projectMenu" class="projectMenu hidden" role="menu" aria-label="切换项目"></div>
@@ -47,9 +47,9 @@
           <button id="embedExpandBtn" type="button" class="embedExpandBtn" title="在对话里铺开" aria-pressed="false" hidden>⤢</button>
           <button id="saveBtn" title="Save to task-tree.md">💾</button>
           <button id="reloadBtn" title="Reload Markdown">↻</button>
-          <button id="codexParallelBtn" type="button" class="codexParallelToolbarBtn" title="自动规划多个独立分支；你只在开始和结束各确认一次"><span aria-hidden="true">⇉</span><span class="codexParallelToolbarLabel">自动并行</span></button>
+          <button id="codexParallelBtn" type="button" class="codexParallelToolbarBtn" title="自动规划、并行执行并应用结果"><span aria-hidden="true">⇉</span><span class="codexParallelToolbarLabel">自动并行</span></button>
           <span class="codexLaunch">
-            <button id="openInCodexBtn" type="button" class="openInCodexBtn" title="让 Codex 执行 Next 节点的 NextIdea，自动跑一轮，不用按回车。默认续用本项目上次那条会话；点右边的 ▾ 可以直接跟它说别的">Codex</button>
+            <button id="openInCodexBtn" type="button" class="openInCodexBtn" title="让 DeepSeek 执行 Next 节点的 NextIdea，自动跑一轮">DeepSeek</button>
             <button id="codexThreadsBtn" type="button" class="codexThreadsBtn" title="换一条会话，或新开一条" aria-haspopup="menu" aria-expanded="false">▾</button>
             <div id="codexThreadMenu" class="codexThreadMenu hidden" role="menu" aria-label="选择 Codex 会话"></div>
           </span>
@@ -62,7 +62,7 @@
         <button type="button" id="workspaceBannerExitBtn">返回主树</button>
       </div>
 
-      <main class="layout is-left-pane-collapsed is-right-pane-collapsed">
+      <main class="layout">
         <aside class="knowledgePane" aria-label="Knowledge base" aria-hidden="true">
           <div class="paneHeader">
             <strong>知识库</strong>
@@ -184,6 +184,13 @@
             <div id="focusLensBody" class="focusLensBody"></div>
           </section>
           <div id="flowViewHost" class="flowViewHost" hidden></div>
+          <aside id="directRunPanel" class="directRunPanel" aria-label="节点执行输出" hidden>
+            <header class="directRunPanelHeader">
+              <strong>节点执行输出</strong>
+              <button id="directRunPanelClose" type="button" title="关闭执行输出">×</button>
+            </header>
+            <div id="directRunList" class="directRunList"></div>
+          </aside>
         </section>
         <aside class="versionPane" aria-label="Version history" aria-hidden="true">
           <div class="paneHeader">
@@ -280,20 +287,14 @@
       <div id="codexParallelStageRail" class="codexParallelStageRail" aria-label="并行阶段">
         <span class="codexParallelStage" data-stage="planning">规划</span>
         <span class="codexParallelStage" data-stage="execution">执行</span>
-        <span class="codexParallelStage" data-stage="summary">汇总</span>
-        <span class="codexParallelStage" data-stage="review">审核</span>
-        <span class="codexParallelStage" data-stage="applied">应用</span>
+        <span class="codexParallelStage" data-stage="completed">完成</span>
       </div>
-      <form id="codexParallelForm" class="codexParallelForm">
+      <div id="codexParallelForm" class="codexParallelForm">
         <div class="codexParallelObjective" id="codexParallelObjectiveBar">
           <label for="codexParallelObjective">本轮目标</label>
-          <input id="codexParallelObjective" type="text" maxlength="4000" placeholder="留空则按当前任务树规划">
-          <button type="button" id="codexParallelRegenerate" title="按本轮目标重新生成并行草案">更新计划</button>
+          <input id="codexParallelObjective" type="text" placeholder="留空则按当前任务树规划">
+          <button type="button" id="codexParallelRegenerate" title="按本轮目标重新规划并自动执行">重新规划</button>
         </div>
-        <details class="codexParallelSummary" id="codexParallelSummary" hidden>
-          <summary>规划依据</summary>
-          <p id="codexParallelSummaryText"></p>
-        </details>
         <section id="codexParallelGoalReview" class="codexParallelGoalReview" hidden>
           <div>
             <span id="codexParallelGoalLabel">本轮目标</span>
@@ -302,30 +303,6 @@
           <div>
             <span id="codexParallelGoalStatus"></span>
             <p id="codexParallelGoalResult"></p>
-          </div>
-        </section>
-        <details id="codexParallelContexts" class="codexParallelContexts" hidden>
-          <summary><span>分支上下文</span><strong id="codexParallelContextSummary"></strong></summary>
-          <div class="codexParallelContextBody">
-            <div id="codexParallelContextAssignments" class="codexParallelContextGroup"></div>
-            <div id="codexParallelContextPool" class="codexParallelContextGroup"></div>
-          </div>
-        </details>
-        <section id="codexParallelSupervisor" class="codexParallelSupervisor" hidden aria-label="持续总控">
-          <div class="codexParallelSupervisorHead">
-            <div class="codexParallelSupervisorIdentity">
-              <span id="codexParallelSupervisorDot" class="codexParallelSupervisorDot" aria-hidden="true"></span>
-              <strong>持续总控</strong>
-              <span id="codexParallelSupervisorStatus" class="codexParallelSupervisorStatus"></span>
-              <span id="codexParallelSupervisorRounds" class="codexParallelSupervisorRounds"></span>
-            </div>
-            <button type="button" id="codexParallelSupervisorToggle">暂停</button>
-          </div>
-          <p id="codexParallelSupervisorDecision" class="codexParallelSupervisorDecision"></p>
-          <div id="codexParallelExecutionTree" class="codexParallelExecutionTree" role="tree" aria-label="本轮动态运行树"></div>
-          <div class="codexParallelSupervisorMessage">
-            <input id="codexParallelSupervisorInput" type="text" maxlength="4000" placeholder="随时告诉总控要调整什么" aria-label="给持续总控发消息">
-            <button type="button" id="codexParallelSupervisorSend">发送</button>
           </div>
         </section>
         <div id="codexParallelPlanTools" class="codexParallelPlanTools" hidden>
@@ -341,34 +318,10 @@
             <tbody id="codexParallelRows"></tbody>
           </table>
         </div>
-        <section id="codexParallelReview" class="codexParallelReview" hidden>
-          <div class="codexParallelReviewGrid">
-            <div><span>变更</span><strong id="codexParallelFiles"></strong></div>
-            <div><span>测试</span><strong id="codexParallelTests"></strong></div>
-          </div>
-          <div id="codexParallelReviewWarning" class="codexParallelReviewWarning" hidden></div>
-          <details>
-            <summary>查看代码差异</summary>
-            <pre id="codexParallelPatch"></pre>
-          </details>
-        </section>
         <div class="codexParallelActions">
           <span id="codexParallelState" class="codexParallelState" role="status"></span>
-          <details id="codexParallelMore" class="codexParallelMore" hidden>
-            <summary>更多</summary>
-            <div class="codexParallelMorePanel">
-              <button type="button" id="codexParallelAudit" hidden>重新核验目标</button>
-              <button type="button" id="codexParallelSupervisorOpen" hidden>打开总控对话</button>
-              <button type="button" id="codexParallelOpen" hidden>打开协调任务</button>
-            </div>
-          </details>
-          <button type="button" id="codexParallelRetry" hidden>修订并重跑失败分支</button>
-          <button type="button" id="codexParallelAppendConfirm" hidden>确认加入分支</button>
-          <button type="button" id="codexParallelReject" hidden>丢弃结果</button>
-          <button type="button" id="codexParallelAccept" hidden>接受并应用</button>
-          <button type="submit" id="codexParallelStart" disabled>确认开始并行</button>
         </div>
-      </form>
+      </div>
     </dialog>
     <dialog id="filePreviewDialog" class="filePreviewDialog" aria-label="File preview">
       <div class="filePreviewHeader">

@@ -78,9 +78,16 @@ test("reports token usage from app-server notifications", async () => {
 test("interactive launch returns after Codex accepts the turn", async () => {
   const requests = [];
   const startedAt = performance.now();
+  const outputSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["status"],
+    properties: { status: { type: "string" } }
+  };
   const result = await startCodexTurn({
     cwd: "E:\\project",
     prompt: "test",
+    outputSchema,
     spawnCodex: () => fakeAppServer({ requests })
   });
   const elapsed = performance.now() - startedAt;
@@ -93,6 +100,7 @@ test("interactive launch returns after Codex accepts the turn", async () => {
     ["initialize", "initialized", "thread/start", "turn/start"]
   );
   assert.equal(requests.find((request) => request.method === "initialized")?.id, undefined);
+  assert.deepEqual(requests.find((request) => request.method === "turn/start")?.params.outputSchema, outputSchema);
 });
 
 test("optional naming cannot exhaust the budget before turn start", async () => {

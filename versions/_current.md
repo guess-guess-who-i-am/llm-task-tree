@@ -2,7 +2,7 @@
 
 > 这个文件是大模型和前端共同维护的任务图。节点保存问题空间，边保存节点之间的关系；每条边只连接两个节点。
 ## ROOT - 建立可共享的大模型任务上下文
-- Position: 1759,70
+- Position: 1758,70
 - Size: 400,420
 - Completion: 进行中
 - Problem: 如何让人类快速看懂、纠正并持续维护大模型的当前工作状态？
@@ -19,7 +19,7 @@
 - SelectedSkills:
 
 ## N1 - 设计 Markdown 节点格式
-- Position: 245,557
+- Position: 286,557
 - Size: 400,720
 - Completion: 已完成
 - Problem: Markdown 如何同时保持人可读、Agent 可写和前端可解析？
@@ -36,7 +36,7 @@
 - SelectedSkills:
 
 ## N2 - 实现可视化图谱编辑器
-- Position: 636,557
+- Position: 676,557
 - Size: 400,420
 - Completion: 进行中
 - Problem: 如何一眼看清关系并直接编辑，同时保持 Markdown 为唯一数据源？
@@ -55,7 +55,7 @@
 - SelectedSkills:
 
 ## N4 - 分析本地 skill 仓库与自动调用机制
-- Position: 2544,550
+- Position: 2491,557
 - Size: 470,750
 - Completion: 已完成
 - Problem: 如何从项目、kit 与全局目录自动选择相关且不重复的 skill？
@@ -85,7 +85,7 @@
 - CurrentResult: 对话按轮持久化；run 前可自动检索，模型仍可追加 search。
 - RootCauseAnalysis:
 - CaseStudy:
-- NextIdea: 重启服务后跑一轮并重开浏览器，验证历史与自动检索记录仍在。
+- NextIdea:
 - SelectedSkills:
 - Folded: true
 - SubtreeFile: subtrees/N6-subtree.md
@@ -119,34 +119,34 @@
 - Metrics:
 - Notes:
 - CodeLoc:
-- CurrentResult: kit 已完成跨项目分发，并建立 GitHub 私有备份仓库 guess-guess-who-i-am/llm-task-tree-workspace-backup。远端 main 与本地提交 f82aeea 一致，包含项目代码、任务树、子树、版本、文档和验收证据；密钥、知识索引、运行状态及外部仓库已排除。可移植与灾难恢复目标已具备。
-- RootCauseAnalysis:
+- CurrentResult: Finder 两个入口已启用；真实右键首次建树并在 Safari 打开，二次打开复用端口。Kit 与插件检查通过。
+- RootCauseAnalysis: 修复 Finder 缺少 Node/Codex 路径及重装刷新服务导致入口关闭；现仅在 Workflow 变化时刷新。
 - CaseStudy:
 - NextIdea:
 - SelectedSkills:
 
 ## N3 - 让 Codex 同步维护任务图
-- Position: 2103,557
+- Position: 2061,557
 - Size: 488,953
 - Completion: 进行中
-- Problem: 多个 Agent 如何并发修改代码和运行服务，又不互相覆盖或污染共享状态？
-- Approach: 写集/资源租约隔离运行，带来源 JSON 和 scope 隔离语义；共享目标和证据；接受/发布串行加锁、校验与回滚。
+- Problem: 允许多个 Worker 同时修改代码与任务树，冲突由对话协商合并，结果自动应用并只展示进度。
+- Approach: 完整上下文一次规划；就绪任务全部并发；写集仅作提示；独立工作树执行，真实冲突续接双方对话，完成自动应用。
 - Input: 现有并发源码、任务树、官方工程实践和用户方案。
 - Output: 并发与上下文协议见 docs/subtree-parallel/、docs/agent-context-research/。
-- Metrics: 写集/资源零越界、无来源事实零误入；新会话恢复目标/焦点；并发接受仅一成功，发布失败不破坏旧版。
+- Metrics: 同文件和任务树保留双方结果；超过四个任务并发；追加即时执行；无需审批、测试或审核阶段。
 - Notes:
 - CodeLoc:
-- CurrentResult: 第三代读树7ms、36.1秒恢复五项；第四代在树已记录审查完成后仍继承“尚未核验”，知识更新未闭环。代码/写集隔离已验证；资源租约、跨运行锁和发布状态机仍缺，根目标未达成。
-- RootCauseAnalysis: 污染来自两层：写集不隔离端口/数据库/发布锁；自由摘要无来源，会把临时指令升级为长期事实。
+- CurrentResult: 同文件/任务树合并、8/12/20 路并发、追加、上下文传递和自动应用通过；8 参与者冲突只用一次解析。拆分数量和语义正确性仍非全局最优。
+- RootCauseAnalysis: 旧瓶颈是逐个 peer 串行咨询；现改为一次信息包加解析回合。无代码上限不等于资源无限，并行度仍受机器、配额、网络和共享状态约束。
 - CaseStudy:
-- NextIdea: 实现资源租约注册表与 Worker 环境清单，并用双 Worker 端口、数据库及崩溃回收实验验证。
+- NextIdea: 在真实业务任务中观察拆分质量与冲突协商耗时。
 - SelectedSkills:
 - Folded: true
 - SubtreeFile: subtrees/N3-subtree.md
 - SubtreeCount: 1
 
 ## N5 - 处理任务树回溯后的文件漂移
-- Position: 1672,1190
+- Position: 1671,1190
 - Size: 523,640
 - Completion: 已完成
 - Problem: 树回溯但代码和产物未回滚时，如何避免误判完成或误删文件？
@@ -163,7 +163,7 @@
 - SelectedSkills: codex:skill-creator, agents:write-a-skill
 
 ## ST-P1 - 子树试点A chain-step 审计
-- Position: 2923,557
+- Position: 2881,557
 - Size: 380,280
 - Completion: 已完成
 - Problem: [子树] chain-step 是否泄露后续 Chain？
@@ -183,7 +183,7 @@
 - SubtreeCount: 1
 
 ## ST-P2 - 子树试点B 并行冲突梳理
-- Position: 3313,557
+- Position: 3271,557
 - Size: 380,280
 - Completion: 已完成
 - Problem: [子树] 多 Agent 写树和代码有哪些冲突点？
@@ -196,14 +196,14 @@
 - CurrentResult: 写集冲突清单已完成；证据见 docs/subtree-parallel/findings-P2.md。
 - RootCauseAnalysis:
 - CaseStudy:
-- NextIdea:
+- NextIdea: 现在的多模型的协作，是否能自主和其他的并行的执行的节点进行协调，自动的互相交流？互相发消息等等的？如果不行的话，设置当需要不同的节点互相传递信息或者互相协作的时候 ，就自动找对应的节点进行交流，记得要能完成的是一开始就要给到不同的节点现在找做什么，要不然节点就不知道要和哪一个节点进行对话了
 - SelectedSkills:
 - Folded: true
 - SubtreeFile: subtrees/ST-P2-subtree.md
 - SubtreeCount: 1
 
 ## N11 - 重构多树上下文与 Agent 维护闭环
-- Position: 2062,1190
+- Position: 2061,1190
 - Size: 0,720
 - Completion: 进行中
 - Problem: 如何让人借助任务图舒适地形成局面感、恢复上下文并保持对模型的控制？
@@ -237,7 +237,7 @@
 - SelectedSkills:
 
 ## N12 - 让 Agent 直接调用任务图
-- Position: 2493,1190
+- Position: 2491,1190
 - Size: 0,720
 - Completion: 已完成
 - Problem: 如何让 Agent 结构化读写任务图，并让图界面反向续接 Codex 会话？
@@ -254,9 +254,8 @@
 - SelectedSkills:
 
 # GraphState
-- ChainForceNext: 
 - Current: N3
-- Next: N3
+- Next: ST-P2
 - NextPlan: 重新打开任务图（Ctrl+F5）后验证：节点 × 在九宫格右上角；点 ⤓ 关系图/流程图 下载 SVG 并用 Inkscape/浏览器打开确认文字完整。
 
 # Edges

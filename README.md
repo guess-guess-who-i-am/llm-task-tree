@@ -80,11 +80,25 @@
 
 ```bash
 git clone https://github.com/guess-guess-who-i-am/llm-task-tree.git
-cd llm-task-tree/kit
+cd llm-task-tree/llm-task-tree-kit
 npm start
 ```
 
-Windows 也可以双击 `kit/打开任务图.cmd`。服务只监听本机地址，并为每个项目选择稳定端口。
+Windows 也可以双击 `llm-task-tree-kit/打开任务图.cmd`。服务只监听本机地址，并为每个项目选择稳定端口。
+
+### macOS 独立 IDE
+
+仓库内的 `macos/IDE/` 是隔离的 Mac 入口，不会改动系统 Node.js、Homebrew 或用户全局 Codex 配置：
+
+```bash
+cd llm-task-tree
+./macos/IDE/install.command
+./macos/IDE/open.command
+```
+
+安装器会把官方 Node.js 22 LTS 放进 `macos/IDE/runtime/`，把独立任务图项目放进 `macos/IDE/workspace/`。也可以运行 `./macos/IDE/test.sh` 重做安装、启动器、浏览器交接、项目 API 和 MCP 的隔离回归。完整改动和测试记录见 [`macos/IDE/README.md`](macos/IDE/README.md) 与 [`macos/IDE/TEST-REPORT.md`](macos/IDE/TEST-REPORT.md)。
+
+“自动并行”现在直接规划并执行：就绪 Worker 全部并发，允许修改同一文件和任务树，真实冲突通过分支对话合并，完成后自动应用。界面只显示进度与对话入口，不再要求审批、审核、测试命令或接受确认。详见[当前工作流](docs/subtree-parallel/WORKFLOW.md)与[本轮实测报告](docs/subtree-parallel/automatic-parallel-test-report.zh.md)。
 
 接入 Agent 后，直接说：
 
@@ -141,7 +155,7 @@ Agent 先读取根本目标、当前节点和 `NextIdea`，完成一个可验证
 | 质量与历史 | `task_tree_check_compact`、`task_tree_versions` |
 | 扩展能力 | `task_tree_knowledge`、`task_tree_models`、`task_tree_skills` |
 
-项目接入块在 [`kit/templates/AGENTS.merge.md`](kit/templates/AGENTS.merge.md)，完整规则在 [`kit/AGENTS.task-tree.md`](kit/AGENTS.task-tree.md)。写入工具不能擅自移动 `Current`、`Next`，也不会执行 `NextPlan`。
+项目接入块在 [`llm-task-tree-kit/templates/AGENTS.merge.md`](llm-task-tree-kit/templates/AGENTS.merge.md)，完整规则在 [`llm-task-tree-kit/AGENTS.task-tree.md`](llm-task-tree-kit/AGENTS.task-tree.md)。写入工具不能擅自移动 `Current`、`Next`，也不会执行 `NextPlan`。
 
 </details>
 
@@ -149,7 +163,7 @@ Agent 先读取根本目标、当前节点和 `NextIdea`，完成一个可验证
 <summary><strong>查看仓库结构</strong></summary>
 
 ```text
-kit/                            可部署到项目的任务树运行时
+llm-task-tree-kit/              可部署到项目的任务树运行时
 marketplace/plugins/task-tree/  Codex、Cursor、Claude Code 共享插件
 .agents/plugins/                Codex marketplace
 .claude-plugin/                 Claude Code marketplace

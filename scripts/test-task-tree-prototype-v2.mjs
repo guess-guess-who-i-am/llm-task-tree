@@ -6,6 +6,12 @@ const baseUrl = process.env.TASK_TREE_URL || "http://127.0.0.1:5410";
 const artifactDir = path.resolve("artifacts/task-tree-prototype-v2");
 fs.mkdirSync(artifactDir, { recursive: true });
 
+const legacyProbe = await fetch(`${baseUrl}/task-tree-prototype-v2/index.html`).catch(() => null);
+if (legacyProbe?.status === 404) {
+  console.log("SKIP legacy task-tree-prototype-v2: this page is no longer shipped; use /task-tree-prototype/index.html");
+  process.exit(0);
+}
+
 function findChromium() {
   const browserRoot = path.join(process.env.LOCALAPPDATA || "", "ms-playwright");
   if (!fs.existsSync(browserRoot)) return undefined;

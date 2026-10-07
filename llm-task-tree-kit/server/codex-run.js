@@ -19,6 +19,7 @@ import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "
 import { open as openFile } from "node:fs/promises";
 import path from "node:path";
 import { OPEN_GRAPH_PROMPT } from "./codex-prompts.js";
+import { startDeepSeekTurn, deepSeekThreadLink } from "./deepseek-run.js";
 
 export { OPEN_GRAPH_PROMPT };
 
@@ -94,16 +95,23 @@ export function findCodexBinary() {
       const managed = newestCodexInBinDir(path.join(home, ".local", "share", "OpenAI", "Codex", "bin"));
       if (managed) return managed;
     }
+    if (process.platform === "darwin") {
+      const appBundles = [
+        "/Applications/ChatGPT.app/Contents/Resources/codex",
+        ...(home ? [path.join(home, "Applications", "ChatGPT.app", "Contents", "Resources", "codex")] : [])
+      ];
+      const bundled = appBundles.find((candidate) => existsSync(candidate));
+      if (bundled) return bundled;
+    }
   }
 
   // Falls back to PATH; spawn reports a clear ENOENT if Codex is not installed at all.
   return process.platform === "win32" ? "codex.exe" : "codex";
 }
 
-export const spawnAppServer = (environment = {}) => spawn(findCodexBinary(), ["app-server"], {
-  stdio: ["pipe", "pipe", "pipe"],
-  env: { ...process.env, ...environment }
-});
+export const spawnAppServer = () => {
+  throw new Error("Codex app-server 已停用；生产执行统一使用 DeepSeek API");
+};
 
 class AppServerSession {
   constructor(child, { trustedServer = "task_tree" } = {}) {
@@ -117,9 +125,14 @@ class AppServerSession {
 
     this.child.stderr.on("data", (chunk) => { this.stderr += chunk.toString("utf8"); });
     this.child.stdout.on("data", (chunk) => this.#consume(chunk));
+    this.child.on("error", (error) => {
+      this.stderr += error.message;
+      for (const { reject } of this.pending.values()) reject(error);
+      this.pending.clear();
+    });
     this.child.on("exit", () => {
       for (const { reject } of this.pending.values()) {
-        reject(new Error(`codex app-server 退出了：${this.stderr.slice(-300) || "没有错误输出"}`));
+        reject(new Error(`codex app-server 退出了：${this.stderr || "没有错误输出"}`));
       }
       this.pending.clear();
     });
@@ -240,7 +253,8 @@ export async function withSession(spawnCodex, run) {
  * The conversations this project can be sent to. Codex stores every thread with the cwd it was
  * started in, so filtering on that keeps another project's history out of the picker.
  */
-export async function listProjectThreads({ cwd, limit = 12, spawnCodex = spawnAppServer, maxPages = 6, pageSize = 60 } = {}) {
+export async function listProjectThreads({ cwd, limit = 12, spawnCodex = null, maxPages = 6, pageSize = 60 } = {}) {
+  if (typeof spawnCodex !== "function") return [];
   const mine = path.resolve(cwd).toLowerCase();
 
   // `thread/list` is machine-wide and ordered by recency, so one page is whatever the busiest
@@ -264,7 +278,7 @@ export async function listProjectThreads({ cwd, limit = 12, spawnCodex = spawnAp
           id: thread.id,
           name: thread.name || "",
           // Collapsed: a preview carrying newlines turns one menu row into a paragraph.
-          preview: String(thread.preview || "").replace(/\s+/g, " ").trim().slice(0, 80),
+          preview: String(thread.preview || ""),
           updatedAt: thread.updatedAt || thread.recencyAt || thread.createdAt || 0
         });
       }
@@ -284,13 +298,14 @@ export async function listProjectThreads({ cwd, limit = 12, spawnCodex = spawnAp
  *
  * @returns {Promise<{threadId: string, turnId: string|null, resumed: boolean}>}
  */
-export async function startCodexTurn({
+async function startCodexTurnViaAppServer({
   prompt = OPEN_GRAPH_PROMPT,
   cwd,
   threadId: wanted = "",
   forkThreadId = "",
   threadName = PINNED_THREAD_NAME,
   model = null,
+  outputSchema = null,
   sandbox = null,
   approvalPolicy = null,
   config = null,
@@ -309,6 +324,11 @@ export async function startCodexTurn({
 } = {}) {
   const session = new AppServerSession(spawnCodex(environment || {}));
   const startedAt = Date.now();
+  const timing = { startedAt: new Date(startedAt).toISOString(), initializeMs: null, threadForkMs: null, threadResumeMs: null, threadStartMs: null, turnStartMs: null, completionMs: null, unsubscribeMs: null, totalMs: null };
+  const phase = async (name, operation) => {
+    const phaseStarted = Date.now();
+    try { return await operation(); } finally { timing[`${name}Ms`] = Date.now() - phaseStarted; }
+  };
   const waitFor = (promise, timeoutMs, label) => {
     const remaining = Number.isFinite(totalTimeoutMs) && totalTimeoutMs > 0
       ? Math.max(1, totalTimeoutMs - (Date.now() - startedAt))
@@ -317,11 +337,11 @@ export async function startCodexTurn({
   };
 
   try {
-    await waitFor(
+    await phase("initialize", () => waitFor(
       session.request("initialize", { clientInfo: { name: "task-tree-ui", title: "任务图", version: "1.0.0" } }),
       ACCEPT_TIMEOUT_MS,
       "连接 codex app-server"
-    );
+    ));
     session.sendNotification("initialized");
 
     // Resuming loads the conversation's history, so the turn lands in the thread the user is
@@ -331,7 +351,7 @@ export async function startCodexTurn({
     let forked = false;
     let started = null;
     if (!forceNewThread && forkThreadId) {
-      started = await waitFor(
+      started = await phase("threadFork", () => waitFor(
         session.request("thread/fork", {
           threadId: forkThreadId,
           cwd,
@@ -343,13 +363,13 @@ export async function startCodexTurn({
         }),
         ACCEPT_TIMEOUT_MS,
         "复制已有对话"
-      );
+      ));
       forked = Boolean(started?.thread?.id || started?.threadId);
       if (!forked) throw new Error("Codex 没有返回复制后的对话 id");
     }
     if (!forceNewThread && !started && wanted) {
       try {
-        started = await waitFor(session.request("thread/resume", { threadId: wanted }), ACCEPT_TIMEOUT_MS, "恢复会话");
+        started = await phase("threadResume", () => waitFor(session.request("thread/resume", { threadId: wanted }), ACCEPT_TIMEOUT_MS, "恢复会话"));
         // A conversation belongs to the directory it was started in, and resuming one from another
         // project would quietly file this project's work under someone else's history. A stale pin
         // is not worth that, so it is dropped and a fresh conversation takes over.
@@ -362,7 +382,7 @@ export async function startCodexTurn({
     }
 
     if (!started) {
-      started = await waitFor(
+      started = await phase("threadStart", () => waitFor(
         session.request("thread/start", {
           cwd,
           ...(sandbox ? { sandbox } : {}),
@@ -373,7 +393,7 @@ export async function startCodexTurn({
         }),
         ACCEPT_TIMEOUT_MS,
         "新建会话"
-      );
+      ));
     }
 
     const threadId = started?.thread?.id || started?.threadId;
@@ -438,11 +458,15 @@ export async function startCodexTurn({
       }
     };
 
-    const accepted = await waitFor(
-      session.request("turn/start", { threadId, input: [{ type: "text", text: prompt }] }),
+    const accepted = await phase("turnStart", () => waitFor(
+      session.request("turn/start", {
+        threadId,
+        input: [{ type: "text", text: prompt }],
+        ...(outputSchema ? { outputSchema } : {})
+      }),
       ACCEPT_TIMEOUT_MS,
       "发起对话"
-    );
+    ));
     acceptedTurnId = accepted?.turn?.id || "";
     // Naming is cosmetic. Start the real work first so an unsupported or slow naming request
     // cannot consume a planner's entire total timeout before turn/start is even sent.
@@ -454,17 +478,18 @@ export async function startCodexTurn({
     }
 
     if (waitForCompletion) {
-      const turn = await waitFor(completed, completionTimeoutMs, "等待 Codex 完成");
+      const turn = await phase("completion", () => waitFor(completed, completionTimeoutMs, "等待 Codex 完成"));
       const messages = (turn?.items || [])
         .filter((item) => item?.type === "agentMessage" && typeof item.text === "string")
         .map((item) => item.text.trim())
         .filter(Boolean);
       const output = messages.at(-1) || "";
-      await withTimeout(
+      await phase("unsubscribe", () => withTimeout(
         session.request("thread/unsubscribe", { threadId }),
         ACCEPT_TIMEOUT_MS,
         "释放 Codex 会话写入租约"
-      ).catch(() => {});
+      ).catch(() => {}));
+      timing.totalMs = Date.now() - startedAt;
       session.close();
       await deliverCompletion(turn).catch(() => {});
       if (turn?.status === "failed" || turn?.error || failure) {
@@ -482,27 +507,40 @@ export async function startCodexTurn({
         output
         ,tokenUsage: lastTokenUsage
         ,contextCompactions
+        ,timing
       };
     }
 
     // Nothing awaits the rest of the turn; this only guarantees the child is reaped.
     setTimeout(() => session.close(), TURN_TIMEOUT_MS).unref?.();
 
-    return { threadId, turnId: accepted?.turn?.id || null, resumed, forked, tokenUsage: lastTokenUsage, contextCompactions };
+    timing.totalMs = Date.now() - startedAt;
+    return { threadId, turnId: accepted?.turn?.id || null, resumed, forked, tokenUsage: lastTokenUsage, contextCompactions, timing };
   } catch (error) {
     session.close();
     throw error;
   }
 }
 
+/**
+ * Production execution is provider-native DeepSeek. The legacy app-server implementation remains
+ * private solely for protocol tests and explicit callers that inject `spawnCodex`; no production
+ * call can reach `spawn codex` anymore.
+ */
+export async function startCodexTurn(options = {}) {
+  if (typeof options.spawnCodex === "function") return startCodexTurnViaAppServer(options);
+  return startDeepSeekTurn(options);
+}
+
 export function threadDeepLink(threadId) {
-  return `codex://threads/${threadId}`;
+  return deepSeekThreadLink(threadId);
 }
 
 /** Reads the real model-visible turns so context rotation can preserve recent user corrections. */
-export async function readCodexThread(threadId, { spawnCodex = spawnAppServer } = {}) {
+export async function readCodexThread(threadId, { spawnCodex = null } = {}) {
   const id = String(threadId || "").trim();
   if (!id) throw new Error("threadId is required");
+  if (typeof spawnCodex !== "function") return { id, cwd: "", turns: [], provider: "deepseek" };
   return withSession(spawnCodex, async (session) => {
     const result = await withTimeout(
       session.request("thread/read", { threadId: id, includeTurns: true }),
@@ -515,9 +553,10 @@ export async function readCodexThread(threadId, { spawnCodex = spawnAppServer } 
 }
 
 /** Resolves the local rollout file without requesting model-visible turns. */
-export async function readCodexThreadRolloutPath(threadId, { spawnCodex = spawnAppServer } = {}) {
+export async function readCodexThreadRolloutPath(threadId, { spawnCodex = null } = {}) {
   const id = String(threadId || "").trim();
   if (!id) throw new Error("threadId is required");
+  if (typeof spawnCodex !== "function") return "";
   return withSession(spawnCodex, async (session) => {
     const result = await withTimeout(
       session.request("thread/read", { threadId: id, includeTurns: false }),
@@ -588,9 +627,11 @@ export async function readCodexRolloutContextSnapshot(filePath, { maxBytes = 512
 }
 
 /** Archive a completed context generation without deleting its history. */
-export async function archiveCodexThread(threadId, { spawnCodex = spawnAppServer } = {}) {
+export async function archiveCodexThread(threadId, { spawnCodex = null } = {}) {
   const id = String(threadId || "").trim();
   if (!id) return false;
+  // DeepSeek runs are stateless provider requests, so there is no desktop thread to archive.
+  if (id.startsWith("deepseek-") || typeof spawnCodex !== "function") return true;
   let lastError;
   for (let attempt = 0; attempt < 7; attempt += 1) {
     try {
@@ -628,6 +669,7 @@ export function taskTreeSystemThreadKind(thread) {
 /** Hands the url to the OS so the desktop app comes forward on the thread we just started. */
 export function openInCodex(threadId) {
   const url = threadDeepLink(threadId);
+  if (!url || url.startsWith("deepseek://")) return url;
   const [command, args] = process.platform === "win32"
     ? ["cmd.exe", ["/c", "start", "", url]]
     : process.platform === "darwin"

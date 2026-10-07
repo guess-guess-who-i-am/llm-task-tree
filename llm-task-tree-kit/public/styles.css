@@ -3599,14 +3599,13 @@ button.chainAddBtn.active {
 
 .codexParallelGoalReview strong,
 .codexParallelGoalReview p {
-  display: -webkit-box;
+  display: block;
   margin: 0;
-  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
   color: var(--ink);
   font-size: 14px;
   line-height: 1.45;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
 }
 
 .codexParallelGoalReview p {
@@ -4058,12 +4057,10 @@ button.chainAddBtn.active {
   display: inline-block;
   max-width: 100%;
   margin: 3px 0 0 36px;
-  overflow: hidden;
   color: #47766b;
   font-size: 11px;
   line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .codexParallelThreadLink {
@@ -4140,10 +4137,9 @@ button.chainAddBtn.active {
   color: var(--ink);
   font-size: 13px;
   line-height: 1.45;
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .codexParallelJobSettings {
@@ -6276,6 +6272,77 @@ div.codexParallelWriteSet {
   border-color: var(--accent);
   color: var(--accent);
 }
+
+.nodeActions .nodeRunBtn {
+  border-color: color-mix(in srgb, var(--accent, #2f6fed) 55%, var(--line, #cbd5e1));
+  color: var(--accent, #2f6fed);
+  font-weight: 650;
+}
+
+.nodeActions .nodeRunBtn:hover {
+  background: color-mix(in srgb, var(--accent, #2f6fed) 12%, transparent);
+}
+
+.nodeActions .nodeRunBtn.is-disabled {
+  opacity: .55;
+}
+
+.directRunPanel {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 20;
+  width: min(520px, calc(100% - 28px));
+  max-height: min(52vh, 520px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .97);
+  box-shadow: 0 12px 32px rgba(20, 45, 35, .16);
+}
+
+.directRunPanelHeader,
+.directRunCard header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.directRunPanelHeader {
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--line);
+}
+
+.directRunPanelHeader button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.directRunList {
+  overflow: auto;
+  padding: 8px;
+}
+
+.directRunCard {
+  margin: 0 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.directRunCard:last-child { margin-bottom: 0; }
+.directRunCard header { padding: 7px 9px; background: #f5f8f6; font-size: 12px; }
+.directRunCard.running header { color: var(--accent); }
+.directRunCard.failed header { color: #a33a32; }
+.directRunEvents { max-height: 180px; overflow: auto; padding: 6px 9px; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+.directRunEvent { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 7px; padding: 2px 0; }
+.directRunEventType { color: var(--muted); word-break: break-all; }
 
 .nodeActions [data-action="toggle-neighbor-guides"] {
   color: #9a7200;

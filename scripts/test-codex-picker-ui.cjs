@@ -6,7 +6,7 @@ const { chromium } = require("playwright");
 let browser;
 
 (async () => {
-  const executablePath = [
+  const executablePath = process.env.BROWSER_EXECUTABLE || chromium.executablePath?.() || [
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
     "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
     "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",

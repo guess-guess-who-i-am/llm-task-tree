@@ -42,13 +42,11 @@ import {
 } from "./server/context-checkpoint.js";
 import { applyCodexRolloutSnapshot, createMainContextLifecycle } from "./server/main-context-lifecycle.js";
 import {
-  buildAcceptedParallelStateSyncPrompt,
   buildPresetPrompt,
-  describePresets,
-  resolveAcceptedParallelNodeIds
+  describePresets
 } from "./server/codex-prompts.js";
 import { createParallelCodexCoordinator } from "./server/codex-coordinator.js";
-import { createExecutionScopeStore, executionScopeEnvironment } from "./server/execution-scope.js";
+import { createExecutionScopeStore } from "./server/execution-scope.js";
 import { patchNodeFields } from "./server/tree-node-patch.js";
 import { ACTIVE_METHOD_TREE_MAX_BYTES, inspectTreeMarkdown, parseTreeNodeFields } from "./server/tree-quality.js";
 import { changedNodeIds, diffTreeMarkdown } from "./server/tree-diff.js";
@@ -106,52 +104,58 @@ const knowledgeHistoryFile = path.join(projectRoot, "knowledge-chat-history.json
 const modelNodeConversationsFile = path.join(projectRoot, "model-node-conversations.json");
 const webSearchConfigFile = path.join(projectRoot, "web-search-config.json");
 const envFile = path.join(projectRoot, ".env");
+// One shared provider configuration serves every project created by this kit. A project `.env`
+// may override non-empty values, but newly created directories do not need to copy API keys.
+const globalEnvFile = process.env.TASK_TREE_GLOBAL_ENV_FILE
+  ? path.resolve(process.env.TASK_TREE_GLOBAL_ENV_FILE)
+  : path.resolve(kitDir, "..", "..", ".env");
 const port = Number(process.env.PORT || 5177);
 const host = process.env.HOST || "127.0.0.1";
 const execFileAsync = promisify(execFile);
-const executionScopes = createExecutionScopeStore({ projectRoot });
-const parallelCodex = createParallelCodexCoordinator({
-  projectRoot,
-  scopeStore: executionScopes,
-  onAccepted: async ({ run, appliedFiles }) => {
-    const nodeIds = resolveAcceptedParallelNodeIds({
-      sourceNodeIds: run.jobs.map((job) => job.nodeId),
-      reportedNodeIds: run.review?.affectedNodes
-    });
-    if (!nodeIds.length) return { status: "skipped", reason: "没有受影响节点" };
-    const scope = await executionScopes.create({
-      runId: run.id,
-      role: "state-sync",
-      targetNodeIds: nodeIds,
-      writableNodeIds: nodeIds,
-      writeSet: ["task-tree.md", "scripts/steps/**"],
-      instruction: "把已接受的并行实现和验收证据同步为精炼的任务树当前状态"
-    });
+let gitBootstrapPromise = null;
+
+async function ensureProjectGitRepository() {
+  if (gitBootstrapPromise) return gitBootstrapPromise;
+  gitBootstrapPromise = (async () => {
     try {
-      const tests = (run.integrationTestResults || []).map((test) => `${test.ok ? "PASS" : "FAIL"} ${test.command}`).join("; ") || "未配置集成命令";
-      const result = await startCodexTurn({
+      await execFileAsync("git", ["rev-parse", "--git-dir"], { cwd: projectRoot });
+      return { initialized: false };
+    } catch {
+      await execFileAsync("git", ["init", "-q"], { cwd: projectRoot });
+      await execFileAsync("git", ["add", "-A"], { cwd: projectRoot });
+      await execFileAsync("git", ["-c", "user.name=Task Tree", "-c", "user.email=task-tree@local", "commit", "--allow-empty", "-m", "Initialize task-tree project"], {
         cwd: projectRoot,
-        threadName: `任务图状态同步 · ${run.id.slice(0, 8)}`,
-        sandbox: "read-only",
-        approvalPolicy: "never",
-        environment: executionScopeEnvironment(scope),
-        developerInstructions: "Update task-tree state only through task_tree_focus/task_tree_write. Do not edit code, flow order, GraphState, or unrelated nodes.",
-        waitForCompletion: true,
-        prompt: buildAcceptedParallelStateSyncPrompt({
-          scopeId: scope.scopeId,
-          nodeIds,
-          summary: run.review?.summary || run.summary,
-          appliedFiles,
-          integrationTests: tests,
-          coordinatorEvidence: run.review?.evidence
-        })
+        env: { ...process.env, GIT_AUTHOR_NAME: "Task Tree", GIT_AUTHOR_EMAIL: "task-tree@local", GIT_COMMITTER_NAME: "Task Tree", GIT_COMMITTER_EMAIL: "task-tree@local" }
       });
-      return { status: "completed", threadId: result.threadId, turnId: result.turnId };
-    } finally {
-      await executionScopes.close(scope.scopeId).catch(() => {});
+      return { initialized: true };
     }
-  }
-});
+  })().catch((error) => {
+    gitBootstrapPromise = null;
+    throw error;
+  });
+  return gitBootstrapPromise;
+}
+const executionScopes = createExecutionScopeStore({ projectRoot });
+const parallelCodex = createParallelCodexCoordinator({ projectRoot });
+const directRuns = new Map();
+
+function directRunEvent(run, type, text = "", detail = {}) {
+  run.events.push({ at: new Date().toISOString(), type, text: String(text || "").trim(), ...detail });
+  if (run.events.length > 200) run.events.splice(0, run.events.length - 200);
+  run.updatedAt = new Date().toISOString();
+}
+
+function directRunNotification(run, message) {
+  const params = message?.params || {};
+  const item = params.item || {};
+  const text = item.text || item.delta || params.delta || params.message || params.error?.message || "";
+  const type = message?.method || item.type || "notification";
+  if (text || type) directRunEvent(run, type, text, { itemType: item.type || "" });
+}
+
+function publicDirectRun(run) {
+  return { id: run.id, nodeId: run.nodeId, status: run.status, threadId: run.threadId || "", turnId: run.turnId || "", events: run.events, error: run.error || "", updatedAt: run.updatedAt };
+}
 const treeWriteQueues = new Map();
 let skillIndexCache = null;
 let openWebSearchDaemonPromise = null;
@@ -730,8 +734,16 @@ function parseEnvText(text) {
 }
 
 async function loadLocalEnv() {
-  if (!existsSync(envFile)) return {};
-  return parseEnvText(await readFile(envFile, "utf8"));
+  const merged = {};
+  for (const file of [globalEnvFile, envFile]) {
+    if (!existsSync(file)) continue;
+    const values = parseEnvText(await readFile(file, "utf8"));
+    for (const [key, value] of Object.entries(values)) {
+      // Blank template values must not erase a configured global secret.
+      if (String(value).trim() !== "") merged[key] = value;
+    }
+  }
+  return merged;
 }
 
 function envKeySegment(value) {
@@ -3977,7 +3989,8 @@ const handleRequest = async (req, res) => {
           await mkdir(path.dirname(filePath), { recursive: true });
           await writeFile(filePath, starterTreeMarkdown(added.tree), "utf8");
         }
-        jsonResponse(res, 201, { ok: true, tree: added.tree, registry: added.registry });
+        const git = await ensureProjectGitRepository();
+        jsonResponse(res, 201, { ok: true, tree: added.tree, registry: added.registry, git });
       } catch (error) {
         jsonResponse(res, 400, { error: error.message || "create tree failed" });
       }
@@ -4439,6 +4452,30 @@ const handleRequest = async (req, res) => {
       }
 
       try {
+        if (body.progress === true) {
+          const id = crypto.randomUUID();
+          const tracked = { id, nodeId: String(body.nodeId || ""), status: "starting", threadId: "", turnId: "", events: [], error: "", updatedAt: new Date().toISOString() };
+          directRuns.set(id, tracked);
+          directRunEvent(tracked, "queued", "已收到节点执行请求");
+          const result = await startCodexTurn({
+            prompt, cwd: projectRoot, threadId: "", waitForCompletion: false,
+            onAccepted: ({ threadId, turnId }) => {
+              tracked.status = "running"; tracked.threadId = threadId || ""; tracked.turnId = turnId || "";
+              directRunEvent(tracked, "turn/accepted", "模型已接受执行");
+            },
+            onNotification: (message) => directRunNotification(tracked, message),
+            onCompleted: ({ status, error }) => {
+              tracked.status = status === "failed" || error ? "failed" : "completed";
+              tracked.error = error?.message || "";
+              directRunEvent(tracked, tracked.status, tracked.status === "completed" ? "执行完成" : (tracked.error || "执行失败"));
+            }
+          });
+          tracked.threadId ||= result.threadId || "";
+          tracked.turnId ||= result.turnId || "";
+          tracked.status = "running";
+          jsonResponse(res, 202, { ...publicDirectRun(tracked), prompt, deepLink: tracked.threadId ? threadDeepLink(tracked.threadId) : "" });
+          return;
+        }
         const { threadId, turnId, resumed } = await startCodexTurn({
           prompt,
           cwd: projectRoot,
@@ -4464,6 +4501,14 @@ const handleRequest = async (req, res) => {
       return;
     }
 
+    const directRunMatch = reqPath.match(/^\/api\/codex\/run\/([A-Za-z0-9-]+)$/);
+    if (directRunMatch && req.method === "GET") {
+      const tracked = directRuns.get(directRunMatch[1]);
+      if (!tracked) { jsonResponse(res, 404, { error: "找不到节点执行记录" }); return; }
+      jsonResponse(res, 200, { run: publicDirectRun(tracked) });
+      return;
+    }
+
     if (reqPath === "/api/codex/parallel" && req.method === "POST") {
       try {
         const body = JSON.parse(await readBody(req));
@@ -4486,39 +4531,17 @@ const handleRequest = async (req, res) => {
       return;
     }
 
-    const parallelBranchPlan = reqPath.match(/^\/api\/codex\/parallel\/([A-Za-z0-9-]+)\/branch-plan$/);
+    const parallelBranchPlan = reqPath.match(/^\/api\/codex\/parallel\/([A-Za-z0-9-]+)\/branch$/);
     if (parallelBranchPlan && req.method === "POST") {
       try {
         const body = JSON.parse(await readBody(req));
-        const proposal = await parallelCodex.branchPlan(parallelBranchPlan[1], {
+        const run = await parallelCodex.addBranch(parallelBranchPlan[1], {
           nodeId: typeof body.nodeId === "string" ? body.nodeId.trim() : "",
-          objective: typeof body.objective === "string" ? body.objective.trim() : "",
-          existingJobs: Array.isArray(body.existingJobs) ? body.existingJobs : []
+          objective: typeof body.objective === "string" ? body.objective.trim() : ""
         });
-        jsonResponse(res, 200, { proposal });
+        jsonResponse(res, 202, { run });
       } catch (error) {
         jsonResponse(res, 400, { error: error.message });
-      }
-      return;
-    }
-
-    const parallelAction = reqPath.match(/^\/api\/codex\/parallel\/([A-Za-z0-9-]+)\/(approve|retry|audit|accept|reject)$/);
-    if (parallelAction && req.method === "POST") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const action = parallelAction[2];
-        const run = action === "approve"
-          ? await parallelCodex.approve(parallelAction[1], body)
-          : action === "retry"
-            ? await parallelCodex.retry(parallelAction[1], body)
-          : action === "audit"
-            ? await parallelCodex.audit(parallelAction[1])
-          : action === "accept"
-            ? await parallelCodex.accept(parallelAction[1])
-            : await parallelCodex.reject(parallelAction[1]);
-        jsonResponse(res, ["approve", "retry", "audit"].includes(action) ? 202 : 200, { run });
-      } catch (error) {
-        jsonResponse(res, error.code === "MAIN_WORKSPACE_CHANGED" ? 409 : 400, { error: error.message, files: error.files || [] });
       }
       return;
     }
@@ -4547,36 +4570,7 @@ const handleRequest = async (req, res) => {
       return;
     }
 
-    const parallelSupervisor = reqPath.match(/^\/api\/codex\/parallel\/([A-Za-z0-9-]+)\/supervisor(?:\/(message|pause|resume|open))?$/);
-    if (parallelSupervisor && req.method === "GET" && !parallelSupervisor[2]) {
-      const run = await parallelCodex.get(parallelSupervisor[1]);
-      if (!run) jsonResponse(res, 404, { error: "找不到这次并行运行" });
-      else jsonResponse(res, 200, { supervisor: run.supervisor, executionTree: run.executionTree });
-      return;
-    }
-    if (parallelSupervisor && req.method === "POST" && parallelSupervisor[2]) {
-      try {
-        const action = parallelSupervisor[2];
-        if (action === "open") {
-          const opened = await parallelCodex.openSupervisor(parallelSupervisor[1]);
-          openInCodex(opened.threadId);
-          jsonResponse(res, 200, opened);
-          return;
-        }
-        const body = JSON.parse(await readBody(req));
-        const run = action === "message"
-          ? await parallelCodex.supervisorMessage(parallelSupervisor[1], body.message)
-          : action === "pause"
-            ? await parallelCodex.pause(parallelSupervisor[1])
-            : await parallelCodex.resume(parallelSupervisor[1]);
-        jsonResponse(res, 202, { run });
-      } catch (error) {
-        jsonResponse(res, error.code === "THREAD_NOT_READY" ? 409 : 400, { error: error.message });
-      }
-      return;
-    }
-
-    const parallelMatch = reqPath.match(/^\/api\/codex\/parallel\/([A-Za-z0-9-]+)(?:\/(open))?$/);
+    const parallelMatch = reqPath.match(/^\/api\/codex\/parallel\/([A-Za-z0-9-]+)$/);
     if (parallelMatch && req.method === "GET") {
       const run = await parallelCodex.get(parallelMatch[1]);
       if (!run) {
@@ -4584,16 +4578,6 @@ const handleRequest = async (req, res) => {
         return;
       }
       jsonResponse(res, 200, { run });
-      return;
-    }
-    if (parallelMatch?.[2] === "open" && req.method === "POST") {
-      const run = await parallelCodex.get(parallelMatch[1]);
-      if (!run?.coordinator?.threadId) {
-        jsonResponse(res, 409, { error: "coordinator 还没有完成" });
-        return;
-      }
-      openInCodex(run.coordinator.threadId);
-      jsonResponse(res, 200, { deepLink: run.deepLink });
       return;
     }
 

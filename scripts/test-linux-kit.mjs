@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -13,6 +13,10 @@ const projectDir = path.join(tmpRoot, "project");
 const stubDir = path.join(projectDir, "llm-task-tree");
 const startScript = path.join(kitDir, "start-task-tree.sh");
 let originalStartMode = null;
+
+const physicalPath = (value) => {
+  try { return realpathSync.native(value); } catch { return path.resolve(value); }
+};
 
 function runNode(args, cwd = repoRoot) {
   return new Promise((resolve, reject) => {
@@ -159,7 +163,7 @@ try {
   assert.equal(session.responses.find((item) => item.id === 1).result.serverInfo.name, "llm-task-tree");
   assert.equal(session.responses.find((item) => item.id === 2).result.tools.length, 18);
   const focus = JSON.parse(session.responses.find((item) => item.id === 3).result.content[0].text);
-  assert.equal(path.resolve(focus.projectRoot), projectDir);
+  assert.equal(physicalPath(focus.projectRoot), physicalPath(projectDir));
   assert.equal(focus.graphState.current, "ROOT");
   const compact = JSON.parse(session.responses.find((item) => item.id === 4).result.content[0].text);
   assert.equal(compact.ok, true, JSON.stringify(compact));

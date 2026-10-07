@@ -2,48 +2,43 @@
   "schema": "flow-step/v1",
   "nodeId": "N3",
   "blockId": "",
-  "updatedAt": "2026-08-20T08:56:19.627Z",
-  "title": "让 Codex 同步维护任务图",
+  "updatedAt": "2026-09-22T09:38:02.679Z",
+  "title": "自动并行执行与任务树合并",
   "reportZh": "report.zh.md",
   "substeps": [
     {
-      "title": "核验多 Agent 并发隔离架构与缺口",
+      "title": "完整上下文规划、并发与冲突协商",
       "functions": [
         {
+          "path": "server/codex-coordinator.js",
+          "line": 480,
+          "name": "buildPlannerPrompt"
+        },
+        {
+          "path": "server/codex-coordinator.js",
+          "line": 993,
+          "name": "resolveMergeConflict"
+        },
+        {
           "path": "server/parallel-worktree.js",
-          "line": 140,
-          "name": "createGitWorkspaceManager"
-        },
-        {
-          "path": "server/codex-coordinator.js",
-          "line": 323,
-          "name": "validateParallelJobs"
-        },
-        {
-          "path": "server/codex-coordinator.js",
-          "line": 1541,
-          "name": "integrationQueue"
-        },
-        {
-          "path": "server/codex-coordinator.js",
-          "line": 2455,
+          "line": 301,
           "name": "accept"
         }
       ],
       "inputs": [
         {
-          "path": "docs/subtree-parallel/WORKFLOW.md",
-          "line": 1
-        },
-        {
-          "path": "docs/subtree-parallel/findings-P2.md",
-          "line": 1
+          "path": "docs/subtree-parallel/WORKFLOW.md"
         }
       ],
       "outputs": [
         {
-          "path": "docs/subtree-parallel/concurrent-agent-isolation-design.zh.md",
-          "line": 1
+          "path": "docs/subtree-parallel/automatic-parallel-test-report.zh.md"
+        },
+        {
+          "path": "artifacts/parallel-automatic/live-run.json"
+        },
+        {
+          "path": "artifacts/parallel-automatic/current-progress.png"
         }
       ]
     }

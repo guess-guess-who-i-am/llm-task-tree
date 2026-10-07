@@ -30,6 +30,7 @@ scripts/versions/
 *.log
 *.err.log
 *.out.log
+.DS_Store
 node_modules/
 test-runs/
 backups/
@@ -38,6 +39,8 @@ knowledge-index.corrupt*.json
 # Generated archives and packaged copies
 *.zip
 dist/
+macos/IDE/runtime/
+macos/IDE/workspace/
 
 # External repositories vendored only for local study
 agent-reach/

@@ -1,9 +1,21 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
 const HOST = "127.0.0.1";
 const START_TIMEOUT_MS = 20000;
+
+// macOS exposes /var as a symlink to /private/var. Keep the path spelling that the
+// caller supplied for UI/config output, but use the physical path for identity and
+// stable-port calculations so the same project cannot receive two URLs.
+function canonicalPath(value) {
+  const resolved = path.resolve(value || "");
+  try { return realpathSync.native(resolved); } catch { return resolved; }
+}
+
+function canonicalKey(value) {
+  return canonicalPath(value).replace(/\\/g, "/").toLowerCase();
+}
 
 /**
  * Where the installer records every project it has touched, so one graph window can reach the
@@ -20,7 +32,7 @@ export function registryFile(env = process.env) {
  */
 export function stablePortFor(projectRoot) {
   let hash = 0;
-  for (const char of path.resolve(projectRoot).toLowerCase()) {
+  for (const char of canonicalKey(projectRoot)) {
     hash = (hash * 31 + char.charCodeAt(0)) % 100000;
   }
   return 5178 + (hash % 800);
@@ -74,7 +86,7 @@ export function describeProjects({ file = registryFile(), currentRoot = "" } = {
     } catch {
       continue;
     }
-    const key = root.toLowerCase();
+    const key = canonicalKey(root);
     if (seen.has(key)) continue;
     seen.add(key);
     if (!existsSync(root)) continue;
@@ -84,7 +96,7 @@ export function describeProjects({ file = registryFile(), currentRoot = "" } = {
       root,
       name: path.basename(root),
       port: stablePortFor(root),
-      current: currentRoot ? key === path.resolve(currentRoot).toLowerCase() : false,
+      current: currentRoot ? key === canonicalKey(currentRoot) : false,
       touchedAt: touchedAt(treeFile)
     });
   }
@@ -124,7 +136,7 @@ export async function probeProject(root, port, { fetchImpl = fetch, timeoutMs = 
     });
     if (!response.ok) return false;
     const project = await response.json();
-    return path.resolve(project.root || "").toLowerCase() === path.resolve(root).toLowerCase();
+    return canonicalKey(project.root || "") === canonicalKey(root);
   } catch {
     return false;
   }

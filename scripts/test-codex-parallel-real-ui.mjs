@@ -1,303 +1,97 @@
+// Live browser -> production HTTP -> real Codex -> Git -> automatic application.
+// Requires the user's existing Codex login. No model or API responses are mocked.
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { createServer } from "node:http";
+import { spawn, execFile } from "node:child_process";
+import { createServer } from "node:net";
 import { createRequire } from "node:module";
-import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { createParallelCodexCoordinator } from "../server/codex-coordinator.js";
-import { createGitWorkspaceManager } from "../server/parallel-worktree.js";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("../prototype/swimlane-view/node_modules/playwright");
 const exec = promisify(execFile);
-const appPort = process.env.PORT || "5412";
-const appUrl = `http://127.0.0.1:${appPort}`;
-const browserExecutable = process.env.BROWSER_EXECUTABLE || [
-  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-  "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
-].find(existsSync);
-const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "task-tree-parallel-ui-project-"));
-const worktreeRoot = await mkdtemp(path.join(os.tmpdir(), "task-tree-parallel-ui-worktrees-"));
-const git = (args) => exec("git", args, { cwd: fixtureRoot, windowsHide: true });
-const fileText = async (relative) => (await readFile(path.join(fixtureRoot, relative), "utf8")).replace(/\r\n/g, "\n");
-const pause = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
-let planGeneration = 0;
-let failApiNext = false;
-const workerRuns = { ui: 0, api: 0 };
-
-async function prepareFixture() {
-  await mkdir(path.join(fixtureRoot, "public"), { recursive: true });
-  await mkdir(path.join(fixtureRoot, "server"), { recursive: true });
-  await mkdir(path.join(fixtureRoot, "scripts"), { recursive: true });
-  await writeFile(path.join(fixtureRoot, "public", "parallel-ui.txt"), "base ui\n");
-  await writeFile(path.join(fixtureRoot, "server", "parallel-api.txt"), "base api\n");
-  await writeFile(path.join(fixtureRoot, "scripts", "parallel-pass.mjs"), "console.log('fixture pass');\n");
-  await writeFile(path.join(fixtureRoot, "task-tree.md"), [
-    "# Task Tree",
-    "## ROOT - Fixture",
-    "- Problem: 验证自动并行",
-    "- Completion: 进行中",
-    "## N2 - 界面",
-    "- Problem: 更新界面文件",
-    "- NextIdea: 完成界面分支",
-    "- Completion: 进行中",
-    "## N3 - 服务",
-    "- Problem: 更新服务文件",
-    "- NextIdea: 完成服务分支",
-    "- Completion: 进行中",
-    ""
-  ].join("\n"));
-  await git(["init"]);
-  await git(["config", "user.name", "Parallel UI Test"]);
-  await git(["config", "user.email", "parallel-ui@test.local"]);
-  await git(["add", "."]);
-  await git(["commit", "-m", "fixture base"]);
+const root = process.cwd();
+const fixture = await mkdtemp(path.join(os.tmpdir(), "parallel-live-browser-"));
+const artifacts = path.join(root, "artifacts", "parallel-automatic");
+await mkdir(artifacts, { recursive: true });
+const objective = "在此临时项目完成两个明确独立任务，必须同时派出两个 Worker，不要增设契约、测试或审核任务：alpha 分支把 shared.txt 的 base 行改成 alpha 并新建 alpha.txt；beta 分支把 shared.txt 的 base 行改成 beta 并新建 beta.txt。两者从相同基线独立工作，不等待对方；发生真实 Git 冲突时，双方协商，最终 shared.txt 保留 alpha 和 beta 各一行。仅修改当前临时工作树，禁止修改外部文件。不运行测试，不修改其他文件，不委派。完成后直接自动应用。";
+await writeFile(path.join(fixture, "task-tree.md"), `# LLM Task Graph\n## ROOT - 两个分支自动合并\n- Problem: ${objective}\n- Completion: 进行中\n## N1 - alpha 分支\n- Problem: shared.txt 的 base 改为 alpha，新增 alpha.txt，文件内容为 alpha\n- Completion: 进行中\n## N2 - beta 分支\n- Problem: shared.txt 的 base 改为 beta，新增 beta.txt，文件内容为 beta\n- Completion: 进行中\n# GraphState\n- Current: ROOT\n- Next: ROOT\n# Edges\n`);
+await writeFile(path.join(fixture, "shared.txt"), "base\n");
+await writeFile(path.join(fixture, "AGENTS.md"), "This is an isolated live integration fixture. Follow the assigned task only. Do not run tests, use MCP, delegate, or modify files outside the current Git worktree. Do not edit AGENTS.md. When resolving a Git conflict, preserve alpha and beta, stage the resolution, and let the host continue the cherry-pick.\n");
+for (const args of [["init"], ["config", "user.name", "Parallel Live Test"], ["config", "user.email", "parallel-live@test.local"], ["add", "."], ["commit", "-m", "live fixture"]]) {
+  await exec("git", args, { cwd: fixture });
 }
-
-async function fakeCodexTurn(options) {
-  const { prompt, cwd } = options;
-  if (prompt.includes("Automatic Parallel Planner")) {
-    planGeneration += 1;
-    return {
-      threadId: `planner-${planGeneration}`,
-      turnId: `planner-turn-${planGeneration}`,
-      output: JSON.stringify({
-        summary: `第 ${planGeneration} 轮：界面与服务并行，合并后统一验收。`,
-        jobs: [
-          {
-            taskId: "ui",
-            nodeId: "N2",
-            title: "界面",
-            instruction: "更新界面结果文件并通过测试",
-            writeSet: ["public/**"],
-            dependsOn: [],
-            tests: ["node scripts/parallel-pass.mjs"]
-          },
-          {
-            taskId: "api",
-            nodeId: "N3",
-            title: "服务",
-            instruction: "更新服务结果文件并通过测试",
-            writeSet: ["server/**"],
-            dependsOn: [],
-            tests: ["node scripts/parallel-pass.mjs"]
-          }
-        ],
-        integrationTests: ["node scripts/parallel-pass.mjs"]
-      })
-    };
-  }
-  const taskId = prompt.match(/^Task id: (.+)$/m)?.[1];
-  if (taskId === "ui") {
-    workerRuns.ui += 1;
-    await pause(250);
-    await writeFile(path.join(cwd, "public", "parallel-ui.txt"), `ui run ${planGeneration}\n`);
-    return { threadId: `worker-ui-${planGeneration}`, turnId: "worker-ui-turn", output: '{"event":"completed","changedFiles":["public/parallel-ui.txt"],"affectedNodes":["N2"],"evidence":"fixture"}' };
-  }
-  if (taskId === "api") {
-    workerRuns.api += 1;
-    await pause(250);
-    if (failApiNext) {
-      failApiNext = false;
-      throw new Error("fixture api worker failed once");
-    }
-    await writeFile(path.join(cwd, "server", "parallel-api.txt"), `api run ${planGeneration}\n`);
-    return { threadId: `worker-api-${planGeneration}`, turnId: "worker-api-turn", output: '{"event":"completed","changedFiles":["server/parallel-api.txt"],"affectedNodes":["N3"],"evidence":"fixture"}' };
-  }
-  if (prompt.includes("Continuous Supervisor")) {
-    await pause(100);
-    await options.onAccepted?.({ threadId: options.threadId || `supervisor-${planGeneration}`, turnId: `supervisor-turn-${planGeneration}` });
-    return { threadId: options.threadId || `supervisor-${planGeneration}`, turnId: `supervisor-turn-${planGeneration}`, output: JSON.stringify({ action: "finish", summary: "当前分支可进入集成", reason: "两个分支均已完成", newJobs: [] }) };
-  }
-  if (prompt.includes("Supervisor Final Review")) {
-    const continuity = prompt.includes("no previous accepted or reviewed run") ? "baseline" : "stable";
-    return { threadId: options.threadId || `supervisor-${planGeneration}`, turnId: `supervisor-final-${planGeneration}`, output: JSON.stringify({ event: "completed", summary: "两个隔离分支均已集成并通过测试", affectedNodes: ["N2", "N3"], evidence: "3/3 tests passed", goalAssessment: { alignment: "aligned", progress: "progress", continuity, achieved: "并行分支形成可验证结果", remaining: "仍需长期业务观察" } }) };
-  }
-  if (prompt.includes("Integration Coordinator")) {
-    await pause(200);
-    const continuity = prompt.includes("no previous accepted or reviewed run") ? "baseline" : "stable";
-    return {
-      threadId: `coordinator-${planGeneration}`,
-      turnId: `coordinator-turn-${planGeneration}`,
-      output: JSON.stringify({
-        event: "completed",
-        summary: "两个隔离分支均已集成并通过测试",
-        affectedNodes: ["N2", "N3"],
-        evidence: "3/3 tests passed",
-        goalAssessment: { alignment: "aligned", progress: "progress", continuity, achieved: "并行分支形成可验证结果", remaining: "仍需长期业务观察" }
-      })
-    };
-  }
-  throw new Error("unexpected fake Codex prompt");
-}
-
-function json(res, status, value) {
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(value));
-}
-
-async function readJson(req) {
-  let body = "";
-  for await (const chunk of req) body += chunk;
-  return body ? JSON.parse(body) : {};
-}
-
-async function createParallelApiServer(coordinator) {
-  const server = createServer(async (req, res) => {
-    try {
-      const pathname = new URL(req.url, "http://127.0.0.1").pathname;
-      if (pathname === "/api/codex/parallel/plan" && req.method === "POST") {
-        const body = await readJson(req);
-        return json(res, 201, { run: await coordinator.plan({ objective: body.objective || "" }) });
-      }
-      const action = pathname.match(/^\/api\/codex\/parallel\/([A-Za-z0-9-]+)\/(approve|retry|accept|reject)$/);
-      if (action && req.method === "POST") {
-        const body = await readJson(req);
-        const run = action[2] === "approve"
-          ? await coordinator.approve(action[1], body)
-          : action[2] === "retry"
-            ? await coordinator.retry(action[1], body)
-          : action[2] === "accept"
-            ? await coordinator.accept(action[1])
-            : await coordinator.reject(action[1]);
-        return json(res, ["approve", "retry"].includes(action[2]) ? 202 : 200, { run });
-      }
-      const read = pathname.match(/^\/api\/codex\/parallel\/([A-Za-z0-9-]+)$/);
-      if (read && req.method === "GET") {
-        const run = await coordinator.get(read[1]);
-        return run ? json(res, 200, { run }) : json(res, 404, { error: "not found" });
-      }
-      return json(res, 404, { error: "not found" });
-    } catch (error) {
-      return json(res, error.code === "MAIN_WORKSPACE_CHANGED" ? 409 : 400, { error: error.message });
-    }
-  });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  return { server, url: `http://127.0.0.1:${address.port}` };
-}
-
-assert.ok(browserExecutable, "no system Chrome or Edge executable found");
-await prepareFixture();
-const coordinator = createParallelCodexCoordinator({
-  projectRoot: fixtureRoot,
-  workspace: createGitWorkspaceManager({ projectRoot: fixtureRoot, tempRoot: worktreeRoot }),
-  startTurn: fakeCodexTurn,
-  onAccepted: async () => ({ status: "completed" })
+const reserve = createServer();
+await new Promise((resolve) => reserve.listen(0, "127.0.0.1", resolve));
+const port = reserve.address().port;
+await new Promise((resolve) => reserve.close(resolve));
+const baseUrl = `http://127.0.0.1:${port}`;
+const child = spawn(process.execPath, ["server.js"], {
+  cwd: root,
+  env: { ...process.env, TASK_TREE_PROJECT_ROOT: fixture, PORT: String(port), HOST: "127.0.0.1", PATH: `${path.dirname(process.execPath)}:${process.env.PATH}` },
+  stdio: ["ignore", "pipe", "pipe"]
 });
-const api = await createParallelApiServer(coordinator);
-const browser = await chromium.launch({ headless: true, executablePath: browserExecutable });
-
+let log = "";
+child.stdout.on("data", (chunk) => { log += chunk; });
+child.stderr.on("data", (chunk) => { log += chunk; });
+let browser;
+let run;
+const startedAt = Date.now();
 try {
+  for (;;) {
+    try { if ((await fetch(`${baseUrl}/api/project`)).ok) break; } catch { /* startup */ }
+    if (Date.now() - startedAt > 15000) throw new Error(`server startup failed: ${log}`);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-  await page.route("**/api/codex/parallel/**", async (route) => {
-    const request = route.request();
-    const target = `${api.url}${new URL(request.url()).pathname}`;
-    const response = await fetch(target, {
-      method: request.method(),
-      headers: { "content-type": "application/json" },
-      body: request.method() === "GET" ? undefined : request.postData() || "{}"
-    });
-    await route.fulfill({ status: response.status, contentType: "application/json", body: await response.text() });
+  const requests = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/codex/parallel")) requests.push(`${request.method()} ${new URL(request.url()).pathname}`);
   });
-  await page.goto(appUrl, { waitUntil: "domcontentloaded" });
-  await page.waitForFunction(() => document.querySelectorAll(".graphNode").length > 0);
-  await page.waitForTimeout(800);
-  await page.evaluate(() => {
-    localStorage.removeItem(`task-tree:codex-parallel:${location.origin}${location.pathname}`);
-    const overview = document.querySelector("#projectOverviewDialog");
-    if (overview?.open) overview.close();
-  });
-
-  let clicks = 0;
-  const click = async (selector) => {
-    clicks += 1;
-    await page.locator(selector).click();
-  };
-
-  assert.equal(await page.locator("#codexParallelBtn").isVisible(), true);
-  await page.locator(".topbar").screenshot({ path: "artifacts/parallel-direct-entry.png" });
-  await click("#codexParallelBtn");
-  await page.waitForFunction(() => {
-    const button = document.querySelector("#codexParallelStart");
-    return button && !button.disabled && document.querySelector("#codexParallelState")?.textContent.includes("待确认");
-  }, null, { timeout: 30000 });
-  assert.match(await page.locator("#codexParallelState").innerText(), /待确认/);
-  await click("#codexParallelStart");
-  await page.locator("#codexParallelStart").waitFor({ state: "hidden", timeout: 5000 });
-  assert.equal(await page.locator("#codexParallelAccept").isVisible(), false, "end review stays hidden until automation completes");
-  assert.equal(await page.locator("#codexParallelReject").isVisible(), false, "running phase must not ask for worker decisions");
-  await page.locator("#codexParallelAccept").waitFor({ state: "visible", timeout: 30000 });
-  assert.equal(await fileText("public/parallel-ui.txt"), "base ui\n", "review must not alter the main project");
-  assert.equal(await fileText("server/parallel-api.txt"), "base api\n", "review must stay isolated");
-  assert.equal(await page.locator("#projectOverviewDialog").evaluate((dialog) => dialog.open), false, "daily overview must not cover parallel review");
-  await page.locator("#codexParallelDialog").screenshot({ path: "artifacts/parallel-real-end-review.png" });
-  const acceptStartedAt = Date.now();
-  await click("#codexParallelAccept");
-  await page.waitForFunction(() => document.querySelector("#codexParallelState")?.textContent.startsWith("已应用"), null, { timeout: 30000 });
-  const acceptResponseMs = Date.now() - acceptStartedAt;
-  await page.waitForFunction(() => document.querySelector("#codexParallelState")?.textContent.trim() === "已应用", null, { timeout: 30000 });
-  assert.equal(clicks, 3, "accept flow should need entry, start review, and end review only");
-  assert.equal(await fileText("public/parallel-ui.txt"), "ui run 1\n");
-  assert.equal(await fileText("server/parallel-api.txt"), "api run 1\n");
-
-  await click("#codexParallelClose");
-  await page.locator("#codexParallelDialog").waitFor({ state: "hidden" });
-  await page.evaluate(() => localStorage.removeItem(`task-tree:codex-parallel:${location.origin}${location.pathname}`));
-  clicks = 0;
-  await click("#codexParallelBtn");
-  await page.waitForFunction(() => {
-    const button = document.querySelector("#codexParallelStart");
-    return button && !button.disabled && document.querySelector("#codexParallelState")?.textContent.includes("待确认");
-  }, null, { timeout: 30000 });
-  await click("#codexParallelStart");
-  await page.locator("#codexParallelReject").waitFor({ state: "visible", timeout: 30000 });
-  await click("#codexParallelReject");
-  await page.locator("#codexParallelState").getByText("已丢弃", { exact: false }).waitFor();
-  assert.equal(clicks, 3, "reject flow should need entry, start review, and end review only");
-  assert.equal(await fileText("public/parallel-ui.txt"), "ui run 1\n", "rejected UI result must not be applied");
-  assert.equal(await fileText("server/parallel-api.txt"), "api run 1\n", "rejected API result must not be applied");
-
-  await click("#codexParallelClose");
-  await page.locator("#codexParallelDialog").waitFor({ state: "hidden" });
-  failApiNext = true;
-  await click("#codexParallelBtn");
-  await page.waitForFunction(() => {
-    const button = document.querySelector("#codexParallelStart");
-    return button && !button.disabled && document.querySelector("#codexParallelState")?.textContent.includes("待确认");
-  }, null, { timeout: 30000 });
-  await click("#codexParallelStart");
-  await page.locator("#codexParallelRetry").waitFor({ state: "visible", timeout: 30000 });
-  assert.equal(await page.locator("#codexParallelAccept").isDisabled(), true, "a failed worker must lock acceptance even when integration tests pass");
-  assert.match(await page.locator("#codexParallelState").innerText(), /1 个分支待修复/);
-  assert.equal(await page.locator('tr[data-task-id="api"] .codexParallelInstruction').isEditable(), true);
-  assert.equal(await page.locator('tr[data-task-id="ui"] .codexParallelTaskText').isVisible(), true);
-  await page.locator("#codexParallelDialog").screenshot({ path: "artifacts/parallel-failed-review.png" });
-  await page.locator('tr[data-task-id="api"] .codexParallelJobSettings summary').click();
-  await page.locator('tr[data-task-id="api"] .codexParallelInstruction').fill("修复 API 分支并重新验证");
-  const uiRunsBeforeRetry = workerRuns.ui;
-  await click("#codexParallelRetry");
-  await page.waitForFunction(() => {
-    const button = document.querySelector("#codexParallelAccept");
-    return button && !button.hidden && !button.disabled;
-  }, null, { timeout: 30000 });
-  assert.equal(workerRuns.ui, uiRunsBeforeRetry, "completed UI worker must not rerun");
-  assert.equal(await fileText("public/parallel-ui.txt"), "ui run 1\n", "retry review must remain isolated from main project");
-  assert.equal(await fileText("server/parallel-api.txt"), "api run 1\n", "retry review must remain isolated from main project");
-  await page.locator("#codexParallelDialog").screenshot({ path: "artifacts/parallel-retry-success-review.png" });
-  await click("#codexParallelAccept");
-  await page.waitForFunction(() => document.querySelector("#codexParallelState")?.textContent.trim() === "已应用", null, { timeout: 30000 });
-  assert.equal(await fileText("public/parallel-ui.txt"), "ui run 3\n");
-  assert.equal(await fileText("server/parallel-api.txt"), "api run 3\n");
-
-  console.log(`PASS real browser covers three-click success, rejection, strict failure gate, and failed-only retry; accept response ${acceptResponseMs}ms`);
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  if (await page.locator("#projectOverviewDialog[open]").count()) await page.click("#projectOverviewClose");
+  const planningResponse = page.waitForResponse((response) => response.url().endsWith("/api/codex/parallel/plan") && response.request().method() === "POST");
+  await page.click("#codexParallelBtn");
+  const initial = await (await planningResponse).json();
+  assert.ok(initial.run?.id, JSON.stringify(initial));
+  const runId = initial.run.id;
+  console.log(`Live run ${runId}: browser submitted the real plan`);
+  let lastState = "";
+  for (;;) {
+    run = (await (await fetch(`${baseUrl}/api/codex/parallel/${runId}`)).json()).run;
+    const state = `${run.status}: ${run.jobs.map((job) => `${job.taskId}=${job.status}`).join(", ")}`;
+    if (state !== lastState) { console.log(state); lastState = state; }
+    if (["accepted", "failed"].includes(run.status)) break;
+    if (Date.now() - startedAt > 12 * 60 * 1000) throw new Error(`Live run timed out: ${state}`);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  await writeFile(path.join(artifacts, "live-run.json"), `${JSON.stringify(run, null, 2)}\n`);
+  assert.equal(run.status, "accepted", run.error);
+  assert.equal(run.jobs.length, 2, "the real planner must honor the two explicitly independent tasks");
+  assert.equal(run.jobs.every((job) => job.status === "completed" && job.threadId), true);
+  assert.equal((await readFile(path.join(fixture, "alpha.txt"), "utf8")).trim(), "alpha");
+  assert.equal((await readFile(path.join(fixture, "beta.txt"), "utf8")).trim(), "beta");
+  const lines = (await readFile(path.join(fixture, "shared.txt"), "utf8")).trim().split(/\r?\n/).sort();
+  assert.deepEqual(lines, ["alpha", "beta"]);
+  // The resolver receives one complete participant packet; one resolver message is intentional.
+  assert.ok(run.mergeConflicts.some((conflict) => conflict.status === "resolved" && conflict.messages.length >= 1));
+  const starts = run.events.filter((event) => event.type === "worker_started");
+  const ends = run.events.filter((event) => event.type === "completed");
+  assert.ok(Math.max(...starts.map((event) => Date.parse(event.at))) < Math.min(...ends.map((event) => Date.parse(event.at))), "workers must overlap in time");
+  await page.waitForFunction(() => document.querySelector(".codexParallelStage[data-stage='completed']")?.classList.contains("is-active"), null, { timeout: 15000 });
+  assert.equal(await page.locator("#codexParallelRows tr").count(), 2);
+  assert.ok(!requests.some((request) => /\/(approve|accept|reject|audit|supervisor)(?:$|\/)/.test(request)));
+  await page.locator("#codexParallelDialog").screenshot({ path: path.join(artifacts, "live-completed.png") });
+  await writeFile(path.join(artifacts, "live-result.json"), `${JSON.stringify({ elapsedMs: Date.now() - startedAt, requests, sharedLines: lines, runId, model: "real Codex app-server, existing user configuration", fixture }, null, 2)}\n`);
+  console.log(`PASS live browser, real planner + two simultaneous workers + conflict conversation + automatic apply (${Date.now() - startedAt}ms)`);
 } finally {
-  await browser.close();
-  await new Promise((resolve) => api.server.close(resolve));
-  await rm(fixtureRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-  await rm(worktreeRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  if (run) await writeFile(path.join(artifacts, "live-run.json"), `${JSON.stringify(run, null, 2)}\n`);
+  await browser?.close();
+  await fetch(`${baseUrl}/api/shutdown`, { method: "POST" }).catch(() => {});
+  child.kill();
+  await writeFile(path.join(artifacts, "live-server.log"), log);
+  if (run?.status === "accepted") await rm(fixture, { recursive: true, force: true });
 }

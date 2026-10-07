@@ -32,6 +32,12 @@ powershell -File .\deploy-task-tree.ps1 -ProjectRoot <你的项目路径> -UseSh
 
 - Node.js 20.11+
 - Windows（当前启动器与安装脚本以 PowerShell 为主）
+- macOS：运行 `./install-macos.sh <项目目录>`；仓库内的独立 IDE 入口见 `../macos/IDE/`
+- Linux / 其它 POSIX：运行 `./install-linux.sh <项目目录>`，再使用生成的 `llm-task-tree/open-task-tree.sh`
+
+macOS 独立 IDE 会把 Node.js 22 LTS 放在自己的 `runtime/`，把任务图和运行状态隔离在 `macos/IDE/workspace/`，不会默认改动系统 Node 或全局 Codex 配置。
+
+模型配置使用一个共享根 `.env`：默认是安装目录上两级的 `.env`（也可用 `TASK_TREE_GLOBAL_ENV_FILE` 指定）。新建项目只需有任务树目录；项目内 `.env` 仅用于提供非空的项目级覆盖，不需要重复保存 API key。
 
 ## 文档
 

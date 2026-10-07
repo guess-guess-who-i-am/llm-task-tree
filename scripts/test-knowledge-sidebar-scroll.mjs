@@ -11,6 +11,14 @@ const browser = await chromium.launch({ headless: true, executablePath: browserE
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 720 } });
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  const overview = page.locator("#projectOverviewDialog");
+  if (await overview.evaluate((dialog) => dialog.open)) {
+    await page.locator("#projectOverviewClose").click();
+  }
+  const paneToggle = page.locator("#toggleLeftPaneBtn");
+  if ((await paneToggle.getAttribute("aria-expanded")) !== "true") {
+    await paneToggle.click();
+  }
   await page.waitForSelector(".knowledgeBody");
 
   const body = page.locator(".knowledgeBody");

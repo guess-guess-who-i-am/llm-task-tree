@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { chromium } = require("../prototype/swimlane-view/node_modules/playwright");
 const baseUrl = `http://127.0.0.1:${process.env.PORT || "5410"}`;
-const browserExecutable = [
+const browserExecutable = process.env.BROWSER_EXECUTABLE || [
   "C:/Program Files/Google/Chrome/Application/chrome.exe",
   "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe",

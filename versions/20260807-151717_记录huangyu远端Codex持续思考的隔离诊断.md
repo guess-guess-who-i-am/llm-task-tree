@@ -129,7 +129,7 @@
 - CurrentResult: 0.7.0 提供 17 个 task_tree 工具和 1 个内联 UI；写入继承备份、焦点保护与 flow 同步。
 
 # GraphState
-- ChainForceNext: 
+- ChainForceNext:
 - Current: N4
 - Next: N11
 - NextPlan: 重新打开任务图（Ctrl+F5）后验证：节点 × 在九宫格右上角；点 ⤓ 关系图/流程图 下载 SVG 并用 Inkscape/浏览器打开确认文字完整。

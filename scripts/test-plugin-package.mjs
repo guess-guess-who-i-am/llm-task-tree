@@ -13,7 +13,7 @@
  */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -23,6 +23,9 @@ const repoRoot = process.cwd();
 const arg = process.argv.slice(2).find((item) => !item.startsWith("-"));
 const pluginRoot = path.resolve(arg || path.join(repoRoot, "marketplace", "plugins", "task-tree"));
 const failures = [];
+const physical = (value) => {
+  try { return realpathSync.native(value); } catch { return path.resolve(value); }
+};
 
 /**
  * The name the host's capability scan looks for. `mcp.json` without the dot is the Cursor spelling;
@@ -219,7 +222,7 @@ if (entry) {
     const response = byId.get(4);
     assert.ok(!response?.result?.isError, `task_tree_focus failed: ${response?.result?.content?.[0]?.text?.slice(0, 300)}`);
     const focus = JSON.parse(response.result.content[0].text);
-    assert.equal(path.resolve(focus.projectRoot), path.resolve(tmpRoot), "focus must resolve the caller's project, not the package");
+    assert.equal(physical(focus.projectRoot), physical(tmpRoot), "focus must resolve the caller's project, not the package");
     assert.equal(focus.graphState.current, "ROOT");
   });
 }

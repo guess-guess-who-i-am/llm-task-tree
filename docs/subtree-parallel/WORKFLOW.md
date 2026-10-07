@@ -1,67 +1,63 @@
-# 多 Agent 子树并行 — 自动运行与手动兜底
+# 自动并行 Worker 工作流
 
-## 0. 推荐：两次审核的自动并行
+## 实际入口
 
-正常情况下不需要手动开多个 Codex 会话。打开任务图右上角 Codex 菜单，选择 **自动并行 Codex**：
+打开任务图，点击右上角“自动并行”。系统不再停在草案页，也不要求用户批准、审核或接受：
 
-1. 系统读取 ROOT、当前阶段和未决节点，让 planner 生成 2–4 个分支、依赖、独占写集和验收命令；此时只生成 `draft`，不创建 worktree，也不写项目文件。
-2. 人只审核这份草案，必要时改任务或写集，然后点 **批准并运行**。批准会冻结当前工作区快照。
-3. 系统在隔离 git worktree 中启动真实 Codex worker。互不依赖的任务并行运行，完成一个就进入 integration 并解锁后继任务；越界写入、保留路径、写集冲突和测试失败都会被程序拦截。
-4. coordinator 在 integration worktree 核验实际差异、修复兼容问题并测试。主工作区在此期间保持不变。
-5. 人只做第二次审核：查看根本目标相对结论、变更文件、测试和 diff，点 **接受并应用** 或 **丢弃结果**。接受后系统才应用补丁，并用受限 scope 会话精炼受影响节点；不会自动移动全局 GraphState。
+1. Planner 读取完整 task-tree.md、本轮目标、历史运行和同节点历史失败。
+2. Planner 一次返回任务 DAG、目标覆盖映射、完整任务说明、分支上下文和可选 writeSet 提示。
+3. 合法计划必须至少包含两个非空 Worker，且至少两个 Worker 没有前置依赖；否则自动把失败原因送回 Planner 重规划。通过后立即创建 Git 快照和独立 worktree。
+4. 所有依赖已经满足的 Worker 同时启动。应用层没有固定 Worker 数量上限；Planner 会最大化可用的独立 runnable frontier：能拆成 12 个就不合并成 6 个，能拆成 20 个就不合并成 8 个。六到八个只是此前验证过的样本规模，不是默认目标或上限。
+5. Worker 提交依次进入 integration worktree。同文件没有 Git 冲突就自动合并；每次真实冲突事件都将当时已完成且涉及文件的参与者完整分支包一次性交给 source resolver，在隔离区完成一次语义合并回合。
+6. 所有 Worker 完成后，结果自动合并进主工作区并清理临时目录。
 
-运行记录在项目 `.task-tree-runs/<runId>.json`，隔离目录在系统临时目录，接受/拒绝后会清理。规划慢时接口立即返回 `planning`，界面轮询，不会让浏览器请求一直挂住。
+界面只显示“规划 / 执行 / 完成”、当前完成数、每个 Worker 状态、失败原因和“进入对话”。没有测试命令、代码审核、diff、目标核验、接受、拒绝或确认开始按钮。
 
-> 下方手动兜底流程的子树详文仍只用任务图 UI ⊞ 展开；自动流程由结束审核和受限状态同步会话完成状态落盘。
+## 计划怎样生成
 
-## 1. 手动兜底：把主树收成「索引」
+Planner prompt 先要求列出全部显式目标和完成条件，再为每项填写负责的 taskId。coverage 是模型对覆盖关系的说明；系统不增加单独的目标审核门禁。
 
-1. 打开 `打开任务图.cmd`
-2. 对每个大分支根节点（如 N6、N7、N3…）点 **⊟ 折叠**
-3. 主树只剩：ROOT + N2（若在做的壳）+ 各 stub（Problem 一行 + SubtreeFile）
-4. 运行 `node scripts/subtree-size-experiment.mjs` 看 `projectedTokensEst` 是否 ~3k 级
+任务粒度按关键路径判断：
 
-**未折叠前**（~9k token）也可并行，但 Worker 读整树更费 context；**折叠后读整树是推荐模式**。
+- 能独立推进、需要不同领域上下文或能缩短关键路径时拆分。
+- 协调成本高于并发收益时合并。
+- 一个小文件中的单一文字修改只用一个 Worker。
+- API、界面和文档彼此独立时分别形成 Worker；如果再有数据模型、迁移、配置、适配器和脚本等独立交付物，也全部拆成各自的可运行分支。只有真实共享前置、强耦合、重复劳动或协调成本明显超过收益时才合并；不能为了减少数量合并独立领域，也不能为了增加数量制造空任务。
+- 后端和前端即使都要修改同一 schema 文件，也可以并行，最后按实际 Git 冲突处理。
 
-## 2. 开 Agent（同一项目根目录）
+这里能确定性保证的是自动计划至少有两个可立即并行的 Worker、任务 ID 唯一、依赖引用有效和依赖图无环。目标是否真正全覆盖、任务数量和粒度是否“全局最优”无法仅靠 prompt 数学证明；few-shot、覆盖映射和关键路径规则用于提高质量，Planner 输出不可执行或只有串行前沿时会带上完整失败输出继续生成。
 
-| 会话 | 贴什么 | 作用 |
-|------|--------|------|
-| **协调者 ×1** | `prompts/coordinator.md` | 派活、看 stub 进度、冲突检查 |
-| **Worker ×N** | `prompts/worker-v2.md`（填 SUBTREE） | 各守一个 `subtrees/Nx-subtree.md` |
+## 上下文与历史复用
 
-## 3. Worker 首条消息示例（N6 包）
+系统按节点、文件提示和历史运行索引可复用的 Codex 对话。Worker prompt 包含完整任务树、ROOT 与阶段目标、任务说明、历史分支完整结果、以前运行的完整失败原因，以及当前分支列表和对话入口。
 
-```
-你是 worker-N6，负责 N6 → subtrees/N6-subtree.md。
+同一个历史对话不会被两个 Worker 同时续写；第二个 Worker 从该历史对话 fork 出独立会话。界面中的“已复用历史对话”和“进入对话”可用于找到并继续以前的上下文。
 
-按 docs/subtree-parallel/prompts/worker-v2.md：
-- 可以读 task-tree.md 全文（看 stub 索引）
-- 禁止读其它 subtrees/*.md
-- 禁止写 task-tree.md 详文；合并我只用 UI ⊞
+## 并发、写集和任务树
 
-执行 subtrees/N6-subtree.md 里 GraphState.Next 的 NextPlan。
-```
+writeSet 只是 Planner 的上下文提示，不是锁，也不做路径合法性或重叠检查。Worker 可以修改 task-tree.md、task-trees.json、Git 跟踪的 flow JSON 和项目元数据，也可以在明确任务要求时修改项目外路径。
 
-## 4. 并行跑
+Planner 会把 `.task-tree-runs/` 运行元数据目录的实际路径传给每个 Worker；普通 Worker 可以按任务需要直接修改运行记录。该目录属于共享直接状态，不会随 Git worktree 自动合并，多个 Worker 同时写同一元数据时由任务本身负责协调。
 
-- 各 Worker **同时**跑即可（产出文件已分区）
-- 每个 Worker 子树内可再开 `/loop` + `chain-step`（只链本子树 GraphState）
+项目内文件通过独立 worktree 和 Git 合并。项目外路径是直接副作用，不受 Git 隔离，也不能自动回滚或三方合并。
 
-## 5. 收工与合并
+调度器仍检查三条最小结构条件，因为没有它们 DAG 无法执行：taskId 唯一；依赖必须指向已知任务且不能自依赖；依赖图无环。
 
-1. 看主树 stub 的 `Completion` / `CurrentResult`（Worker 可选 sync-stub，或你手动看子树）
-2. 协调者写 merge 清单（`coordinator-run-*.md`）
-3. **你**在任务图对每个完成的包点 **⊞ 展开** → 整包写回 `task-tree.md`
-4. 不要多个 Agent 同时 ⊞ 同一节点
+## 冲突处理
 
-## 6. 控制变量自检
+每个 Worker 的结果先变成以其起始提交为父提交的完整变更，再串行 cherry-pick 到 integration：
 
-| 检查 | 期望 |
-|------|------|
-| Worker 读了整树但没去改 N7 详文 | ✅ |
-| Worker 没读 ST-P2-subtree | ✅ |
-| 主树详文变更只来自 ⊞ 展开 | ✅ |
-| 代码冲突 | 用 git / 不同 worktree 若改同一文件 |
+1. Git 可自动三方合并时直接继续。
+2. Git 报告未合并文件时，记录实际冲突文件。
+3. 根据 changedFiles 找到涉及这些文件的其他 Worker。
+4. 将每一方的任务说明、branchContext、输出、changedFiles、writeSet、依赖和对话链接组成完整 participant packet。
+5. fork 当前冲突 Worker 的对话到 integration worktree，用一个 resolver 回合读取 packet、检查冲突标记、保留兼容意图并暂存文件。
+6. 文件全部解决并暂存后，宿主继续 cherry-pick；运行元数据记录 `consultationMode=single-resolver` 和解析耗时。
 
-实验记录：`EXPERIMENT.md`
+任务树和普通项目文件走同一套机制，没有特殊禁止规则。
+
+## 不做的事情
+
+产品运行流程不会执行 Planner 或 Worker 给出的测试命令，也没有单独的集成测试、代码审核、目标核验和人工接受步骤。仓库开发测试仍然存在，只用于验证调度器本身，不属于用户每次自动并行运行的步骤。
+
+运行记录保存在 .task-tree-runs/<runId>.json。分支 worktree 位于系统临时目录，完成后清理；可复用的 Codex 对话仍保留在 Codex 历史中。

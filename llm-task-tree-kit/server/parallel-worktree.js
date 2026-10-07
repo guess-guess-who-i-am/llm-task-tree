@@ -1,34 +1,21 @@
-import { createHash } from "node:crypto";
-import { execFile, spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
 import { mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
-const PROTECTED_FILES = new Set([
-  "task-tree.md",
-  "task-trees.json",
-  "scripts/project.json",
-  "scripts/run.json"
-]);
-const PROTECTED_DIRECTORIES = ["versions/", ".task-tree-runs/", ".task-tree-scopes/"];
-
-function isProtectedPath(file) {
-  const normalized = String(file || "").replace(/\\/g, "/").toLowerCase();
-  return PROTECTED_FILES.has(normalized)
-    || PROTECTED_DIRECTORIES.some((directory) => normalized === directory.slice(0, -1) || normalized.startsWith(directory));
-}
-
 const execFileAsync = promisify(execFile);
 const MAX_GIT_OUTPUT = 64 * 1024 * 1024;
-const MAX_TEST_OUTPUT = 16000;
-const TEST_TIMEOUT_MS = 10 * 60 * 1000;
 const RUNTIME_PATHS = [".task-tree-runs/", ".task-tree-scopes/", ".task-tree-thread", ".task-tree-threads.json"];
 
 const slash = (value) => String(value || "").replace(/\\/g, "/").replace(/^\.\//, "");
 
-async function git(cwd, args, options = {}) {
+async function gitCommand(cwd, args, options = {}) {
+  const observer = options.onTiming || null;
+  const startedAt = observer ? Date.now() : 0;
+  let failed = false;
   try {
     const result = await execFileAsync("git", args, {
       cwd,
@@ -39,10 +26,19 @@ async function git(cwd, args, options = {}) {
     });
     return result.stdout;
   } catch (error) {
+    failed = true;
     const detail = String(error.stderr || error.stdout || error.message || "git command failed").trim();
-    const wrapped = new Error(`git ${args[0]} 失败：${detail.slice(-1200)}`);
+    const wrapped = new Error(`git ${args[0]} 失败：${detail}`);
     wrapped.cause = error;
     throw wrapped;
+  } finally {
+    if (observer) {
+      try {
+        observer({ command: String(args[0] || "unknown"), args: args.map((item) => String(item)), durationMs: Date.now() - startedAt, failed });
+      } catch {
+        // Diagnostic observers must never change the outcome of a Git operation.
+      }
+    }
   }
 }
 
@@ -54,87 +50,13 @@ function safeSegment(value) {
   return String(value || "run").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "run";
 }
 
-function scopeRegex(scope) {
-  const normalized = slash(scope);
-  if (normalized.endsWith("/")) return new RegExp(`^${normalized.replace(/[.+^${}()|[\]\\]/g, "\\$&")}`);
-  let source = "";
-  for (let index = 0; index < normalized.length; index += 1) {
-    const char = normalized[index];
-    if (char === "*" && normalized[index + 1] === "*") {
-      source += ".*";
-      index += 1;
-    } else if (char === "*") source += "[^/]*";
-    else if (char === "?") source += "[^/]";
-    else source += char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-  }
-  return new RegExp(`^${source}$`, "i");
-}
-
-export function pathInWriteSet(file, writeSet) {
-  const normalized = slash(file);
-  return (writeSet || []).some((scope) => scopeRegex(scope).test(normalized));
-}
-
-export function validateTestCommand(command) {
-  const value = String(command || "").trim();
-  if (!value) throw new Error("测试命令不能为空");
-  if (/[\r\n]/.test(value)) throw new Error(`测试命令不能换行：${value}`);
-  if (/(^|\s)(rm|rmdir|del|erase|format|shutdown|reboot|git\s+(reset|clean|checkout))\b/i.test(value)) {
-    throw new Error(`测试命令包含破坏性操作：${value}`);
-  }
-  if (!/^(node|npm(?:\.cmd)?|pnpm|yarn|bun|python(?:\.exe)?(?:\s+-m)?|pytest|pwsh|powershell)(\s|$)/i.test(value)) {
-    throw new Error(`不允许自动运行此测试命令：${value}`);
-  }
-  return value;
-}
-
-function runCommand(cwd, command) {
-  const [shell, args] = process.platform === "win32"
-    ? [process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", command]]
-    : ["/bin/sh", ["-lc", command]];
-  return new Promise((resolve) => {
-    const child = spawn(shell, args, { cwd, windowsHide: true, env: process.env });
-    let output = "";
-    const append = (chunk) => { output = `${output}${chunk.toString("utf8")}`.slice(-MAX_TEST_OUTPUT); };
-    child.stdout.on("data", append);
-    child.stderr.on("data", append);
-    const timer = setTimeout(() => child.kill(), TEST_TIMEOUT_MS);
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      resolve({ command, ok: false, exitCode: null, output: error.message });
-    });
-    child.on("exit", (code, signal) => {
-      clearTimeout(timer);
-      resolve({ command, ok: code === 0, exitCode: code, signal: signal || "", output: output.trim() });
-    });
-  });
-}
-
-async function snapshotPaths(projectRoot) {
-  const tracked = splitZero(await git(projectRoot, ["diff", "--name-only", "-z", "HEAD", "--"]));
-  const untracked = splitZero(await git(projectRoot, ["ls-files", "--others", "--exclude-standard", "-z"]));
+async function snapshotPaths(projectRoot, onTiming = null) {
+  const tracked = splitZero(await gitCommand(projectRoot, ["diff", "--name-only", "-z", "HEAD", "--"], { onTiming }));
+  const untracked = splitZero(await gitCommand(projectRoot, ["ls-files", "--others", "--exclude-standard", "-z"], { onTiming }));
   return [...new Set([
     ...tracked,
     ...untracked.filter((relative) => !RUNTIME_PATHS.some((reserved) => relative === reserved || relative.startsWith(reserved)))
   ])];
-}
-
-async function blobAtCommit(cwd, commit, relative) {
-  try {
-    return String(await git(cwd, ["rev-parse", `${commit}:${slash(relative)}`])).trim();
-  } catch {
-    return "";
-  }
-}
-
-async function workingBlob(cwd, relative) {
-  const file = path.join(cwd, relative);
-  if (!existsSync(file)) return "";
-  try {
-    return String(await git(cwd, ["hash-object", "--", relative])).trim();
-  } catch {
-    return "";
-  }
 }
 
 export function createGitWorkspaceManager({ projectRoot, tempRoot = os.tmpdir() } = {}) {
@@ -144,6 +66,8 @@ export function createGitWorkspaceManager({ projectRoot, tempRoot = os.tmpdir() 
   const contextDir = path.join(baseDir, "contexts");
   const contextLockDir = path.join(baseDir, "context-locks");
   const activeContextLocks = new Map();
+  let gitTimingObserver = null;
+  const git = (cwd, args, options = {}) => gitCommand(cwd, args, { ...options, onTiming: gitTimingObserver });
 
   const runDir = (runId) => path.join(baseDir, safeSegment(runId));
   const contextPath = (contextKey) => path.join(contextDir, safeSegment(contextKey));
@@ -213,13 +137,17 @@ export function createGitWorkspaceManager({ projectRoot, tempRoot = os.tmpdir() 
   }
 
   return {
+    setTimingObserver(observer) {
+      gitTimingObserver = typeof observer === "function" ? observer : null;
+    },
+
     async prepare(runId) {
       const directory = runDir(runId);
       const integrationPath = path.join(directory, "integration");
       const indexPath = path.join(directory, "snapshot.index");
       await mkdir(directory, { recursive: true });
       const baseCommit = String(await git(projectRoot, ["rev-parse", "HEAD"])).trim();
-      const paths = await snapshotPaths(projectRoot);
+      const paths = await snapshotPaths(projectRoot, gitTimingObserver);
       const identity = {
         GIT_AUTHOR_NAME: "Task Tree",
         GIT_AUTHOR_EMAIL: "task-tree@local",
@@ -269,46 +197,65 @@ export function createGitWorkspaceManager({ projectRoot, tempRoot = os.tmpdir() 
       const tracked = splitZero(await git(workerPath, ["diff", "--name-only", "-z", baseCommit, "--"]));
       const untracked = splitZero(await git(workerPath, ["ls-files", "--others", "--exclude-standard", "-z"]));
       const changedFiles = [...new Set([...tracked, ...untracked])].sort();
-      const violations = changedFiles.filter((file) => isProtectedPath(file) || !pathInWriteSet(file, writeSet));
-      return { changedFiles, violations };
-    },
-
-    async runTests(cwd, commands = []) {
-      const results = [];
-      for (const raw of commands) {
-        let command;
-        try {
-          command = validateTestCommand(raw);
-        } catch (error) {
-          results.push({ command: String(raw || ""), ok: false, exitCode: null, output: error.message });
-          continue;
-        }
-        results.push(await runCommand(cwd, command));
-      }
-      return results;
+      return { changedFiles, violations: [] };
     },
 
     async commit(cwd, message, baseCommit = "") {
       await git(cwd, ["add", "-A"]);
-      if (!String(await git(cwd, ["status", "--porcelain"])).trim()) return baseCommit || this.head(cwd);
+      const base = baseCommit || await this.head(cwd);
+      const tree = String(await git(cwd, ["write-tree"])).trim();
+      if (tree === String(await git(cwd, ["rev-parse", `${base}^{tree}`])).trim()) return base;
       const identity = {
         GIT_AUTHOR_NAME: "Task Tree Worker",
         GIT_AUTHOR_EMAIL: "task-tree@local",
         GIT_COMMITTER_NAME: "Task Tree Worker",
         GIT_COMMITTER_EMAIL: "task-tree@local"
       };
-      await git(cwd, ["commit", "-m", message], { env: identity });
-      return this.head(cwd);
+      // Include all worker changes, including commits it made itself, as one delta.
+      return String(await git(cwd, ["commit-tree", tree, "-p", base, "-m", message], { env: identity })).trim();
     },
 
     async integrate(integrationPath, commit, sourceCommit = "") {
-      if (!commit || commit === sourceCommit) return;
+      if (!commit || commit === sourceCommit) return { conflicts: [] };
       try {
         await git(integrationPath, ["cherry-pick", commit]);
+        return { conflicts: [] };
       } catch (error) {
+        const conflicts = splitZero(await git(integrationPath, ["diff", "--name-only", "--diff-filter=U", "-z"]).catch(() => ""));
+        if (conflicts.length) {
+          error.code = "CHERRY_PICK_CONFLICT";
+          error.files = conflicts;
+          throw error;
+        }
+        if (existsSync(path.join(String(await git(integrationPath, ["rev-parse", "--absolute-git-dir"])).trim(), "CHERRY_PICK_HEAD"))
+          && !String(await git(integrationPath, ["status", "--porcelain"])).trim()) {
+          await git(integrationPath, ["cherry-pick", "--skip"]);
+          return { conflicts: [] };
+        }
         await git(integrationPath, ["cherry-pick", "--abort"]).catch(() => {});
         throw error;
       }
+    },
+
+    async continueIntegration(integrationPath) {
+      const conflicts = splitZero(await git(integrationPath, ["diff", "--name-only", "--diff-filter=U", "-z"]));
+      if (conflicts.length) throw new Error(`仍有未解决的合并冲突：${conflicts.join(", ")}`);
+      await git(integrationPath, ["add", "-A"]);
+      if (!String(await git(integrationPath, ["diff", "--cached", "--name-only"])).trim()) {
+        await git(integrationPath, ["cherry-pick", "--skip"]);
+        return;
+      }
+      const identity = {
+        GIT_AUTHOR_NAME: "Task Tree Conflict Resolver",
+        GIT_AUTHOR_EMAIL: "task-tree@local",
+        GIT_COMMITTER_NAME: "Task Tree Conflict Resolver",
+        GIT_COMMITTER_EMAIL: "task-tree@local"
+      };
+      await git(integrationPath, ["cherry-pick", "--continue"], { env: identity });
+    },
+
+    async abortIntegration(integrationPath) {
+      await git(integrationPath, ["cherry-pick", "--abort"]).catch(() => {});
     },
 
     async removeWorker(workerPath, options = {}) {
@@ -327,29 +274,35 @@ export function createGitWorkspaceManager({ projectRoot, tempRoot = os.tmpdir() 
       const changedFiles = splitZero(await git(integrationPath, ["diff", "--name-only", "-z", snapshotCommit, "HEAD", "--"]));
       const stat = String(await git(integrationPath, ["diff", "--stat", snapshotCommit, "HEAD", "--"])).trim();
       const patch = String(await git(integrationPath, ["diff", "--no-ext-diff", "--unified=2", snapshotCommit, "HEAD", "--"]));
-      return { changedFiles, stat, patchPreview: patch.slice(0, 32000), patchTruncated: patch.length > 32000 };
+      return { changedFiles, stat, patchPreview: patch, patchTruncated: false };
     },
 
-    async accept({ integrationPath, snapshotCommit, changedFiles = [] } = {}) {
-      const conflicts = (await Promise.all(changedFiles.map(async (file) => {
-        const [before, current] = await Promise.all([
-          blobAtCommit(integrationPath, snapshotCommit, file),
-          workingBlob(projectRoot, file)
-        ]);
-        return before === current ? "" : file;
-      }))).filter(Boolean);
-      if (conflicts.length) {
-        const error = new Error(`并行运行期间主工作区又修改了这些文件，不能静默覆盖：${conflicts.join(", ")}`);
-        error.code = "MAIN_WORKSPACE_CHANGED";
-        error.files = conflicts;
-        throw error;
-      }
+    async accept({ integrationPath, snapshotCommit, changedFiles = [], resolveConflict } = {}) {
       if (!changedFiles.length) return { appliedFiles: [] };
-      const patchFile = path.join(path.dirname(integrationPath), "accepted.patch");
-      const patch = await git(integrationPath, ["diff", "--binary", snapshotCommit, "HEAD", "--"], { encoding: "buffer" });
-      await writeFile(patchFile, patch);
-      await git(projectRoot, ["apply", "--binary", "--whitespace=nowarn", patchFile]);
-      return { appliedFiles: [...changedFiles] };
+      const applyId = `apply-${randomUUID()}`;
+      const current = await this.prepare(applyId);
+      try {
+        const tree = String(await git(integrationPath, ["rev-parse", "HEAD^{tree}"])).trim();
+        const commit = String(await git(integrationPath, ["commit-tree", tree, "-p", snapshotCommit, "-m", "parallel result"], {
+          env: { GIT_AUTHOR_NAME: "Task Tree", GIT_AUTHOR_EMAIL: "task-tree@local", GIT_COMMITTER_NAME: "Task Tree", GIT_COMMITTER_EMAIL: "task-tree@local" }
+        })).trim();
+        try {
+          await this.integrate(current.integrationPath, commit, snapshotCommit);
+        } catch (error) {
+          if (error.code !== "CHERRY_PICK_CONFLICT" || !resolveConflict) throw error;
+          await resolveConflict(current.integrationPath, error.files);
+        }
+        const patchFile = path.join(current.runDir, "apply.patch");
+        const patch = await git(current.integrationPath, ["diff", "--binary", current.snapshotCommit, "HEAD", "--"], { encoding: "buffer" });
+        if (!patch.length) return { appliedFiles: [] };
+        await writeFile(patchFile, patch);
+        // Git checks the live files before writing. The main index is untouched;
+        // even a new edit arriving during conflict resolution cannot be overwritten.
+        await git(projectRoot, ["apply", "--binary", "--whitespace=nowarn", patchFile]);
+        return { appliedFiles: [...changedFiles] };
+      } finally {
+        await this.cleanup({ ...current, runId: applyId });
+      }
     },
 
     async cleanup({ integrationPath, runId } = {}) {

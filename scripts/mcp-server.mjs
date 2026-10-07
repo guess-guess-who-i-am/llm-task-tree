@@ -14,7 +14,7 @@
  * Zero dependencies so every installed project can run it without npm install.
  */
 import "../public/tree-layout.js";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
@@ -36,6 +36,11 @@ const NEXT_PLAN_WARNING = "GraphState.NextPlan 是用户备忘，可能过期，
 const HOST = "127.0.0.1";
 const START_TIMEOUT_MS = 40000;
 const DEFAULT_EXECUTION_SCOPE = String(process.env.TASK_TREE_EXECUTION_SCOPE || "").trim();
+
+function canonicalKey(value) {
+  const resolved = path.resolve(value || "");
+  try { return realpathSync.native(resolved).replace(/\\/g, "/").toLowerCase(); } catch { return resolved.replace(/\\/g, "/").toLowerCase(); }
+}
 
 function resolveProjectRoot() {
   const index = process.argv.indexOf("--project-root");
@@ -129,7 +134,7 @@ async function probePort(port, { timeoutMs = 1200 } = {}) {
     });
     if (!response.ok) return null;
     const project = await response.json();
-    if (path.resolve(project.root || "") !== path.resolve(projectRoot)) return null;
+    if (canonicalKey(project.root || "") !== canonicalKey(projectRoot)) return null;
     return { port, project };
   } catch {
     return null;
@@ -168,7 +173,7 @@ function freePort(preferred = 0) {
  */
 function stablePort() {
   let hash = 0;
-  for (const char of path.resolve(projectRoot).toLowerCase()) {
+  for (const char of canonicalKey(projectRoot)) {
     hash = (hash * 31 + char.charCodeAt(0)) % 100000;
   }
   return 5178 + (hash % 800);

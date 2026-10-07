@@ -8,8 +8,8 @@ const KB_HISTORY_MAX_TURNS = 12;
 const IO_FILE_PREVIEW_CHARS = 3600;
 const KB_HISTORY_STORAGE_KEY = "taskTree.knowledgeHistory";
 const LEFT_PANE_WIDTH_STORAGE_KEY = "taskTree.leftPaneWidth";
-const LEFT_PANE_COLLAPSED_STORAGE_KEY = "taskTree.leftPaneCollapsed.v2";
-const RIGHT_PANE_COLLAPSED_STORAGE_KEY = "taskTree.rightPaneCollapsed.v2";
+const LEFT_PANE_COLLAPSED_STORAGE_KEY = "taskTree.leftPaneCollapsed.v3";
+const RIGHT_PANE_COLLAPSED_STORAGE_KEY = "taskTree.rightPaneCollapsed.v3";
 const CHAIN_DOCK_COLLAPSED_STORAGE_KEY = "taskTree.chainDockCollapsed.v1";
 const LEFT_PANE_MIN_WIDTH = 260;
 const LEFT_PANE_MAX_WIDTH = 960;
@@ -223,9 +223,8 @@ let knowledgeConfigPromise = null;
 let serverFeaturesPromise = null;
 let focusLensId = "";
 let focusLensOpen = false;
-let codexParallelContextOptions = [];
-const codexParallelPendingAppendJobs = new Map();
-let codexParallelBranchPlanning = false;
+const directRunPollers = new Map();
+const directRunStates = new Map();
 const card = {
   width: 520,
   height: 720,
@@ -264,6 +263,9 @@ const els = {
   focusLensClose: document.querySelector("#focusLensClose"),
   focusLensTrail: document.querySelector("#focusLensTrail"),
   focusLensBody: document.querySelector("#focusLensBody"),
+  directRunPanel: document.querySelector("#directRunPanel"),
+  directRunList: document.querySelector("#directRunList"),
+  directRunPanelClose: document.querySelector("#directRunPanelClose"),
   nodeCount: document.querySelector("#nodeCount"),
   linkState: document.querySelector("#linkState"),
   saveState: document.querySelector("#saveState"),
@@ -297,45 +299,16 @@ const els = {
   codexParallelObjective: document.querySelector("#codexParallelObjective"),
   codexParallelRows: document.querySelector("#codexParallelRows"),
   codexParallelState: document.querySelector("#codexParallelState"),
-  codexParallelSummary: document.querySelector("#codexParallelSummary"),
-  codexParallelSummaryText: document.querySelector("#codexParallelSummaryText"),
   codexParallelGoalReview: document.querySelector("#codexParallelGoalReview"),
   codexParallelGoalLabel: document.querySelector("#codexParallelGoalLabel"),
   codexParallelGoalText: document.querySelector("#codexParallelGoalText"),
   codexParallelGoalStatus: document.querySelector("#codexParallelGoalStatus"),
   codexParallelGoalResult: document.querySelector("#codexParallelGoalResult"),
-  codexParallelContexts: document.querySelector("#codexParallelContexts"),
-  codexParallelContextSummary: document.querySelector("#codexParallelContextSummary"),
-  codexParallelContextAssignments: document.querySelector("#codexParallelContextAssignments"),
-  codexParallelContextPool: document.querySelector("#codexParallelContextPool"),
-  codexParallelSupervisor: document.querySelector("#codexParallelSupervisor"),
-  codexParallelSupervisorDot: document.querySelector("#codexParallelSupervisorDot"),
-  codexParallelSupervisorStatus: document.querySelector("#codexParallelSupervisorStatus"),
-  codexParallelSupervisorRounds: document.querySelector("#codexParallelSupervisorRounds"),
-  codexParallelSupervisorDecision: document.querySelector("#codexParallelSupervisorDecision"),
-  codexParallelExecutionTree: document.querySelector("#codexParallelExecutionTree"),
-  codexParallelSupervisorInput: document.querySelector("#codexParallelSupervisorInput"),
-  codexParallelSupervisorSend: document.querySelector("#codexParallelSupervisorSend"),
-  codexParallelSupervisorToggle: document.querySelector("#codexParallelSupervisorToggle"),
-  codexParallelSupervisorOpen: document.querySelector("#codexParallelSupervisorOpen"),
   codexParallelPlanTools: document.querySelector("#codexParallelPlanTools"),
   codexParallelAppendNode: document.querySelector("#codexParallelAppendNode"),
   codexParallelAddBranch: document.querySelector("#codexParallelAddBranch"),
-  codexParallelAppendConfirm: document.querySelector("#codexParallelAppendConfirm"),
   codexParallelTableWrap: document.querySelector("#codexParallelTableWrap"),
-  codexParallelReview: document.querySelector("#codexParallelReview"),
-  codexParallelFiles: document.querySelector("#codexParallelFiles"),
-  codexParallelTests: document.querySelector("#codexParallelTests"),
-  codexParallelPatch: document.querySelector("#codexParallelPatch"),
-  codexParallelReviewWarning: document.querySelector("#codexParallelReviewWarning"),
-  codexParallelMore: document.querySelector("#codexParallelMore"),
-  codexParallelAudit: document.querySelector("#codexParallelAudit"),
   codexParallelRegenerate: document.querySelector("#codexParallelRegenerate"),
-  codexParallelOpen: document.querySelector("#codexParallelOpen"),
-  codexParallelRetry: document.querySelector("#codexParallelRetry"),
-  codexParallelReject: document.querySelector("#codexParallelReject"),
-  codexParallelAccept: document.querySelector("#codexParallelAccept"),
-  codexParallelStart: document.querySelector("#codexParallelStart"),
   shutdownBtn: document.querySelector("#shutdownBtn"),
   knowledgeState: document.querySelector("#knowledgeState"),
   knowledgePaneSummary: document.querySelector("#knowledgePaneSummary"),
@@ -2262,6 +2235,11 @@ function chainAddButton(node) {
   return `<button type="button" data-action="add-to-chain" class="chainAddBtn${inChain ? " active" : ""}" title="加入底部执行链">⊕</button>`;
 }
 
+function nodeRunButton(node) {
+  const hasIdea = Boolean(String(node.nextIdea || "").trim());
+  return `<button type="button" data-action="run-direct" class="nodeRunBtn${hasIdea ? "" : " is-disabled"}" title="${hasIdea ? "直接执行这个节点；多个节点可同时执行" : "先填写下一步思路（NextIdea）再执行"}" aria-label="直接执行 ${attr(node.title || node.id)}">▶</button>`;
+}
+
 function coreNodeSummary(node, { compact = true } = {}) {
   const fields = [
     { label: "问题", value: node.problem, maxChars: compact ? 150 : null },
@@ -2308,6 +2286,7 @@ function renderNodeCard(node) {
           ${foldBtn}
           <button type="button" data-action="edit-subtree" class="subtreeEditBtn" title="在子树工作区编辑（不展开）">✎</button>
           ${readDoneButton(node)}
+          ${nodeRunButton(node)}
           <button type="button" data-action="toggle-complete" class="completeBtn" title="完成 / 取消完成">✓</button>
           <button type="button" data-action="set-current" title="设为当前推进节点">●</button>
           <button type="button" data-action="set-next" title="设为下一步推进节点">◆</button>
@@ -2342,6 +2321,7 @@ function renderNodeCard(node) {
             ${foldBtn}
             <button type="button" data-action="toggle-neighbor-guides" class="neighborGuideBtn${neighborGuideVisibleIds.has(node.id) ? " active" : ""}" title="显示/隐藏邻居跳转方向">↗</button>
             ${readDoneButton(node)}
+            ${nodeRunButton(node)}
             <button type="button" data-action="toggle-complete" class="completeBtn" title="完成 / 取消完成">✓</button>
             <button type="button" data-action="set-current" title="设为当前推进节点">●</button>
             <button type="button" data-action="set-next" title="设为下一步推进节点">◆</button>
@@ -2369,6 +2349,7 @@ function renderNodeCard(node) {
           ${foldBtn}
           <button type="button" data-action="toggle-neighbor-guides" class="neighborGuideBtn${neighborGuideVisibleIds.has(node.id) ? " active" : ""}" title="显示/隐藏邻居跳转方向">↗</button>
           ${readDoneButton(node)}
+          ${nodeRunButton(node)}
           <button type="button" data-action="toggle-complete" class="completeBtn" title="完成 / 取消完成">✓</button>
           <button type="button" data-action="set-current" title="设为当前推进节点">●</button>
           <button type="button" data-action="set-next" title="设为下一步推进节点">◆</button>
@@ -2400,6 +2381,7 @@ function renderNodeCard(node) {
         ${foldBtn}
         <button type="button" data-action="toggle-neighbor-guides" class="neighborGuideBtn${neighborGuideVisibleIds.has(node.id) ? " active" : ""}" title="显示/隐藏邻居跳转方向">↗</button>
         ${readDoneButton(node)}
+        ${nodeRunButton(node)}
         <button type="button" data-action="toggle-complete" class="completeBtn" title="完成 / 取消完成">✓</button>
         <button type="button" data-action="set-current" title="设为当前推进节点">●</button>
         <button type="button" data-action="set-next" title="设为下一步推进节点">◆</button>
@@ -2476,6 +2458,25 @@ async function runFocusLensNode(nodeId) {
   if (nextFocusId !== nodeId) setNextNode(nodeId);
   if (dirty) await saveTree();
   await runCodex({ preset: "next" });
+}
+
+async function runDirectNode(nodeId) {
+  const node = nodes.find((item) => item.id === nodeId);
+  const nextIdea = String(node?.nextIdea || "").trim();
+  if (!node || !nextIdea) {
+    setSaveState("先写清楚让 Agent 继续做什么");
+    return;
+  }
+  const prompt = [
+    "【任务树节点直接执行】",
+    `节点：${node.title || node.id}（${node.id}）`,
+    `问题：${node.problem || ""}`,
+    `当前思路：${node.approach || ""}`,
+    `下一步：${nextIdea}`,
+    "请直接完成这个节点的下一步工作。该请求使用独立会话；不要等待或修改其它节点的执行状态。完成后简要说明改动和结果。"
+  ].filter(Boolean).join("\n");
+  const payload = await runCodex({ prompt, fresh: true, open: false, progress: true, nodeId });
+  if (payload?.id || payload?.runId) beginDirectRunProgress(payload);
 }
 
 function handleFocusLensAction(action, nodeId) {
@@ -3274,6 +3275,11 @@ function wireNodeCard(nodeCard, nodeId) {
     markNodeReadDone(node, next);
     markDirty(`${next ? "将标记已经读完" : "将取消已经读完"}${nodeTitle(nodeId)}`);
     renderTree();
+  });
+
+  nodeCard.querySelector("[data-action='run-direct']")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    runDirectNode(nodeId).catch((error) => setSaveState(`Codex 没能启动: ${error.message}`));
   });
 
   nodeCard.querySelector("[data-action='toggle-complete']").addEventListener("click", (event) => {
@@ -6181,8 +6187,8 @@ function syncPaneSummaryBar() {
 function initPaneCollapseState() {
   try {
     const stored = (key) => localStorage.getItem(key);
-    leftPaneCollapsed = stored(LEFT_PANE_COLLAPSED_STORAGE_KEY) !== "0";
-    rightPaneCollapsed = stored(RIGHT_PANE_COLLAPSED_STORAGE_KEY) !== "0";
+    leftPaneCollapsed = stored(LEFT_PANE_COLLAPSED_STORAGE_KEY) === "1";
+    rightPaneCollapsed = stored(RIGHT_PANE_COLLAPSED_STORAGE_KEY) === "1";
     leftPaneWidth = readStoredLeftPaneWidth();
   } catch {
     leftPaneCollapsed = true;
@@ -6314,6 +6320,9 @@ els.filePreviewClose?.addEventListener("click", () => els.filePreviewDialog?.clo
 els.filePreviewDialog?.addEventListener("click", (event) => {
   if (event.target === els.filePreviewDialog) els.filePreviewDialog.close();
 });
+els.directRunPanelClose?.addEventListener("click", () => {
+  els.directRunPanel.hidden = true;
+});
 let codexThreadRefreshTimer = null;
 
 function closeCodexThreadMenu() {
@@ -6341,14 +6350,63 @@ async function runCodex(body = {}) {
     });
     const payload = await res.json();
     if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
-    setSaveState(payload.resumed ? "已发到原来那条会话，切过去接着做" : "已新开一条会话，切过去就能看到");
-    return true;
+    setSaveState(payload.status === "running" ? "节点已开始执行，可在输出面板查看中间过程" : (payload.resumed ? "已发到原来那条会话，切过去接着做" : "已新开一条会话，切过去就能看到"));
+    return payload;
   } catch (error) {
     setSaveState(`Codex 没能启动: ${error.message}`);
     return false;
   } finally {
     for (const button of buttons) button.disabled = false;
   }
+}
+
+function renderDirectRunPanel() {
+  if (!els.directRunPanel || !els.directRunList) return;
+  const runs = [...directRunStates.values()].slice(-8).reverse();
+  els.directRunPanel.hidden = runs.length === 0;
+  els.directRunList.innerHTML = runs.map((run) => {
+    const node = nodes.find((item) => item.id === run.nodeId);
+    const title = node?.title || run.nodeId || "节点";
+    const status = run.status === "running" ? "执行中" : run.status === "completed" ? "已完成" : run.status === "failed" ? "失败" : "启动中";
+    const events = (run.events || []).slice(-80).map((event) => `<div class="directRunEvent"><span class="directRunEventType">${escapeHtml(event.type || "事件")}</span><span>${escapeHtml(event.text || "")}</span></div>`).join("");
+    return `<section class="directRunCard ${run.status}"><header><strong>${escapeHtml(title)}</strong><span>${status}</span></header><div class="directRunEvents">${events || "等待模型事件…"}</div></section>`;
+  }).join("");
+}
+
+function stopDirectRunPolling(runId) {
+  const timer = directRunPollers.get(runId);
+  if (timer) clearTimeout(timer);
+  directRunPollers.delete(runId);
+}
+
+async function pollDirectRun(runId) {
+  try {
+    const response = await fetch(`/api/codex/run/${encodeURIComponent(runId)}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const run = (await response.json()).run;
+    directRunStates.set(runId, run);
+    renderDirectRunPanel();
+    if (["completed", "failed"].includes(run.status)) { stopDirectRunPolling(runId); return; }
+  } catch (error) {
+    const current = directRunStates.get(runId);
+    if (current) {
+      current.status = "failed";
+      current.events = [...(current.events || []), { type: "client", text: `读取执行进度失败：${error.message}` }];
+      renderDirectRunPanel();
+    }
+    stopDirectRunPolling(runId);
+    return;
+  }
+  directRunPollers.set(runId, setTimeout(() => pollDirectRun(runId), 500));
+}
+
+function beginDirectRunProgress(payload) {
+  const runId = payload?.runId || payload?.id;
+  if (!runId) return;
+  directRunStates.set(runId, payload);
+  renderDirectRunPanel();
+  stopDirectRunPolling(runId);
+  pollDirectRun(runId);
 }
 
 /** Switching the target is free; only the send section spends a model turn. */
@@ -6492,170 +6550,64 @@ function codexAskBox() {
 let codexParallelRunId = "";
 let codexParallelPollTimer = null;
 let codexParallelRun = null;
-let codexParallelSupervisorBusy = false;
-let codexParallelPollGeneration = 0;
-const codexParallelDraftEdits = new Map();
+let codexParallelBranchPlanning = false;
 const codexParallelStorageKey = `task-tree:codex-parallel:${location.origin}${location.pathname}`;
 
+const parallelStatusLabels = {
+  planned: "等待执行",
+  queued: "等待执行",
+  preparing: "准备中",
+  running: "执行中",
+  completed: "已完成",
+  failed: "失败",
+  blocked: "依赖失败"
+};
+
 function parallelRunTerminal(run) {
-  if (["rejected", "failed"].includes(run?.status)) return true;
+  if (run?.status === "failed") return true;
   if (run?.status !== "accepted") return false;
-  const treeSync = run.review?.treeSync?.status;
-  const cleanup = run.review?.cleanup?.status;
-  return !["queued", "running"].includes(treeSync) && !["queued", "running"].includes(cleanup);
+  return !["queued", "running"].includes(run.result?.cleanup?.status);
 }
 
 function parallelRunNeedsPolling(run) {
-  if (["planning", "approved", "preparing", "running", "supervising", "waiting_user", "paused", "coordinating", "auditing"].includes(run?.status)) return true;
-  if (run?.status !== "accepted") return false;
-  return ["queued", "running"].includes(run.review?.treeSync?.status)
-    || ["queued", "running"].includes(run.review?.cleanup?.status);
+  if (["planning", "queued", "preparing", "running", "applying"].includes(run?.status)) return true;
+  return run?.status === "accepted" && ["queued", "running"].includes(run.result?.cleanup?.status);
 }
 
 function parallelPollDelay(run) {
-  if (run?.status === "planning") return 600;
-  if (run?.status === "waiting_user") return 8000;
-  if (run?.status === "paused") return 15000;
-  return 1200;
+  return run?.status === "planning" ? 500 : 1000;
 }
 
 function rememberCodexParallelRun(run) {
   if (!run?.id) return;
   try {
-    if (parallelRunTerminal(run)) localStorage.removeItem(codexParallelStorageKey);
+    if (run.status === "accepted" && parallelRunTerminal(run)) localStorage.removeItem(codexParallelStorageKey);
     else localStorage.setItem(codexParallelStorageKey, run.id);
   } catch {
-    // Embedded and private contexts may disable localStorage; the in-memory run still works.
+    // The in-memory run still works when storage is unavailable.
   }
 }
 
 function rememberedCodexParallelRunId() {
-  try {
-    return localStorage.getItem(codexParallelStorageKey) || "";
-  } catch {
-    return "";
-  }
+  try { return localStorage.getItem(codexParallelStorageKey) || ""; } catch { return ""; }
 }
 
 function forgetCodexParallelRun() {
   try { localStorage.removeItem(codexParallelStorageKey); } catch { /* optional persistence */ }
 }
 
-const parallelStatusLabels = {
-  planned: "待审核",
-  queued: "排队",
-  preparing: "准备隔离区",
-  running: "执行中",
-  completed: "已集成",
-  failed: "失败",
-  blocked: "被依赖阻塞"
-};
-
-const parallelSupervisorStatusLabels = {
-  idle: "待调度",
-  running: "调度中",
-  supervising: "调度中",
-  waiting_user: "等你决定",
-  paused: "已暂停",
-  finalizing: "收尾中",
-  completed: "已完成",
-  failed: "需处理"
-};
-
-const parallelStageOrder = ["planning", "execution", "summary", "review", "applied"];
-
 function parallelStageFor(run) {
-  if (["approved", "preparing", "running", "supervising", "waiting_user", "paused"].includes(run?.status)) return "execution";
-  if (run?.status === "coordinating") return "summary";
-  if (["auditing", "review"].includes(run?.status)) return "review";
-  if (run?.status === "accepted") return "applied";
-  return "planning";
-}
-
-function parallelExecutionTreeRows(tree) {
-  const nodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
-  const byParent = new Map();
-  for (const node of nodes) {
-    const parentId = String(node.parentId || tree?.root?.id || "RUN");
-    const children = byParent.get(parentId) || [];
-    children.push(node);
-    byParent.set(parentId, children);
-  }
-  const rows = [];
-  const visited = new Set();
-  const visit = (parentId, depth) => {
-    for (const node of byParent.get(parentId) || []) {
-      if (!node?.id || visited.has(node.id)) continue;
-      visited.add(node.id);
-      rows.push({ node, depth });
-      visit(node.id, depth + 1);
-    }
-  };
-  visit(tree?.root?.id || "RUN", 1);
-  for (const node of nodes) {
-    if (!node?.id || visited.has(node.id)) continue;
-    rows.push({ node, depth: 1 });
-    visited.add(node.id);
-    visit(node.id, 2);
-  }
-  return rows;
-}
-
-function renderParallelExecutionTree(tree) {
-  if (!els.codexParallelExecutionTree) return;
-  els.codexParallelExecutionTree.textContent = "";
-  if (!tree?.root) return;
-  const rows = [{ node: tree.root, depth: 0, root: true }, ...parallelExecutionTreeRows(tree)];
-  for (const { node, depth, root = false } of rows) {
-    const row = document.createElement("div");
-    row.className = `codexParallelExecutionNode${root ? " is-root" : ""}`;
-    row.style.setProperty("--tree-depth", String(Math.min(depth, 6)));
-    row.setAttribute("role", "treeitem");
-    row.setAttribute("aria-level", String(depth + 1));
-    const title = document.createElement(root ? "strong" : "span");
-    title.className = "codexParallelExecutionTitle";
-    title.textContent = root
-      ? humanizeParallelTitle(node.title, "本轮自动并行")
-      : humanizeParallelTitle(node.title, node.id || "并行分支");
-    title.title = node.title || title.textContent;
-    const status = document.createElement("span");
-    status.className = `codexParallelExecutionStatus ${node.status || "planned"}`;
-    status.textContent = root
-      ? parallelStatusText({ ...codexParallelRun, status: node.status || codexParallelRun?.status })
-      : (parallelStatusLabels[node.status] || node.status || "待调度");
-    row.append(title, status);
-    els.codexParallelExecutionTree.append(row);
-  }
-}
-
-function renderParallelSupervisor(run) {
-  if (!els.codexParallelSupervisor) return;
-  const supervisor = run?.supervisor || run?.executionTree?.supervisor;
-  const visible = Boolean(supervisor || run?.executionTree) && !["planning", "draft"].includes(run?.status);
-  els.codexParallelSupervisor.hidden = !visible;
-  if (!visible) return;
-  const statusKey = supervisor?.paused ? "paused" : (supervisor?.status || run.status || "idle");
-  const paused = statusKey === "paused" || run.status === "paused";
-  const terminal = ["accepted", "rejected"].includes(run.status);
-  els.codexParallelSupervisor.dataset.status = statusKey;
-  els.codexParallelSupervisorStatus.textContent = parallelSupervisorStatusLabels[statusKey] || statusKey;
-  els.codexParallelSupervisorRounds.textContent = `${Number(supervisor?.rounds) || 0} 轮`;
-  els.codexParallelSupervisorDecision.textContent = supervisor?.lastDecision || (paused ? "自动推进已暂停。" : "总控正在等待第一轮结果。");
-  els.codexParallelSupervisorToggle.textContent = paused ? "继续" : "暂停";
-  els.codexParallelSupervisorToggle.title = paused ? "继续自动调度" : "暂停新增调度；正在执行的分支会完成当前工作";
-  els.codexParallelSupervisorToggle.disabled = terminal || codexParallelSupervisorBusy;
-  els.codexParallelSupervisorInput.disabled = terminal || codexParallelSupervisorBusy;
-  els.codexParallelSupervisorSend.disabled = terminal || codexParallelSupervisorBusy;
-  renderParallelExecutionTree(run.executionTree);
+  if (run?.status === "accepted") return "completed";
+  if (run?.status === "planning" || (run?.status === "failed" && !run.jobs?.length)) return "planning";
+  return "execution";
 }
 
 function renderParallelStageRail(run = { status: "planning" }) {
-  const rail = els.codexParallelStageRail;
-  if (!rail) return;
   const activeStage = parallelStageFor(run);
-  const activeIndex = parallelStageOrder.indexOf(activeStage);
-  rail.classList.toggle("is-error", ["failed", "rejected"].includes(run?.status));
-  rail.querySelectorAll(".codexParallelStage").forEach((stage, index) => {
+  const order = ["planning", "execution", "completed"];
+  const activeIndex = order.indexOf(activeStage);
+  els.codexParallelStageRail?.classList.toggle("is-error", run?.status === "failed");
+  els.codexParallelStageRail?.querySelectorAll(".codexParallelStage").forEach((stage, index) => {
     stage.classList.toggle("is-complete", index < activeIndex);
     stage.classList.toggle("is-active", index === activeIndex);
     stage.setAttribute("aria-current", index === activeIndex ? "step" : "false");
@@ -6670,346 +6622,93 @@ function humanizeParallelTitle(value, fallback = "并行任务") {
     .replace(/契约/g, "规则")
     .replace(/夹具/g, "测试场景")
     .replace(/语义回归/g, "目标校验")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 20);
+    .trim();
 }
 
 function parallelTaskSummary(job) {
-  const text = String(job?.summary || job?.instruction || "").replace(/\s+/g, " ").trim();
-  const first = text.split(/[。！？；;]/)[0] || text;
-  const colon = first.indexOf("：");
-  return (colon > 8 ? first.slice(0, colon) : first).slice(0, 36) || "等待补充任务说明";
+  return String(job?.summary || job?.instruction || "等待任务说明").trim();
 }
 
-function parallelGoalView(run) {
-  const assessment = run.review?.goalAssessment || {};
-  if (run.status === "auditing" || run.review?.goalAudit?.status === "running") {
-    return { status: "正在核验", result: "对照根目标、阶段目标和实际改动" };
-  }
-  if (assessment.continuity === "baseline" && run.goal?.history?.length) {
-    return { status: "目标连续性冲突", result: "已有历史运行，必须重新核验是否仍服务同一个根本目标" };
-  }
-  if (assessment.continuity === "drifted") return { status: "长期目标漂移", result: assessment.remaining || "这轮结果可能只完成了局部实现，没有保持长期目标" };
-  if (assessment.continuity !== "baseline" && assessment.continuity !== "stable") {
-    return { status: "目标连续性待核验", result: assessment.remaining || "还不能判断这轮是否继续服务同一个根本目标" };
-  }
-  if (assessment.alignment === "off_target") return { status: "偏离目标", result: assessment.remaining || "当前改动没有对准本轮目标" };
-  if (assessment.alignment !== "aligned") return { status: "待核验", result: "尚不能判断这些改动是否真正推进目标" };
-  if (assessment.progress === "reached") return { status: "目标已达到", result: assessment.achieved || "完成判据已有充分证据" };
-  if (assessment.progress === "progress") {
-    const achieved = assessment.achieved ? `已推进：${assessment.achieved}` : "已有可验证推进";
-    return { status: assessment.continuity === "baseline" ? "首次基线 · 方向一致" : "长期连续 · 方向一致", result: assessment.remaining ? `${achieved}；仍缺：${assessment.remaining}` : achieved };
-  }
-  return { status: "没有有效推进", result: assessment.remaining || "改动尚未形成可验证的目标进展" };
-}
-
-function parallelField(labelText, control, wide = false) {
-  const label = document.createElement("label");
-  label.className = `codexParallelField${wide ? " wide" : ""}`;
-  const caption = document.createElement("span");
-  caption.textContent = labelText;
-  label.append(caption, control);
-  return label;
-}
-
-function parallelContextOptionsForRun(runOptions = []) {
-  const merged = new Map();
-  for (const option of [...runOptions, ...codexParallelContextOptions]) {
-    if (!option?.contextKey || !option?.threadId) continue;
-    const key = String(option.contextKey);
-    if (!merged.has(key)) merged.set(key, option);
-  }
-  return [...merged.values()];
-}
-
-function parallelContextBadgeText(job, option = null) {
-  if (option?.value === "new") return "新建对话";
-  const threadId = option?.dataset?.contextThreadId || job.contextThreadId || "";
-  const title = option?.dataset?.contextLabel || job.contextLabel || job.title || job.nodeId || "分支";
-  return threadId ? `复用 · ${humanizeParallelTitle(title, job.nodeId)}` : "首次建立";
-}
-
-function parallelContextLifecycleLabel(job, fallback = "") {
-  const generation = Number(job?.contextGeneration) || 1;
-  const status = {
-    active: "当前",
-    near_limit: "偏长",
-    ready_to_rotate: "待换代",
-    rotating: "换代中",
-    archived: "已归档"
-  }[job?.contextStatus] || fallback;
-  return `第${generation}代${status ? ` · ${status}` : ""}`;
-}
-
-function parallelContextLine({ title = "", state = "", threadId = "", threadIds = [] } = {}) {
-  const row = document.createElement("div");
-  row.className = "codexParallelContextLine";
-  const name = document.createElement("strong");
-  name.textContent = title || "未命名上下文";
-  const status = document.createElement("span");
-  status.textContent = state;
-  row.append(name, status);
-  const links = [...new Set([threadId, ...threadIds].filter(Boolean))];
-  if (links.length) {
-    const linkGroup = document.createElement("span");
-    linkGroup.className = "codexParallelContextLinks";
-    links.forEach((id, index) => {
-      const open = document.createElement("a");
-      open.href = `codex://threads/${encodeURIComponent(id)}`;
-      open.textContent = "↗";
-      open.title = `打开${title || "上下文"}${links.length > 1 ? `（${index === 0 ? "提问" : "回答"}）` : ""}`;
-      open.setAttribute("aria-label", open.title);
-      linkGroup.append(open);
-    });
-    row.append(linkGroup);
-  }
-  return row;
-}
-
-function renderParallelContextOverview(run, contextOptions = []) {
-  const jobs = run?.jobs || [];
-  const reused = jobs.filter((job) => job.contextThreadId).length;
-  const fresh = jobs.length - reused;
-  const parts = [`${reused} 个复用`];
-  if (fresh) parts.push(`${fresh} 个新建`);
-  parts.push(`${contextOptions.length} 个可选`);
-  els.codexParallelContextSummary.textContent = parts.join(" · ");
-  els.codexParallelContextAssignments.textContent = "";
-  els.codexParallelContextPool.textContent = "";
-
-  if (run?.planner?.threadId) {
-    els.codexParallelContextAssignments.append(parallelContextLine({
-      title: "规划上下文",
-      state: run.planner.contextResumed ? "已复用" : "当前",
-      threadId: run.planner.threadId
-    }));
-  }
-  for (const job of jobs) {
-    els.codexParallelContextAssignments.append(parallelContextLine({
-      title: humanizeParallelTitle(job.title, job.taskId),
-      state: parallelContextLifecycleLabel(job, job.contextThreadId ? "复用" : "首次建立"),
-      threadId: job.threadId || job.contextThreadId || ""
-    }));
-  }
-  for (const message of run?.peerMessages || []) {
-    els.codexParallelContextAssignments.append(parallelContextLine({
-      title: `${message.fromTaskId} → ${message.toTaskId}`,
-      state: message.status === "answered" ? `已回答 · ${message.question}` : `${message.status || "排队"} · ${message.question}`,
-      threadIds: [message.fromThreadId, message.toThreadId]
-    }));
-  }
-
-  const assignedThreads = new Set(jobs.map((job) => job.contextThreadId).filter(Boolean));
-  for (const option of contextOptions.filter((item) => !assignedThreads.has(item.threadId))) {
-    const source = option.source === "codex" ? "项目对话" : (option.nodeId || "历史分支");
-    els.codexParallelContextPool.append(parallelContextLine({
-      title: option.title || option.nodeId || "历史上下文",
-      state: source,
-      threadId: option.threadId
-    }));
-  }
-  els.codexParallelContexts.hidden = !(jobs.length || contextOptions.length || run?.planner?.threadId);
-}
-
-function parallelContextSelect(job, contextOptions = [], onChange = null) {
-  const select = document.createElement("select");
-  select.className = "codexParallelContextSelect";
-  select.setAttribute("aria-label", `${job.taskId} 上下文`);
-  select.dataset.contextKey = job.contextKey || "";
-  select.dataset.contextThreadId = job.contextThreadId || "";
-
-  const reuse = document.createElement("option");
-  reuse.value = "reuse";
-  reuse.textContent = job.contextThreadId ? "沿用此分支已有对话" : "此分支上下文（首次建立，之后复用）";
-  reuse.dataset.contextKey = job.contextKey || "";
-  reuse.dataset.contextThreadId = job.contextThreadId || "";
-    reuse.dataset.contextSource = job.contextSource || "parallel";
-    reuse.dataset.contextPreview = job.contextPreview || "";
-    reuse.dataset.contextLabel = job.contextLabel || job.title || job.nodeId || "";
-    reuse.dataset.contextGeneration = String(job.contextGeneration || 1);
-  select.append(reuse);
-
-  const fresh = document.createElement("option");
-  fresh.value = "new";
-  fresh.textContent = "新建独立对话";
-  fresh.dataset.contextLabel = "新建独立对话";
-  select.append(fresh);
-
-  for (const option of contextOptions) {
-    if (!option?.contextKey || !option?.threadId) continue;
-    const item = document.createElement("option");
-    item.value = `selected:${option.contextKey}`;
-    item.dataset.contextKey = option.contextKey;
-    item.dataset.contextThreadId = option.threadId;
-    item.dataset.contextSource = option.source || "parallel";
-    item.dataset.contextPreview = option.preview || "";
-    item.dataset.contextLabel = option.title || option.nodeId || "";
-    item.dataset.contextGeneration = String(option.generation || 1);
-    const source = option.source === "codex" ? "已有对话" : "历史分支";
-    const detail = [option.nodeId, option.preview].filter(Boolean).join(" · ");
-    item.textContent = `${source} · ${option.title || option.nodeId || "未命名"}${detail ? ` · ${detail}` : ""}`;
-    select.append(item);
-  }
-
-  if (job.contextPolicy === "selected" && job.contextKey) select.value = `selected:${job.contextKey}`;
-  else select.value = job.contextPolicy === "new" ? "new" : "reuse";
-  select.addEventListener("change", () => {
-    validateParallelContextChoices();
-    onChange?.(select.selectedOptions?.[0] || null);
-  });
-  return select;
-}
-
-function parallelContextState(job) {
-  const state = document.createElement("span");
-  state.className = "codexParallelContextState";
-  state.textContent = job.contextThreadId
-    ? `对话：${job.contextResumed ? "已继承" : "已建立"} · ${parallelContextLifecycleLabel(job)}`
-    : `对话：首次建立 · ${parallelContextLifecycleLabel(job)}`;
-  if (Array.isArray(job.contextHistory) && job.contextHistory.length) {
-    state.title = `上一代对话已归档，可在 Codex 历史中查看；交接：${job.contextHandoffPath || "已生成"}`;
-  }
-  return state;
-}
-
-function parallelScopeOverlaps(left, right) {
-  const a = String(left || "").replace(/\\/g, "/").toLowerCase();
-  const b = String(right || "").replace(/\\/g, "/").toLowerCase();
-  const base = (value) => value.split(/[*!?\[]/, 1)[0].replace(/[^/]*$/, "");
-  const aBase = base(a);
-  const bBase = base(b);
-  if (!aBase || !bBase || aBase === bBase) return true;
-  const aDirectory = /[*!?\[]|\/$/.test(a);
-  const bDirectory = /[*!?\[]|\/$/.test(b);
-  return (aDirectory && b.startsWith(aBase)) || (bDirectory && a.startsWith(bBase));
-}
-
-function parallelNodeWriteSet(node, jobs = []) {
-  const codeLoc = String(node?.codeLoc || "");
-  const fromCode = codeLoc.split(/[\n,;]+/)
-    .map((item) => item.trim().replace(/\\/g, "/").split(":")[0])
-    .filter((item) => /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.*-]+)+$/.test(item));
-  const text = `${node?.title || ""} ${node?.problem || ""}`;
-  const preferred = fromCode.length
-    ? fromCode.slice(0, 3)
-    : /界面|前端|编辑器|可视化|UI/i.test(text)
-      ? ["public/**"]
-      : /测试|验证|回归/i.test(text)
-        ? ["scripts/**"]
-        : /文档|研究|说明/i.test(text)
-          ? ["docs/**"]
-          : ["server/**"];
-  const occupied = jobs
-    .filter((job) => job.status !== "completed")
-    .flatMap((job) => job.writeSet || []);
-  const free = preferred.find((scope) => !occupied.some((item) => parallelScopeOverlaps(scope, item)));
-  if (free) return [free];
-  const fallbacks = ["server/**", "public/**", "scripts/**", "docs/**"];
-  return [fallbacks.find((scope) => !occupied.some((item) => parallelScopeOverlaps(scope, item))) || "docs/**"];
-}
-
-function parallelJobFromNode(node, taskId, jobs = []) {
-  const instruction = String(node?.nextIdea || node?.problem || node?.approach || `推进${node?.title || node?.id || "当前节点"}`).trim();
-  return {
-    taskId,
-    nodeId: node?.id || "",
-    title: humanizeParallelTitle(node?.title || node?.id || "继续推进"),
-    summary: parallelTaskSummary({ instruction }),
-    instruction,
-    writeSet: parallelNodeWriteSet(node, jobs),
-    dependsOn: [],
-    tests: [],
-    dependencyPrompt: "开始前确认节点接口和依赖分支已满足；没有依赖时写无。",
-    acceptancePrompt: "说明解决了什么问题、如何验证、还缺什么。",
-    contextPolicy: "new",
-    contextKey: "",
-    contextThreadId: "",
-    contextLabel: node?.title || node?.id || "并行分支"
-  };
+function parallelStatusText(run) {
+  if (!run) return "正在准备";
+  const jobs = run.jobs || [];
+  const completed = jobs.filter((job) => job.status === "completed").length;
+  const running = jobs.filter((job) => job.status === "running").length;
+  if (run.status === "planning") return "正在生成并行计划";
+  if (run.status === "queued" || run.status === "preparing") return `已规划 ${jobs.length} 个 Worker，正在准备执行`;
+  if (run.status === "running") return `${running} 个执行中，${completed}/${jobs.length} 已完成`;
+  if (run.status === "applying") return `${completed}/${jobs.length} 已完成，正在自动应用结果`;
+  if (run.status === "accepted") return `已完成并自动应用 ${completed}/${jobs.length} 个 Worker`;
+  if (run.status === "failed") return run.error ? `失败：${run.error}` : `运行失败，${completed}/${jobs.length} 已完成`;
+  return run.status || "正在准备";
 }
 
 function syncParallelAppendNodeOptions(run) {
-  const select = els.codexParallelAppendNode;
-  if (!select) return;
-  const previous = select.value;
-  select.textContent = "";
+  if (!els.codexParallelAppendNode) return;
+  const previous = els.codexParallelAppendNode.value;
+  els.codexParallelAppendNode.textContent = "";
   const candidates = nodes.filter((node) => node.id !== "ROOT");
-  const fallbackId = run.goal?.stageNodeId || nextFocusId || currentFocusId || candidates[0]?.id || "";
+  const fallbackId = run?.goal?.stageNodeId || nextFocusId || currentFocusId || candidates[0]?.id || "";
   for (const node of candidates.length ? candidates : [{ id: fallbackId, title: fallbackId }]) {
     const option = document.createElement("option");
     option.value = node.id;
-    option.textContent = `${node.id} · ${humanizeParallelTitle(node.title || node.id)}`;
-    select.append(option);
+    option.textContent = `${node.id} · ${node.title || node.id}`;
+    els.codexParallelAppendNode.append(option);
   }
-  select.value = candidates.some((node) => node.id === previous)
+  els.codexParallelAppendNode.value = candidates.some((node) => node.id === previous)
     ? previous
-    : (candidates.some((node) => node.id === fallbackId) ? fallbackId : select.options[0]?.value || "");
+    : (candidates.some((node) => node.id === fallbackId) ? fallbackId : els.codexParallelAppendNode.options[0]?.value || "");
 }
 
-function parallelJobRow(job, editable, index, contextOptions = [], initiallyOpen = false) {
+function parallelJobRow(job, index) {
   const row = document.createElement("tr");
   row.dataset.taskId = job.taskId;
-  row.dataset.nodeId = job.nodeId;
-  if (editable && ["failed", "blocked"].includes(job.status)) row.classList.add("codexParallelRetryableRow");
 
   const statusCell = document.createElement("td");
   const status = document.createElement("span");
   status.className = `codexParallelJobStatus ${job.status || "planned"}`;
-  status.textContent = parallelStatusLabels[job.status] || job.status || "待审核";
+  status.textContent = parallelStatusLabels[job.status] || job.status || "等待执行";
   statusCell.append(status);
 
-  const nodeCell = document.createElement("td");
-  const branchHead = document.createElement("div");
-  branchHead.className = "codexParallelBranchHead";
-  const branchNumber = document.createElement("span");
-  branchNumber.className = "codexParallelBranchNumber";
-  branchNumber.textContent = String(index + 1).padStart(2, "0");
-  const nodeTitle = document.createElement("strong");
-  nodeTitle.className = "codexParallelBranchTitle";
-  nodeTitle.textContent = humanizeParallelTitle(job.title, job.taskId);
-  branchHead.append(branchNumber, nodeTitle);
-  let remove = null;
-  if (editable) {
-    remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "codexParallelRemoveBranch";
-    remove.textContent = "\u00d7";
-    remove.title = `删除${nodeTitle.textContent}`;
-    remove.setAttribute("aria-label", `删除${nodeTitle.textContent}`);
-    remove.addEventListener("click", () => removeCodexParallelBranch(job.taskId));
-    branchHead.append(remove);
-  }
+  const branchCell = document.createElement("td");
+  const head = document.createElement("div");
+  head.className = "codexParallelBranchHead";
+  const number = document.createElement("span");
+  number.className = "codexParallelBranchNumber";
+  number.textContent = String(index + 1).padStart(2, "0");
+  const title = document.createElement("strong");
+  title.className = "codexParallelBranchTitle";
+  title.textContent = humanizeParallelTitle(job.title, job.taskId);
+  head.append(number, title);
   if (job.threadId) {
-    const threadLink = document.createElement("a");
-    threadLink.className = "codexParallelThreadLink";
-    threadLink.href = job.deepLink || `codex://threads/${encodeURIComponent(job.threadId)}`;
-    threadLink.textContent = "进入对话";
-    threadLink.title = "打开这个 Codex 任务";
-    threadLink.setAttribute("aria-label", `打开${nodeTitle.textContent}`);
-    threadLink.addEventListener("click", async (event) => {
+    const link = document.createElement("a");
+    link.className = "codexParallelThreadLink";
+    link.href = job.deepLink || `codex://threads/${encodeURIComponent(job.threadId)}`;
+    link.textContent = "进入对话";
+    link.addEventListener("click", async (event) => {
       event.preventDefault();
       try {
         const response = await fetch(`/api/codex/parallel/${encodeURIComponent(codexParallelRunId)}/thread/${encodeURIComponent(job.taskId)}/open`, { method: "POST" });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
       } catch {
-        window.location.href = threadLink.href;
+        window.location.href = link.href;
       }
     });
-    branchHead.append(threadLink);
+    head.append(link);
   }
-  nodeCell.append(branchHead);
-  const contextBadge = document.createElement("span");
-  contextBadge.className = "codexParallelContextBadge";
-  contextBadge.textContent = parallelContextBadgeText(job);
-  nodeCell.append(contextBadge);
+  const context = document.createElement("span");
+  context.className = "codexParallelContextBadge";
+  context.textContent = job.contextResumed
+    ? "已复用历史对话"
+    : (Number(job.contextGeneration) > 1 ? "已续接历史对话" : "独立对话");
+  branchCell.append(head, context);
 
   const taskCell = document.createElement("td");
-  const taskSummary = document.createElement("div");
-  taskSummary.className = "codexParallelTaskText";
-  taskSummary.textContent = parallelTaskSummary(job);
-  taskCell.append(taskSummary);
+  const task = document.createElement("div");
+  task.className = "codexParallelTaskText";
+  task.textContent = parallelTaskSummary(job);
+  taskCell.append(task);
   if (job.error) {
     const error = document.createElement("div");
     error.className = "codexParallelJobError";
@@ -7017,387 +6716,73 @@ function parallelJobRow(job, editable, index, contextOptions = [], initiallyOpen
     taskCell.append(error);
   }
 
-  const settings = document.createElement("details");
-  settings.className = "codexParallelJobSettings";
-  settings.open = initiallyOpen;
-  const settingsSummary = document.createElement("summary");
-  const settingsSummaryText = document.createElement("span");
-  settingsSummaryText.textContent = initiallyOpen
-    ? (editable ? "收起修改" : "收起详情")
-    : (editable ? "查看与修改" : "查看详情");
-  settingsSummary.append(settingsSummaryText);
-  settings.addEventListener("toggle", () => {
-    settingsSummaryText.textContent = settings.open
-      ? (editable ? "收起修改" : "收起详情")
-      : (editable ? "查看与修改" : "查看详情");
-  });
-  const meta = document.createElement("div");
-  meta.className = "codexParallelJobMeta";
-  if (editable) {
-    const titleInput = document.createElement("input");
-    titleInput.className = "codexParallelTitleInput";
-    titleInput.value = job.title || "";
-    titleInput.placeholder = `分支 ${String(index + 1).padStart(2, "0")}`;
-    titleInput.setAttribute("aria-label", `${job.taskId} 分支名称`);
-    titleInput.addEventListener("input", () => {
-      nodeTitle.textContent = humanizeParallelTitle(titleInput.value, job.taskId);
-      remove.title = `删除${nodeTitle.textContent}`;
-      remove.setAttribute("aria-label", remove.title);
-    });
-    const nodeInput = document.createElement("input");
-    nodeInput.className = "codexParallelNodeId";
-    nodeInput.value = job.nodeId || "";
-    nodeInput.placeholder = "N3";
-    nodeInput.setAttribute("aria-label", `${job.taskId} 节点 ID`);
-    meta.append(parallelField("分支名称", titleInput), parallelField("节点 ID", nodeInput));
-  }
-  const fullTask = document.createElement(editable ? "textarea" : "div");
-  fullTask.className = editable ? "codexParallelInstruction codexParallelFullTask" : "codexParallelFullTask";
-  if (editable) {
-    fullTask.rows = 4;
-    fullTask.value = job.instruction || "";
-    fullTask.setAttribute("aria-label", `${job.taskId} 任务`);
-    fullTask.addEventListener("input", () => {
-      taskSummary.textContent = parallelTaskSummary({ instruction: fullTask.value });
-    });
-  } else {
-    fullTask.textContent = job.instruction || "";
-  }
-  const ids = document.createElement("div");
-  ids.className = "codexParallelJobIds";
-  ids.textContent = editable ? `任务 ${job.taskId}` : `节点 ${job.nodeId} · 任务 ${job.taskId}`;
-  const dependency = document.createElement(editable ? "input" : "span");
-  dependency.className = "codexParallelDependsOn";
-  const dependencyText = (job.dependsOn || []).join(", ");
-  if (editable) {
-    dependency.value = dependencyText;
-    dependency.placeholder = "依赖：无";
-    dependency.setAttribute("aria-label", `${job.taskId} 依赖`);
-  } else {
-    dependency.textContent = `依赖：${dependencyText || "无"}`;
-  }
-  const dependencyPrompt = document.createElement(editable ? "textarea" : "span");
-  dependencyPrompt.className = "codexParallelDependencyPrompt";
-  if (editable) {
-    dependencyPrompt.rows = 2;
-    dependencyPrompt.value = job.dependencyPrompt || "";
-    dependencyPrompt.placeholder = "开始前要确认哪些条件？没有依赖就写无。";
-    dependencyPrompt.setAttribute("aria-label", `${job.taskId} 依赖说明`);
-  } else {
-    dependencyPrompt.textContent = `依赖说明：${job.dependencyPrompt || "未填写"}`;
-  }
-  const tests = document.createElement(editable ? "input" : "span");
-  tests.className = "codexParallelJobTests";
-  const testsText = (job.tests || []).join(" ; ");
-  if (editable) {
-    tests.value = testsText;
-    tests.placeholder = "验收命令";
-    tests.setAttribute("aria-label", `${job.taskId} 验收`);
-  } else {
-    tests.textContent = testsText || "未配置分支验收";
-  }
-  const acceptancePrompt = document.createElement(editable ? "textarea" : "span");
-  acceptancePrompt.className = "codexParallelAcceptancePrompt";
-  if (editable) {
-    acceptancePrompt.rows = 3;
-    acceptancePrompt.value = job.acceptancePrompt || "";
-    acceptancePrompt.placeholder = "如何证明问题已解决？还缺什么？";
-    acceptancePrompt.setAttribute("aria-label", `${job.taskId} 验收提示`);
-  } else {
-    acceptancePrompt.textContent = `验收提示：${job.acceptancePrompt || "未填写"}`;
-  }
-  if (editable) {
-    const contextSelect = parallelContextSelect(job, contextOptions, (selected) => {
-      contextBadge.textContent = parallelContextBadgeText(job, selected);
-    });
-    meta.append(
-      parallelField("完整任务", fullTask, true),
-      parallelField("上下文对话（每个分支独立选择）", contextSelect, true),
-      parallelField("依赖说明", dependencyPrompt, true),
-      parallelField("验收提示", acceptancePrompt, true)
-    );
-  } else {
-    meta.append(fullTask, parallelContextState(job), ids, dependency, dependencyPrompt, acceptancePrompt, tests);
-  }
-  const scope = document.createElement(editable ? "input" : "div");
-  scope.className = "codexParallelWriteSet";
-  if (editable) {
-    scope.type = "text";
-    scope.value = (job.writeSet || []).join(", ");
-    scope.placeholder = "server/**";
-    scope.setAttribute("aria-label", `${job.taskId} 分支负责修改的文件范围`);
-  } else {
-    scope.textContent = (job.writeSet || []).join(", ");
-  }
-  if (editable) {
-    meta.append(
-      parallelField("分支负责修改的文件范围", scope, true),
-      parallelField("机器依赖 taskId", dependency),
-      parallelField("验收命令", tests),
-      ids
-    );
-  } else {
-    meta.append(scope);
-  }
-  settings.append(settingsSummary, meta);
-  taskCell.append(settings);
-  row.append(statusCell, nodeCell, taskCell);
+  row.append(statusCell, branchCell, taskCell);
   return row;
 }
 
-function validateParallelContextChoices() {
-  const owners = new Map();
-  let duplicate = "";
-  for (const row of els.codexParallelRows.querySelectorAll("tr")) {
-    const select = row.querySelector(".codexParallelContextSelect");
-    const selected = select?.selectedOptions?.[0];
-    const threadId = selected?.dataset.contextThreadId || "";
-    if (!threadId || select?.value === "new") continue;
-    const owner = owners.get(threadId);
-    if (owner) duplicate = `${owner} 和 ${row.dataset.taskId} 不能选择同一个 Codex 对话`;
-    else owners.set(threadId, row.dataset.taskId);
+function renderParallelRun(run) {
+  if (!run) return;
+  codexParallelRun = run;
+  codexParallelRunId = run.id;
+  rememberCodexParallelRun(run);
+  renderParallelStageRail(run);
+
+  const objective = run.objective || run.goal?.immediate || "";
+  if (objective && document.activeElement !== els.codexParallelObjective) els.codexParallelObjective.value = objective;
+  const canReplan = run.status === "failed";
+  els.codexParallelObjectiveBar.hidden = !["planning", "failed"].includes(run.status);
+  els.codexParallelObjective.disabled = run.status === "planning";
+  els.codexParallelRegenerate.hidden = !canReplan;
+  els.codexParallelRegenerate.disabled = !canReplan;
+
+  els.codexParallelRows.textContent = "";
+  for (const [index, job] of (run.jobs || []).entries()) {
+    els.codexParallelRows.append(parallelJobRow(job, index));
   }
-  if (duplicate) els.codexParallelState.textContent = duplicate;
-  return duplicate ? { message: duplicate } : null;
+  els.codexParallelTableWrap.hidden = !(run.jobs || []).length;
+
+  const completed = (run.jobs || []).filter((job) => job.status === "completed").length;
+  els.codexParallelGoalReview.hidden = false;
+  els.codexParallelGoalLabel.textContent = "本轮目标";
+  els.codexParallelGoalText.textContent = objective || "按当前任务树自动推进";
+  els.codexParallelGoalStatus.textContent = run.status === "accepted" ? "完成" : (run.status === "failed" ? "失败" : "当前进度");
+  els.codexParallelGoalResult.textContent = `${completed}/${run.jobs?.length || 0} 个 Worker 已完成`;
+  els.codexParallelState.textContent = parallelStatusText(run);
+
+  syncParallelAppendNodeOptions(run);
+  const appendable = ["queued", "preparing", "running"].includes(run.status);
+  els.codexParallelPlanTools.hidden = !appendable;
+  els.codexParallelAddBranch.disabled = !appendable || codexParallelBranchPlanning;
 }
 
 function resetParallelDialog() {
-  codexParallelDraftEdits.clear();
+  codexParallelRunId = "";
+  codexParallelRun = null;
+  codexParallelBranchPlanning = false;
   els.codexParallelRows.textContent = "";
+  els.codexParallelTableWrap.hidden = true;
   els.codexParallelGoalReview.hidden = true;
-  els.codexParallelGoalLabel.textContent = "本轮目标";
-  els.codexParallelGoalText.textContent = "";
-  els.codexParallelGoalStatus.textContent = "";
-  els.codexParallelGoalResult.textContent = "";
-  els.codexParallelContexts.hidden = true;
-  els.codexParallelContexts.open = false;
-  els.codexParallelContextSummary.textContent = "";
-  els.codexParallelContextAssignments.textContent = "";
-  els.codexParallelContextPool.textContent = "";
-  els.codexParallelSupervisor.hidden = true;
-  els.codexParallelSupervisor.removeAttribute("data-status");
-  els.codexParallelSupervisorStatus.textContent = "";
-  els.codexParallelSupervisorRounds.textContent = "";
-  els.codexParallelSupervisorDecision.textContent = "";
-  els.codexParallelExecutionTree.textContent = "";
-  els.codexParallelSupervisorInput.value = "";
-  els.codexParallelSupervisorInput.disabled = false;
-  els.codexParallelSupervisorSend.disabled = false;
-  els.codexParallelSupervisorToggle.disabled = false;
-  els.codexParallelSupervisorOpen.hidden = true;
-  codexParallelSupervisorBusy = false;
   els.codexParallelPlanTools.hidden = true;
-  els.codexParallelAddBranch.disabled = false;
-  els.codexParallelTableWrap.hidden = false;
   els.codexParallelObjectiveBar.hidden = false;
-  els.codexParallelSummary.hidden = true;
-  els.codexParallelSummary.open = false;
-  els.codexParallelSummaryText.textContent = "";
-  els.codexParallelReview.hidden = true;
-  els.codexParallelFiles.textContent = "";
-  els.codexParallelTests.textContent = "";
-  els.codexParallelPatch.textContent = "";
-  els.codexParallelReviewWarning.hidden = true;
-  els.codexParallelReviewWarning.textContent = "";
-  els.codexParallelOpen.hidden = true;
-  els.codexParallelRetry.hidden = true;
-  els.codexParallelRetry.disabled = false;
-  els.codexParallelReject.hidden = true;
-  els.codexParallelReject.disabled = false;
-  els.codexParallelAccept.hidden = true;
-  els.codexParallelMore.hidden = true;
-  els.codexParallelMore.open = false;
-  els.codexParallelRegenerate.hidden = false;
-  els.codexParallelRegenerate.disabled = false;
-  els.codexParallelStart.hidden = false;
-  els.codexParallelStart.disabled = true;
-  els.codexParallelStart.textContent = "确认开始并行";
-  els.codexParallelAudit.hidden = true;
-  els.codexParallelAudit.disabled = false;
+  els.codexParallelObjective.disabled = true;
+  els.codexParallelRegenerate.hidden = true;
+  els.codexParallelRegenerate.disabled = true;
+  els.codexParallelState.textContent = "正在准备";
   renderParallelStageRail();
-}
-
-function parallelStatusText(run) {
-  if (run.error) return run.error;
-  if (run.status === "draft") return `${run.jobs.length} 个分支待确认`;
-  if (["approved", "preparing"].includes(run.status)) return "正在准备隔离工作区";
-  if (run.status === "running") {
-    const done = run.jobs.filter((job) => job.status === "completed").length;
-    const active = run.jobs.filter((job) => ["preparing", "running"].includes(job.status)).length;
-    const queued = run.jobs.filter((job) => ["planned", "queued"].includes(job.status)).length;
-    return `${done}/${run.jobs.length} 已完成 · ${active} 执行中${queued ? ` · ${queued} 等待` : ""}`;
-  }
-  if (run.status === "supervising") return "总控正在评估结果并安排下一轮";
-  if (run.status === "waiting_user") return "总控需要你的决定";
-  if (run.status === "paused") return "自动推进已暂停";
-  if (run.status === "coordinating") return "分支已完成 · 正在汇总验证";
-  if (run.status === "review") {
-    const failed = run.review?.failedTasks?.length || 0;
-    if (failed) return `${failed} 个分支待修复`;
-    return run.review?.readyToAccept ? "目标一致 · 可应用" : "暂不可应用";
-  }
-  if (run.status === "auditing") return "正在核验目标";
-  if (run.status === "accepted") {
-    if (["queued", "running"].includes(run.review?.treeSync?.status)) return "已应用 · 正在同步任务树";
-    if (run.review?.treeSync?.status === "failed") return "已应用 · 任务树同步失败";
-    return "已应用";
-  }
-  if (run.status === "rejected") return "已丢弃，当前项目没有被修改";
-  if (run.status === "failed") return `运行失败：${run.error || "请检查协调任务"}`;
-  return "正在自动规划并行分支…";
-}
-
-function renderParallelRun(run, { focusTaskId = "" } = {}) {
-  captureParallelDraftEdits(run);
-  for (const taskId of [...codexParallelPendingAppendJobs.keys()]) {
-    if ((run.jobs || []).some((job) => job.taskId === taskId && !job.pendingAppend) || ["accepted", "rejected"].includes(run.status)) {
-      codexParallelPendingAppendJobs.delete(taskId);
-    }
-  }
-  const openTaskIds = new Set([...els.codexParallelRows.querySelectorAll("tr")]
-    .filter((row) => row.querySelector(".codexParallelJobSettings")?.open)
-    .map((row) => row.dataset.taskId));
-  if (focusTaskId) openTaskIds.add(focusTaskId);
-  const scrollTop = els.codexParallelTableWrap.scrollTop;
-  const scrollLeft = els.codexParallelTableWrap.scrollLeft;
-  const activeRow = document.activeElement?.closest?.("tr");
-  const activeClass = [...(document.activeElement?.classList || [])].find((name) => name.startsWith("codexParallel")) || "";
-  const activeWasSummary = document.activeElement?.tagName === "SUMMARY";
-  const mergeDraft = (job) => {
-    const edits = codexParallelDraftEdits.get(job.taskId);
-    if (!edits || !(run.status === "draft" || job.pendingAppend || codexParallelPendingAppendJobs.has(job.taskId))) return job;
-    return { ...job, ...edits, status: job.status, pendingAppend: job.pendingAppend };
-  };
-  const baseJobs = (run.jobs || []).filter((job) => !job.pendingAppend).map(mergeDraft);
-  const pendingJobs = run.status === "draft" ? [] : [...codexParallelPendingAppendJobs.values()]
-    .filter((job) => !baseJobs.some((item) => item.taskId === job.taskId))
-    .map(mergeDraft);
-  const displayedRun = pendingJobs.length || baseJobs.length !== (run.jobs || []).length
-    ? { ...run, jobs: [...baseJobs, ...pendingJobs] }
-    : run;
-  codexParallelRun = displayedRun;
-  codexParallelRunId = displayedRun.id;
-  renderParallelStageRail(displayedRun);
-  rememberCodexParallelRun(displayedRun);
-  renderParallelSupervisor(displayedRun);
-  const editable = displayedRun.status === "draft";
-  const reviewing = displayedRun.status === "review";
-  const failedTaskIds = new Set(displayedRun.review?.failedTasks || []);
-  const displayedObjective = displayedRun.objective || displayedRun.goal?.immediate || "";
-  if (displayedObjective && document.activeElement !== els.codexParallelObjective) {
-    els.codexParallelObjective.value = displayedObjective;
-  }
-  els.codexParallelObjectiveBar.hidden = !["planning", "draft", "failed"].includes(displayedRun.status);
-  els.codexParallelObjective.disabled = !["planning", "draft", "failed"].includes(displayedRun.status);
-  els.codexParallelRows.textContent = "";
-  const contextOptions = parallelContextOptionsForRun(displayedRun.contextOptions || []);
-  renderParallelContextOverview(displayedRun, contextOptions);
-  for (const [index, job] of (displayedRun.jobs || []).entries()) {
-    const jobEditable = editable || (reviewing && failedTaskIds.has(job.taskId)) || codexParallelPendingAppendJobs.has(job.taskId);
-    els.codexParallelRows.append(parallelJobRow(job, jobEditable, index, contextOptions, openTaskIds.has(job.taskId)));
-  }
-  requestAnimationFrame(() => {
-    const targetTaskId = focusTaskId || activeRow?.dataset.taskId || "";
-    const targetRow = targetTaskId
-      ? [...els.codexParallelRows.querySelectorAll("tr")].find((row) => row.dataset.taskId === targetTaskId)
-      : null;
-    if (focusTaskId) targetRow?.querySelector(".codexParallelJobSettings")?.scrollIntoView({ block: "nearest", inline: "nearest" });
-    else {
-      els.codexParallelTableWrap.scrollTop = scrollTop;
-      els.codexParallelTableWrap.scrollLeft = scrollLeft;
-    }
-    const focusTarget = activeWasSummary
-      ? targetRow?.querySelector(".codexParallelJobSettings summary")
-      : (activeClass ? targetRow?.querySelector(`.${activeClass}`) : null);
-    focusTarget?.focus?.({ preventScroll: true });
-  });
-  const summary = displayedRun.summary;
-  els.codexParallelSummary.hidden = !summary || !editable;
-  els.codexParallelSummaryText.textContent = summary || "";
-  const goalVisible = Boolean(displayedRun.goal) && ["planning", "draft", "review", "auditing", "accepted"].includes(displayedRun.status);
-  els.codexParallelGoalReview.hidden = !goalVisible;
-  if (goalVisible) {
-    if (["planning", "draft"].includes(displayedRun.status)) {
-      els.codexParallelGoalLabel.textContent = "根本目标";
-      els.codexParallelGoalText.textContent = displayedRun.goal.root || "尚未记录根本目标";
-      els.codexParallelGoalStatus.textContent = "阶段目标";
-      els.codexParallelGoalResult.textContent = displayedRun.goal.stage || "尚未记录阶段目标";
-    } else {
-      const goalView = parallelGoalView(displayedRun);
-      els.codexParallelGoalLabel.textContent = "本轮目标";
-      els.codexParallelGoalText.textContent = displayedRun.goal.immediate || "尚未记录本轮目标";
-      els.codexParallelGoalStatus.textContent = goalView.status;
-      els.codexParallelGoalResult.textContent = goalView.result;
-    }
-  }
-  els.codexParallelTableWrap.hidden = ["accepted", "rejected"].includes(displayedRun.status);
-  syncParallelAppendNodeOptions(displayedRun);
-  const appendable = ["draft", "approved", "preparing", "running", "supervising", "waiting_user", "paused", "coordinating", "review", "failed"].includes(displayedRun.status);
-  els.codexParallelPlanTools.hidden = !appendable;
-  els.codexParallelAddBranch.disabled = !appendable || codexParallelBranchPlanning;
-  els.codexParallelAddBranch.title = editable ? "让模型按选中节点生成一个分支草案" : "让模型按选中节点生成一个待审核分支";
-  els.codexParallelState.textContent = parallelStatusText(displayedRun);
-  els.codexParallelStart.hidden = !editable;
-  els.codexParallelStart.disabled = !editable;
-  els.codexParallelRegenerate.hidden = !["draft", "failed"].includes(displayedRun.status);
-  els.codexParallelRegenerate.disabled = !["draft", "failed"].includes(displayedRun.status);
-  els.codexParallelAppendConfirm.hidden = codexParallelPendingAppendJobs.size === 0;
-  els.codexParallelAppendConfirm.disabled = codexParallelBranchPlanning;
-  els.codexParallelAppendConfirm.textContent = codexParallelPendingAppendJobs.size
-    ? `确认加入 ${codexParallelPendingAppendJobs.size} 个分支`
-    : "确认加入分支";
-  const requiredContinuity = displayedRun.goal?.history?.length ? "stable" : "baseline";
-  const auditVisible = reviewing && (!displayedRun.review?.goalAssessment
-    || displayedRun.review.goalAssessment.alignment !== "aligned"
-    || displayedRun.review.goalAssessment.continuity !== requiredContinuity
-    || displayedRun.review?.goalAudit?.status === "failed");
-  els.codexParallelAudit.hidden = !auditVisible;
-  els.codexParallelAudit.disabled = !auditVisible;
-  els.codexParallelOpen.hidden = !displayedRun.coordinator?.threadId;
-  els.codexParallelSupervisorOpen.hidden = !displayedRun.supervisor?.threadId;
-  els.codexParallelMore.hidden = !displayedRun.coordinator?.threadId && !displayedRun.supervisor?.threadId && !auditVisible;
-  els.codexParallelReview.hidden = !reviewing;
-  els.codexParallelRetry.hidden = !reviewing || failedTaskIds.size === 0;
-  els.codexParallelRetry.disabled = !reviewing || failedTaskIds.size === 0;
-  els.codexParallelReject.hidden = !reviewing;
-  els.codexParallelReject.disabled = false;
-  els.codexParallelAccept.hidden = !reviewing;
-  els.codexParallelAccept.disabled = !displayedRun.review?.readyToAccept;
-  els.codexParallelAccept.title = displayedRun.review?.readyToAccept
-    ? "接受并应用；任务树同步在后台进行"
-    : (displayedRun.review?.warnings?.[0] || "实现、目标推进和长期目标连续性都通过后才能接受");
-  if (reviewing) {
-    const files = displayedRun.review.changedFiles || [];
-    const tests = [
-      ...(displayedRun.jobs || []).flatMap((job) => job.testResults || []),
-      ...(displayedRun.integrationTestResults || [])
-    ];
-    const passed = tests.filter((test) => test.ok).length;
-    els.codexParallelFiles.textContent = `${files.length} 个文件`;
-    els.codexParallelFiles.title = files.join("\n");
-    els.codexParallelTests.textContent = tests.length ? `${passed}/${tests.length} 通过` : "未配置命令";
-    els.codexParallelTests.title = tests.map((test) => `${test.ok ? "PASS" : "FAIL"} ${test.command}`).join("\n");
-    els.codexParallelPatch.textContent = displayedRun.review.patchPreview || "没有文本差异";
-    const warnings = displayedRun.review.warnings || [];
-    els.codexParallelReviewWarning.hidden = warnings.length === 0;
-    els.codexParallelReviewWarning.textContent = warnings.join("；");
-  }
 }
 
 async function pollCodexParallelRun() {
   if (!codexParallelRunId || !els.codexParallelDialog.open) return;
-  const generation = codexParallelPollGeneration;
   try {
-    const res = await fetch(`/api/codex/parallel/${codexParallelRunId}`);
-    const payload = await res.json();
-    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
-    if (generation !== codexParallelPollGeneration) return;
-    const run = payload.run;
-    renderParallelRun(run);
-    if (parallelRunNeedsPolling(run)) codexParallelPollTimer = setTimeout(pollCodexParallelRun, parallelPollDelay(run));
+    const response = await fetch(`/api/codex/parallel/${codexParallelRunId}`);
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    renderParallelRun(payload.run);
+    if (parallelRunNeedsPolling(payload.run)) {
+      codexParallelPollTimer = setTimeout(pollCodexParallelRun, parallelPollDelay(payload.run));
+    }
   } catch (error) {
-    if (generation !== codexParallelPollGeneration) return;
-    els.codexParallelState.textContent = `读取状态失败: ${error.message}`;
+    els.codexParallelState.textContent = `读取状态失败：${error.message}`;
     if (parallelRunNeedsPolling(codexParallelRun)) codexParallelPollTimer = setTimeout(pollCodexParallelRun, 5000);
   }
 }
@@ -7405,26 +6790,23 @@ async function pollCodexParallelRun() {
 async function generateCodexParallelPlan() {
   const objective = els.codexParallelObjective?.value.trim() || "";
   clearTimeout(codexParallelPollTimer);
-  codexParallelPendingAppendJobs.clear();
-  codexParallelBranchPlanning = false;
-  codexParallelRunId = "";
-  codexParallelRun = null;
   forgetCodexParallelRun();
   resetParallelDialog();
-  els.codexParallelRegenerate.disabled = true;
-  els.codexParallelState.textContent = "正在生成并行草案；模型较慢时会自动使用保守计划…";
+  els.codexParallelState.textContent = "正在生成并行计划";
   try {
-    const res = await fetch("/api/codex/parallel/plan", {
+    const response = await fetch("/api/codex/parallel/plan", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ objective })
     });
-    const payload = await res.json();
-    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
     renderParallelRun(payload.run);
-    if (payload.run.status === "planning") codexParallelPollTimer = setTimeout(pollCodexParallelRun, 600);
+    if (parallelRunNeedsPolling(payload.run)) codexParallelPollTimer = setTimeout(pollCodexParallelRun, parallelPollDelay(payload.run));
   } catch (error) {
     els.codexParallelState.textContent = error.message;
+    els.codexParallelObjective.disabled = false;
+    els.codexParallelRegenerate.hidden = false;
     els.codexParallelRegenerate.disabled = false;
   }
 }
@@ -7433,37 +6815,15 @@ async function resumeCodexParallelRun() {
   const savedId = rememberedCodexParallelRunId();
   if (!savedId) return false;
   try {
-    const res = await fetch(`/api/codex/parallel/${savedId}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const payload = await res.json();
-    if (!payload.run) throw new Error("运行记录为空");
+    const response = await fetch(`/api/codex/parallel/${savedId}`);
+    const payload = await response.json();
+    if (!response.ok || !payload.run) throw new Error(payload.error || "运行记录为空");
     renderParallelRun(payload.run);
-    if (parallelRunNeedsPolling(payload.run)) {
-      codexParallelPollTimer = setTimeout(pollCodexParallelRun, parallelPollDelay(payload.run));
-    }
+    if (parallelRunNeedsPolling(payload.run)) codexParallelPollTimer = setTimeout(pollCodexParallelRun, parallelPollDelay(payload.run));
     return true;
   } catch {
     forgetCodexParallelRun();
     return false;
-  }
-}
-
-async function loadParallelContextOptions() {
-  try {
-    const res = await fetch("/api/codex/threads");
-    const payload = await res.json();
-    if (!res.ok) return;
-    codexParallelContextOptions = (payload.threads || []).map((thread) => ({
-      contextKey: `codex-${thread.id}`,
-      threadId: thread.id,
-      title: thread.name || thread.preview || thread.id.slice(0, 8),
-      preview: thread.name ? thread.preview : "",
-      source: "codex",
-      updatedAt: thread.updatedAt || 0
-    }));
-    if (codexParallelRun) renderParallelRun(codexParallelRun);
-  } catch {
-    // A missing history list must not block the user from starting new independent branches.
   }
 }
 
@@ -7472,352 +6832,41 @@ async function openCodexParallelDialog() {
   clearTimeout(codexParallelPollTimer);
   resetParallelDialog();
   if (!els.codexParallelDialog.open) els.codexParallelDialog.showModal();
-  loadParallelContextOptions();
   if (!(await resumeCodexParallelRun())) {
     els.codexParallelObjective.value = "";
-    generateCodexParallelPlan();
+    await generateCodexParallelPlan();
   }
-}
-
-function editableControlValue(row, selector, fallback = "") {
-  const control = row.querySelector(selector);
-  return control && "value" in control ? control.value.trim() : String(fallback || "").trim();
-}
-
-function captureParallelDraftEdits(run) {
-  if (!codexParallelRun || codexParallelRun.id !== run?.id) return;
-  if (codexParallelRun.status !== "draft" && codexParallelPendingAppendJobs.size === 0) return;
-  for (const job of collectParallelJobs()) codexParallelDraftEdits.set(job.taskId, job);
-}
-
-function collectParallelJobs() {
-  return [...els.codexParallelRows.querySelectorAll("tr")].map((row) => {
-    const previous = codexParallelRun?.jobs?.find((job) => job.taskId === row.dataset.taskId) || {};
-    const instruction = editableControlValue(row, ".codexParallelInstruction", previous.instruction);
-    const writeSet = editableControlValue(row, ".codexParallelWriteSet", (previous.writeSet || []).join(", "));
-    const dependsOn = editableControlValue(row, ".codexParallelDependsOn", (previous.dependsOn || []).join(", "));
-    const dependencyPrompt = editableControlValue(row, ".codexParallelDependencyPrompt", previous.dependencyPrompt);
-    const acceptancePrompt = editableControlValue(row, ".codexParallelAcceptancePrompt", previous.acceptancePrompt);
-    const tests = editableControlValue(row, ".codexParallelJobTests", (previous.tests || []).join(" ; "));
-    const title = editableControlValue(row, ".codexParallelTitleInput", previous.title);
-    const nodeId = editableControlValue(row, ".codexParallelNodeId", previous.nodeId || row.dataset.nodeId);
-    const context = row.querySelector(".codexParallelContextSelect");
-    const selectedContext = context?.selectedOptions?.[0];
-    const contextPolicy = context?.value === "new"
-      ? "new"
-      : (context?.value?.startsWith("selected:") ? "selected" : (previous.contextPolicy || "reuse"));
-    const contextKey = contextPolicy === "selected"
-      ? (selectedContext?.dataset.contextKey || "")
-      : (contextPolicy === "new" ? "" : (context?.dataset.contextKey || previous.contextKey || ""));
-    const contextThreadId = contextPolicy === "selected"
-      ? (selectedContext?.dataset.contextThreadId || "")
-      : (contextPolicy === "new" ? "" : (context?.dataset.contextThreadId || previous.contextThreadId || ""));
-    const contextSource = contextPolicy === "selected"
-      ? (selectedContext?.dataset.contextSource || "codex")
-      : (contextPolicy === "new" ? "parallel" : (context?.dataset.contextSource || previous.contextSource || "parallel"));
-    const contextPreview = contextPolicy === "selected"
-      ? (selectedContext?.dataset.contextPreview || "")
-      : (context?.dataset.contextPreview || previous.contextPreview || "");
-    return {
-      taskId: row.dataset.taskId,
-      nodeId,
-      title,
-      summary: previous.summary || "",
-      instruction,
-      dependencyPrompt,
-      acceptancePrompt,
-      writeSet: writeSet.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
-      dependsOn: dependsOn.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean),
-      tests: tests.split(/\s*;\s*/).map((item) => item.trim()).filter(Boolean),
-      contextPolicy,
-      contextKey,
-      contextThreadId,
-      contextSource,
-      contextPreview,
-      contextLabel: previous.contextLabel || title || nodeId
-    };
-  });
 }
 
 async function planCodexParallelBranch() {
   if (!codexParallelRunId || !codexParallelRun || codexParallelBranchPlanning) return;
   const nodeId = els.codexParallelAppendNode?.value || codexParallelRun.goal?.stageNodeId || "";
-  const existingJobs = collectParallelJobs();
   codexParallelBranchPlanning = true;
   els.codexParallelAddBranch.disabled = true;
-  els.codexParallelState.textContent = `正在让模型按 ${nodeId} 生成一个可审核分支…`;
+  els.codexParallelState.textContent = `正在为 ${nodeId} 生成并加入新 Worker`;
   try {
-    const res = await fetch(`/api/codex/parallel/${codexParallelRunId}/branch-plan`, {
+    const planResponse = await fetch(`/api/codex/parallel/${codexParallelRunId}/branch`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         nodeId,
-        objective: els.codexParallelObjective?.value.trim() || codexParallelRun.objective || "",
-        existingJobs
+        objective: codexParallelRun.objective || ""
       })
     });
-    const payload = await res.json();
-    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
-    const job = { ...payload.proposal.job, status: "planned", testResults: [], pendingAppend: codexParallelRun.status !== "draft" };
-    if (codexParallelRun.status === "draft") {
-      const jobs = collectParallelJobs();
-      jobs.push(job);
-      renderParallelRun({ ...codexParallelRun, jobs }, { focusTaskId: job.taskId });
-    } else {
-      codexParallelPendingAppendJobs.set(job.taskId, job);
-      renderParallelRun(codexParallelRun, { focusTaskId: job.taskId });
+    const planPayload = await planResponse.json();
+    if (!planResponse.ok) throw new Error(planPayload.error || `HTTP ${planResponse.status}`);
+
+    renderParallelRun(planPayload.run);
+    if (parallelRunNeedsPolling(planPayload.run)) {
+      clearTimeout(codexParallelPollTimer);
+      codexParallelPollTimer = setTimeout(pollCodexParallelRun, 300);
     }
-    els.codexParallelState.textContent = payload.proposal.summary || "已生成分支草案，请审核后确认加入";
   } catch (error) {
     els.codexParallelState.textContent = error.message;
   } finally {
     codexParallelBranchPlanning = false;
-    els.codexParallelAddBranch.disabled = false;
-    els.codexParallelAppendConfirm.disabled = false;
+    els.codexParallelAddBranch.disabled = !["queued", "preparing", "running"].includes(codexParallelRun?.status);
   }
-}
-
-async function appendPendingCodexParallelBranches() {
-  if (!codexParallelRunId || !codexParallelPendingAppendJobs.size) return;
-  const contextError = validateParallelContextChoices();
-  if (contextError) return;
-  const jobs = collectParallelJobs().filter((job) => codexParallelPendingAppendJobs.has(job.taskId));
-  codexParallelBranchPlanning = true;
-  els.codexParallelState.textContent = "正在把已审核的新增分支加入调度队列…";
-  try {
-    const res = await fetch(`/api/codex/parallel/${codexParallelRunId}/append`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jobs })
-    });
-    const payload = await res.json();
-    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
-    for (const job of jobs) {
-      codexParallelPendingAppendJobs.delete(job.taskId);
-      codexParallelDraftEdits.delete(job.taskId);
-    }
-    renderParallelRun(payload.run, { focusTaskId: jobs[0]?.taskId || "" });
-    if (parallelRunNeedsPolling(payload.run)) codexParallelPollTimer = setTimeout(pollCodexParallelRun, 400);
-  } catch (error) {
-    els.codexParallelState.textContent = error.message;
-  } finally {
-    codexParallelBranchPlanning = false;
-    els.codexParallelAddBranch.disabled = false;
-    els.codexParallelAppendConfirm.disabled = false;
-  }
-}
-
-function removeCodexParallelBranch(taskId) {
-  if (codexParallelPendingAppendJobs.has(taskId)) {
-    codexParallelPendingAppendJobs.delete(taskId);
-    renderParallelRun(codexParallelRun);
-    return;
-  }
-  if (codexParallelRun?.status !== "draft") return;
-  const jobs = collectParallelJobs();
-  if (jobs.length <= 2) {
-    els.codexParallelState.textContent = "并行计划至少保留 2 个分支";
-    return;
-  }
-  const nextJobs = jobs
-    .filter((job) => job.taskId !== taskId)
-    .map((job) => ({ ...job, dependsOn: job.dependsOn.filter((id) => id !== taskId) }));
-  renderParallelRun({ ...codexParallelRun, jobs: nextJobs });
-}
-
-function parallelDraftError(jobs) {
-  if (jobs.length < 2) return "并行计划至少需要 2 个分支";
-  const contextError = validateParallelContextChoices();
-  if (contextError) return contextError.message;
-  for (const job of jobs) {
-    if (!job.nodeId) return { taskId: job.taskId, selector: ".codexParallelNodeId", message: `${job.title || job.taskId} 需要填写节点 ID` };
-    if (!job.instruction) return { taskId: job.taskId, selector: ".codexParallelInstruction", message: `${job.title || job.taskId} 需要填写完整任务` };
-    if (!job.writeSet.length) return { taskId: job.taskId, selector: ".codexParallelWriteSet", message: `${job.title || job.taskId} 需要填写分支负责修改的文件范围` };
-  }
-  return null;
-}
-
-function showParallelDraftError(error) {
-  if (typeof error === "string") {
-    els.codexParallelState.textContent = error;
-    return;
-  }
-  const row = [...els.codexParallelRows.querySelectorAll("tr")].find((item) => item.dataset.taskId === error.taskId);
-  const details = row?.querySelector(".codexParallelJobSettings");
-  const control = row?.querySelector(error.selector);
-  if (details) details.open = true;
-  if (control) {
-    control.setAttribute("aria-invalid", "true");
-    control.focus();
-    control.scrollIntoView({ block: "center", inline: "nearest" });
-  }
-  els.codexParallelState.textContent = error.message;
-}
-
-async function startCodexParallel(event) {
-  event.preventDefault();
-  if (!codexParallelRunId || codexParallelRun?.status !== "draft") return;
-  els.codexParallelRows.querySelectorAll('[aria-invalid="true"]').forEach((control) => control.removeAttribute("aria-invalid"));
-  const jobs = collectParallelJobs();
-  const draftError = parallelDraftError(jobs);
-  if (draftError) {
-    showParallelDraftError(draftError);
-    return;
-  }
-  els.codexParallelStart.disabled = true;
-  els.codexParallelRegenerate.disabled = true;
-  els.codexParallelState.textContent = "正在冻结审核计划和当前工作区快照…";
-  try {
-    const res = await fetch(`/api/codex/parallel/${codexParallelRunId}/approve`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        objective: els.codexParallelObjective?.value.trim() || "",
-        jobs,
-        integrationTests: codexParallelRun.integrationTests || []
-      })
-    });
-    const payload = await res.json();
-    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
-    codexParallelDraftEdits.clear();
-    renderParallelRun(payload.run);
-    codexParallelPollTimer = setTimeout(pollCodexParallelRun, 400);
-  } catch (error) {
-    els.codexParallelState.textContent = error.message;
-    els.codexParallelStart.disabled = false;
-    els.codexParallelRegenerate.disabled = false;
-  }
-}
-
-async function retryFailedCodexParallel() {
-  if (!codexParallelRunId || codexParallelRun?.status !== "review" || !codexParallelRun.review?.failedTasks?.length) return;
-  els.codexParallelRetry.disabled = true;
-  els.codexParallelReject.disabled = true;
-  els.codexParallelState.textContent = "正在冻结失败分支修订，已通过分支保持不变…";
-  try {
-    const res = await fetch(`/api/codex/parallel/${codexParallelRunId}/retry`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jobs: collectParallelJobs(), integrationTests: codexParallelRun.integrationTests || [] })
-    });
-    const payload = await res.json();
-    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
-    renderParallelRun(payload.run);
-    codexParallelPollTimer = setTimeout(pollCodexParallelRun, 400);
-  } catch (error) {
-    els.codexParallelState.textContent = error.message;
-    els.codexParallelRetry.disabled = false;
-    els.codexParallelReject.disabled = false;
-  }
-}
-
-async function finishCodexParallel(action) {
-  if (!codexParallelRunId) return;
-  els.codexParallelAccept.disabled = true;
-  els.codexParallelRetry.disabled = true;
-  els.codexParallelReject.disabled = true;
-  els.codexParallelState.textContent = action === "accept" ? "正在应用已审核的差异…" : "正在丢弃隔离工作区…";
-  try {
-    const res = await fetch(`/api/codex/parallel/${codexParallelRunId}/${action}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}"
-    });
-    const payload = await res.json();
-    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
-    renderParallelRun(payload.run);
-    if (!parallelRunTerminal(payload.run)) codexParallelPollTimer = setTimeout(pollCodexParallelRun, 400);
-  } catch (error) {
-    els.codexParallelState.textContent = error.message;
-    els.codexParallelAccept.disabled = !codexParallelRun?.review?.readyToAccept;
-    els.codexParallelRetry.disabled = !codexParallelRun?.review?.failedTasks?.length;
-    els.codexParallelReject.disabled = false;
-  }
-}
-
-async function auditCodexParallelGoal() {
-  if (!codexParallelRunId || codexParallelRun?.status !== "review") return;
-  els.codexParallelAudit.disabled = true;
-  els.codexParallelState.textContent = "正在核验目标";
-  try {
-    const res = await fetch(`/api/codex/parallel/${codexParallelRunId}/audit`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}"
-    });
-    const payload = await res.json();
-    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
-    renderParallelRun(payload.run);
-    codexParallelPollTimer = setTimeout(pollCodexParallelRun, 400);
-  } catch (error) {
-    els.codexParallelState.textContent = error.message;
-    els.codexParallelAudit.disabled = false;
-  }
-}
-
-async function openParallelCoordinator() {
-  if (!codexParallelRunId) return;
-  const res = await fetch(`/api/codex/parallel/${codexParallelRunId}/open`, { method: "POST" });
-  const payload = await res.json();
-  if (!res.ok) els.codexParallelState.textContent = payload.error || `HTTP ${res.status}`;
-}
-
-async function postParallelSupervisorAction(action, body = {}) {
-  if (!codexParallelRunId || codexParallelSupervisorBusy) return null;
-  codexParallelSupervisorBusy = true;
-  const generation = ++codexParallelPollGeneration;
-  renderParallelSupervisor(codexParallelRun);
-  clearTimeout(codexParallelPollTimer);
-  try {
-    const res = await fetch(`/api/codex/parallel/${encodeURIComponent(codexParallelRunId)}/supervisor/${action}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body)
-    });
-    const payload = await res.json();
-    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
-    if (payload.run && generation === codexParallelPollGeneration) renderParallelRun(payload.run);
-    return payload;
-  } catch (error) {
-    els.codexParallelState.textContent = error.message;
-    return null;
-  } finally {
-    codexParallelSupervisorBusy = false;
-    if (codexParallelRun) renderParallelSupervisor(codexParallelRun);
-    if (parallelRunNeedsPolling(codexParallelRun)) {
-      codexParallelPollTimer = setTimeout(pollCodexParallelRun, parallelPollDelay(codexParallelRun));
-    }
-  }
-}
-
-async function sendParallelSupervisorMessage() {
-  const message = els.codexParallelSupervisorInput?.value.trim() || "";
-  if (!message) {
-    els.codexParallelSupervisorInput?.focus();
-    return;
-  }
-  els.codexParallelSupervisorInput.value = "";
-  const payload = await postParallelSupervisorAction("message", { message });
-  if (!payload) {
-    els.codexParallelSupervisorInput.value = message;
-    els.codexParallelSupervisorInput.focus();
-    return;
-  }
-  els.codexParallelState.textContent = "消息已交给总控";
-}
-
-async function toggleParallelSupervisor() {
-  const supervisor = codexParallelRun?.supervisor || {};
-  const paused = supervisor.paused || supervisor.status === "paused" || codexParallelRun?.status === "paused";
-  const payload = await postParallelSupervisorAction(paused ? "resume" : "pause");
-  if (payload) els.codexParallelState.textContent = paused ? "自动推进已继续" : "自动推进已暂停";
-}
-
-async function openParallelSupervisor() {
-  if (!codexParallelRunId) return;
-  const payload = await postParallelSupervisorAction("open");
-  if (!payload) return;
-  els.codexParallelMore.open = false;
 }
 
 function renderCodexThreadMenu({ threads = [], systemThreads = [], systemThreadCount = systemThreads.length, pinned = "", presets = [] } = {}) {
@@ -7964,14 +7013,6 @@ async function loadCodexThreadMenu(attempt = 0, refresh = false) {
     const res = await fetch(refresh ? "/api/codex/threads?refresh=1" : "/api/codex/threads");
     const payload = await res.json();
     if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
-    codexParallelContextOptions = (payload.threads || []).map((thread) => ({
-      contextKey: `codex-${thread.id}`,
-      threadId: thread.id,
-      title: thread.name || thread.preview || thread.id.slice(0, 8),
-      preview: thread.name ? thread.preview : "",
-      source: "codex",
-      updatedAt: thread.updatedAt || 0
-    }));
     renderCodexThreadMenu(payload);
     if ((payload.cache === "warming" || payload.cache === "refreshing") && attempt < 30) {
       const loading = document.createElement("p");
@@ -8092,23 +7133,8 @@ els.codexThreadsBtn?.addEventListener("click", () => {
   else closeCodexThreadMenu();
 });
 els.codexParallelClose?.addEventListener("click", () => els.codexParallelDialog.close());
-els.codexParallelForm?.addEventListener("submit", startCodexParallel);
 els.codexParallelRegenerate?.addEventListener("click", generateCodexParallelPlan);
 els.codexParallelAddBranch?.addEventListener("click", planCodexParallelBranch);
-els.codexParallelAppendConfirm?.addEventListener("click", appendPendingCodexParallelBranches);
-els.codexParallelOpen?.addEventListener("click", openParallelCoordinator);
-els.codexParallelSupervisorOpen?.addEventListener("click", openParallelSupervisor);
-els.codexParallelSupervisorSend?.addEventListener("click", sendParallelSupervisorMessage);
-els.codexParallelSupervisorToggle?.addEventListener("click", toggleParallelSupervisor);
-els.codexParallelSupervisorInput?.addEventListener("keydown", (event) => {
-  if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
-  event.preventDefault();
-  sendParallelSupervisorMessage();
-});
-els.codexParallelAudit?.addEventListener("click", auditCodexParallelGoal);
-els.codexParallelRetry?.addEventListener("click", retryFailedCodexParallel);
-els.codexParallelReject?.addEventListener("click", () => finishCodexParallel("reject"));
-els.codexParallelAccept?.addEventListener("click", () => finishCodexParallel("accept"));
 els.codexParallelDialog?.addEventListener("close", () => clearTimeout(codexParallelPollTimer));
 
 document.addEventListener("click", (event) => {

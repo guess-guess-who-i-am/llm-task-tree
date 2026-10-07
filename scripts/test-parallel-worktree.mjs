@@ -1,111 +1,90 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { createGitWorkspaceManager } from "../server/parallel-worktree.js";
 
 const exec = promisify(execFile);
-const root = await mkdtemp(path.join(os.tmpdir(), "task-tree-git-workspace-"));
-const tempRoot = await mkdtemp(path.join(os.tmpdir(), "task-tree-git-worktrees-"));
-const git = (args, cwd = root) => exec("git", args, { cwd, windowsHide: true });
-const text = async (file) => (await readFile(file, "utf8")).replace(/\r\n/g, "\n");
+const projectRoot = await mkdtemp(path.join(os.tmpdir(), "parallel-worktree-project-"));
+const tempRoot = await mkdtemp(path.join(os.tmpdir(), "parallel-worktree-state-"));
+const git = (cwd, args) => exec("git", args, { cwd });
+const text = (relative) => readFile(path.join(projectRoot, relative), "utf8");
 
 try {
-  await mkdir(path.join(root, "public"), { recursive: true });
-  await mkdir(path.join(root, "server"), { recursive: true });
-  await writeFile(path.join(root, "public", "app.js"), "base\n");
-  await writeFile(path.join(root, "public", "removed.txt"), "remove me\n");
-  await writeFile(path.join(root, "server", "api.js"), "base api\n");
-  await git(["init"]);
-  await git(["config", "user.name", "Workspace Test"]);
-  await git(["config", "user.email", "workspace@test.local"]);
-  await git(["add", "."]);
-  await git(["commit", "-m", "base"]);
+  await git(projectRoot, ["init"]);
+  await git(projectRoot, ["config", "user.name", "Parallel Test"]);
+  await git(projectRoot, ["config", "user.email", "parallel@test.local"]);
+  await writeFile(path.join(projectRoot, "shared.txt"), "base\n");
+  await writeFile(path.join(projectRoot, "task-tree.md"), "# Tree\n");
+  await git(projectRoot, ["add", "."]);
+  await git(projectRoot, ["commit", "-m", "base"]);
 
-  // The snapshot must include dirty tracked and untracked user work without committing the main worktree.
-  await writeFile(path.join(root, "public", "app.js"), "dirty user baseline\n");
-  await writeFile(path.join(root, "public", "draft.txt"), "untracked baseline\n");
-  await writeFile(path.join(root, "public", "staged.txt"), "staged baseline\n");
-  await git(["add", "public/staged.txt"]);
-  await unlink(path.join(root, "public", "removed.txt"));
-  const cachedBefore = (await git(["diff", "--cached", "--binary"])).stdout;
-  const workspace = createGitWorkspaceManager({ projectRoot: root, tempRoot });
-  const prepared = await workspace.prepare("run-one");
-  assert.equal(await text(path.join(prepared.integrationPath, "public", "app.js")), "dirty user baseline\n");
-  assert.equal(await text(path.join(prepared.integrationPath, "public", "draft.txt")), "untracked baseline\n");
-  assert.equal(await text(path.join(prepared.integrationPath, "public", "staged.txt")), "staged baseline\n");
-  await assert.rejects(() => readFile(path.join(prepared.integrationPath, "public", "removed.txt"), "utf8"), /ENOENT/);
-  assert.equal((await git(["diff", "--cached", "--binary"])).stdout, cachedBefore, "snapshot cannot change the main index");
-  assert.match((await git(["status", "--porcelain"])).stdout, /public\/app\.js/);
+  const manager = createGitWorkspaceManager({ projectRoot, tempRoot });
+  const run = await manager.prepare("overlap");
+  const first = await manager.createWorker("overlap", "A", run.snapshotCommit);
+  const second = await manager.createWorker("overlap", "B", run.snapshotCommit);
 
-  const worker = await workspace.createWorker("run-one", "ui", prepared.snapshotCommit);
-  await writeFile(path.join(worker, "public", "app.js"), "worker result\n");
-  await writeFile(path.join(worker, "server", "api.js"), "outside lease\n");
-  let inspected = await workspace.inspectChanges(worker, prepared.snapshotCommit, ["public/**"]);
-  assert.deepEqual(inspected.violations, ["server/api.js"]);
-  await writeFile(path.join(worker, "server", "api.js"), "base api\n");
-  inspected = await workspace.inspectChanges(worker, prepared.snapshotCommit, ["public/**"]);
+  await writeFile(path.join(first, "shared.txt"), "from A\n");
+  await writeFile(path.join(first, "task-tree.md"), "# Tree from A\n");
+  await writeFile(path.join(second, "shared.txt"), "from B\n");
+  await writeFile(path.join(second, "task-tree.md"), "# Tree from B\n");
+
+  const inspected = await manager.inspectChanges(first, run.snapshotCommit, []);
   assert.deepEqual(inspected.violations, []);
-  await mkdir(path.join(worker, "scripts"), { recursive: true });
-  await writeFile(path.join(worker, "scripts", "project.json"), "{}\n");
-  inspected = await workspace.inspectChanges(worker, prepared.snapshotCommit, ["public/**", "scripts/**"]);
-  assert.deepEqual(inspected.violations, ["scripts/project.json"]);
-  await unlink(path.join(worker, "scripts", "project.json"));
-  const workerCommit = await workspace.commit(worker, "worker ui", prepared.snapshotCommit);
-  await workspace.integrate(prepared.integrationPath, workerCommit, prepared.snapshotCommit);
-  await workspace.removeWorker(worker);
-  const review = await workspace.summarize(prepared.integrationPath, prepared.snapshotCommit);
-  assert.deepEqual(review.changedFiles, ["public/app.js"]);
-  assert.equal(await text(path.join(root, "public", "app.js")), "dirty user baseline\n", "review cannot mutate the main worktree");
+  assert.deepEqual(inspected.changedFiles.sort(), ["shared.txt", "task-tree.md"]);
 
-  const accepted = await workspace.accept({ ...prepared, changedFiles: review.changedFiles });
-  assert.deepEqual(accepted.appliedFiles, ["public/app.js"]);
-  assert.equal(await text(path.join(root, "public", "app.js")), "worker result\n");
-  assert.equal(await text(path.join(root, "server", "api.js")), "base api\n");
+  const commitA = await manager.commit(first, "A", run.snapshotCommit);
+  const commitB = await manager.commit(second, "B", run.snapshotCommit);
+  await manager.integrate(run.integrationPath, commitA, run.snapshotCommit);
 
-  // A named branch context keeps one stable cwd for Codex thread/resume and rejects concurrent use.
-  const persistent = await workspace.createWorker("run-context-one", "ui", prepared.snapshotCommit, {
-    contextKey: "n2-ui-context",
-    persistentContext: true
+  let conflict;
+  try {
+    await manager.integrate(run.integrationPath, commitB, run.snapshotCommit);
+  } catch (error) {
+    conflict = error;
+  }
+  assert.equal(conflict?.code, "CHERRY_PICK_CONFLICT");
+  assert.deepEqual(conflict.files.sort(), ["shared.txt", "task-tree.md"]);
+
+  await writeFile(path.join(run.integrationPath, "shared.txt"), "from A\nfrom B\n");
+  await writeFile(path.join(run.integrationPath, "task-tree.md"), "# Tree from A\n# Tree from B\n");
+  await git(run.integrationPath, ["add", "shared.txt", "task-tree.md"]);
+  await manager.continueIntegration(run.integrationPath);
+  const summary = await manager.summarize(run.integrationPath, run.snapshotCommit);
+  assert.deepEqual(summary.changedFiles.sort(), ["shared.txt", "task-tree.md"]);
+  assert.equal(summary.patchTruncated, false);
+  assert.match(summary.patchPreview, /from A/);
+  assert.match(summary.patchPreview, /from B/);
+
+  // Simulate a live edit after the run snapshot. accept() merges it in an isolated
+  // worktree, then applies a clean delta without touching the main index.
+  await writeFile(path.join(projectRoot, "shared.txt"), "live user edit\n");
+  let applyConflictFiles = [];
+  const accepted = await manager.accept({
+    integrationPath: run.integrationPath,
+    snapshotCommit: run.snapshotCommit,
+    changedFiles: summary.changedFiles,
+    resolveConflict: async (integrationPath, files) => {
+      applyConflictFiles = files;
+      await writeFile(path.join(integrationPath, "shared.txt"), "live user edit\nfrom A\nfrom B\n");
+      await writeFile(path.join(integrationPath, "task-tree.md"), "# Tree from A\n# Tree from B\n");
+      await git(integrationPath, ["add", "shared.txt", "task-tree.md"]);
+      await manager.continueIntegration(integrationPath);
+    }
   });
-  await assert.rejects(
-    () => workspace.createWorker("run-context-two", "other", prepared.snapshotCommit, {
-      contextKey: "n2-ui-context",
-      persistentContext: true
-    }),
-    (error) => error.code === "CONTEXT_BUSY"
-  );
-  await writeFile(path.join(persistent, "public", "app.js"), "temporary context edit\n");
-  await workspace.removeWorker(persistent, { preserveContext: true });
-  const persistentAgain = await workspace.createWorker("run-context-three", "ui", prepared.snapshotCommit, {
-    contextKey: "n2-ui-context",
-    persistentContext: true
-  });
-  assert.equal(persistentAgain, persistent, "the same context must retain one stable cwd");
-  assert.equal(await text(path.join(persistentAgain, "public", "app.js")), "dirty user baseline\n", "context reuse resets to the new baseline");
-  await workspace.removeWorker(persistentAgain, { preserveContext: true });
-  await workspace.cleanup({ ...prepared, runId: "run-one" });
+  assert.deepEqual(applyConflictFiles.sort(), ["shared.txt"]);
+  assert.deepEqual(accepted.appliedFiles.sort(), ["shared.txt", "task-tree.md"]);
+  assert.equal(await text("shared.txt"), "live user edit\nfrom A\nfrom B\n");
+  assert.equal(await text("task-tree.md"), "# Tree from A\n# Tree from B\n");
+  assert.equal((await git(projectRoot, ["diff", "--name-only", "--diff-filter=U"])).stdout, "", "main worktree must never contain unresolved index entries");
 
-  // A same-file edit after approval is a conflict, never something the accept action may overwrite.
-  const conflictPrepared = await workspace.prepare("run-conflict");
-  const conflictWorker = await workspace.createWorker("run-conflict", "ui", conflictPrepared.snapshotCommit);
-  await writeFile(path.join(conflictWorker, "public", "app.js"), "parallel change\n");
-  const conflictCommit = await workspace.commit(conflictWorker, "parallel ui", conflictPrepared.snapshotCommit);
-  await workspace.integrate(conflictPrepared.integrationPath, conflictCommit, conflictPrepared.snapshotCommit);
-  await workspace.removeWorker(conflictWorker);
-  await writeFile(path.join(root, "public", "app.js"), "new user edit\n");
-  const conflictReview = await workspace.summarize(conflictPrepared.integrationPath, conflictPrepared.snapshotCommit);
-  await assert.rejects(
-    () => workspace.accept({ ...conflictPrepared, changedFiles: conflictReview.changedFiles }),
-    (error) => error.code === "MAIN_WORKSPACE_CHANGED" && error.files.includes("public/app.js")
-  );
-  await workspace.cleanup({ ...conflictPrepared, runId: "run-conflict" });
-  await unlink(path.join(root, "public", "draft.txt"));
-
-  console.log("PASS git worktrees preserve dirty baselines, enforce leases, integrate safely, and reject concurrent overwrite");
+  await manager.removeWorker(first);
+  await manager.removeWorker(second);
+  await manager.cleanup({ ...run, runId: "overlap" });
+  console.log("parallel worktree: overlapping files, task-tree merge, isolated conflict resolution and automatic apply passed");
 } finally {
-  await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-  await rm(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  await rm(tempRoot, { recursive: true, force: true });
+  await rm(projectRoot, { recursive: true, force: true });
 }

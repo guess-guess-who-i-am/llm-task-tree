@@ -1,55 +1,150 @@
 import { createHash, randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdir, readdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { archiveCodexThread, startCodexTurn, threadDeepLink } from "./codex-run.js";
 import { CONTEXT_ROTATE_THRESHOLD, CONTEXT_SOFT_THRESHOLD } from "./context-policy.js";
-import { createExecutionScopeStore, executionScopeEnvironment } from "./execution-scope.js";
 import { createGitWorkspaceManager } from "./parallel-worktree.js";
 import { parseTreeNodeFields } from "./tree-quality.js";
 
-const MAX_WORKERS = 4;
-const MAX_REPORT_CHARS = 24000;
-const MAX_EVENTS = 120;
-const MAX_PEER_REQUESTS = 8;
-const MAX_PEER_MESSAGES = 24;
-const MAX_PEER_RESPONSE_CHARS = 6000;
-const MAX_SUPERVISOR_ROUNDS = 8;
-const MAX_SUPERVISOR_JOBS_PER_ROUND = 4;
-const MAX_SUPERVISOR_JOBS = 24;
-const MAX_SUPERVISOR_MESSAGES = 40;
-const PLANNER_TIMEOUT_MS = 3 * 60 * 1000;
-const PLANNER_MODEL = String(process.env.TASK_TREE_PLANNER_MODEL || "").trim();
+// Planner context is supplied explicitly in the prompt. Reusing an ever-growing
+// conversation made the first response increasingly slow. Keep the turn short
+// and fail fast so a wedged app-server request cannot block the whole run.
+const PLANNER_TIMEOUT_MS = Math.max(30_000, Number(process.env.TASK_TREE_PLANNER_TIMEOUT_MS) || 90_000);
+// Keep planning on the same high-quality model requested for implementation. Planning
+// still uses a separate effort because a small structured decomposition does not need
+// the xhigh setting that previously exhausted the whole completion timeout.
+const PLANNER_MODEL = String(process.env.TASK_TREE_PLANNER_MODEL || "deepseek-v4.1-flash").trim();
+const PLANNER_REASONING_EFFORT = String(process.env.TASK_TREE_PLANNER_REASONING_EFFORT || "low").trim();
 const ABANDONED_PLANNING_MS = PLANNER_TIMEOUT_MS + 5 * 1000;
-const GOAL_ALIGNMENTS = new Set(["aligned", "off_target", "unknown"]);
-const GOAL_PROGRESS = new Set(["reached", "progress", "no_progress", "unknown"]);
-const GOAL_CONTINUITY = new Set(["baseline", "stable", "drifted", "unknown"]);
-const MAX_GOAL_HISTORY = 6;
-const MAX_CONTEXT_OPTIONS = 24;
 const WORKER_HANDOFF_PATH = ".task-tree-context/handoff.json";
 const CONTEXT_POLICIES = new Set(["reuse", "new", "selected"]);
-const RESERVED_FILES = [
-  "task-tree.md",
-  "task-trees.json",
-  "scripts/project.json",
-  "scripts/run.json"
-];
-const RESERVED_DIRECTORIES = [
-  "versions/",
-  ".task-tree-runs/",
-  ".task-tree-scopes/",
-  ".task-tree-context/"
-];
+
+function parsePlannerEnv(text) {
+  const values = {};
+  for (const raw of String(text || "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const index = line.indexOf("=");
+    if (index <= 0) continue;
+    let value = line.slice(index + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+    values[line.slice(0, index).trim()] = value;
+  }
+  return values;
+}
+
+async function deepSeekPlannerConfig(projectRoot) {
+  let fileEnv = {};
+  try { fileEnv = parsePlannerEnv(await readFile(path.join(projectRoot, ".env"), "utf8")); } catch {}
+  const env = { ...fileEnv, ...process.env };
+  const baseUrl = String(env.TASK_TREE_PLANNER_BASE_URL || env.MODEL_AGENT_MAIN_BASE_URL || "").trim().replace(/\/+$/, "");
+  const apiKey = String(env.TASK_TREE_PLANNER_API_KEY || env.MODEL_AGENT_MAIN_API_KEY || "").trim();
+  const model = String(env.TASK_TREE_PLANNER_MODEL || env.MODEL_AGENT_MAIN_MODEL || PLANNER_MODEL).trim();
+  return baseUrl && apiKey && model ? { baseUrl, apiKey, model } : null;
+}
+
+async function requestDeepSeekPlanner({ projectRoot, prompt, outputSchema }) {
+  const config = await deepSeekPlannerConfig(projectRoot);
+  if (!config) return null;
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PLANNER_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${config.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${config.apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: config.model,
+        messages: [
+          { role: "system", content: "你是任务拆分器。只返回符合要求的 JSON，不调用工具，不解释过程。" },
+          { role: "user", content: prompt }
+        ],
+        temperature: 0.1,
+        max_tokens: 3000,
+        response_format: { type: "json_object" }
+      }),
+      signal: controller.signal
+    });
+    const raw = await response.text();
+    let data;
+    try { data = JSON.parse(raw); } catch { throw new Error(`DeepSeek 返回非 JSON：${raw.slice(0, 300)}`); }
+    if (!response.ok) throw new Error(data?.error?.message || `DeepSeek HTTP ${response.status}`);
+    const output = String(data?.choices?.[0]?.message?.content || "").trim();
+    if (!output) throw new Error("DeepSeek 返回空计划");
+    return {
+      output,
+      threadId: `deepseek-planner-${randomUUID()}`,
+      turnId: `deepseek-turn-${randomUUID()}`,
+      resumed: false,
+      timing: { provider: "deepseek", model: config.model, completedMs: Date.now() - startedAt, outputChars: output.length },
+      outputSchema
+    };
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error(`DeepSeek Planner 超时（${Math.round(PLANNER_TIMEOUT_MS / 1000)}s）`);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+const PLANNER_OUTPUT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["summary", "coverage", "jobs"],
+  properties: {
+    summary: { type: "string", minLength: 1 },
+    coverage: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["goal", "taskIds"],
+        properties: {
+          goal: { type: "string", minLength: 1 },
+          taskIds: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } }
+        }
+      }
+    },
+    jobs: {
+      type: "array",
+      minItems: 2,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["taskId", "nodeId", "title", "instruction", "writeSet", "dependsOn"],
+        properties: {
+          taskId: { type: "string", minLength: 1 },
+          nodeId: { type: "string", minLength: 1 },
+          title: { type: "string", minLength: 1 },
+          instruction: { type: "string", minLength: 1 },
+          writeSet: { type: "array", items: { type: "string" } },
+          dependsOn: { type: "array", items: { type: "string", minLength: 1 } }
+        }
+      }
+    }
+  }
+};
+const BRANCH_OUTPUT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["job"],
+  properties: {
+    job: {
+      ...PLANNER_OUTPUT_SCHEMA.properties.jobs.items
+    }
+  }
+};
 
 function cleanId(value, fallback = "") {
   return String(value || "").trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || fallback;
 }
 
 function cleanObjective(value) {
-  return String(value || "").trim().slice(0, 4000);
+  return String(value || "").trim();
 }
 
-function compactGoalText(value, max = 240) {
-  return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
+function compactGoalText(value) {
+  return String(value || "").trim();
 }
 
 function runtimeTree(run) {
@@ -68,17 +163,10 @@ function runtimeTree(run) {
       title: job.title,
       summary: job.summary || "",
       status: job.status === "queued" ? "planned" : job.status,
-      round: Number(job.supervisorRound) || 0,
       dependsOn: job.dependsOn || [],
       threadId: job.contextThreadId || job.threadId || "",
       evidence: compactGoalText(job.evidence || job.error || "", 180)
     })),
-    supervisor: run.supervisor ? {
-      status: run.supervisor.status,
-      rounds: Number(run.supervisor.rounds) || 0,
-      lastDecision: run.supervisor.lastDecision || "",
-      threadId: run.supervisor.threadId || ""
-    } : null,
     updatedAt: run.updatedAt
   };
 }
@@ -97,7 +185,7 @@ function contextLabel(job) {
 }
 
 export function buildParallelContextOption(run, job, { allowActive = false } = {}) {
-  const durableRun = ["accepted", "rejected", "failed"].includes(String(run?.status || ""));
+  const durableRun = ["accepted", "failed"].includes(String(run?.status || ""));
   const durableJob = ["completed", "failed", "blocked"].includes(String(job?.status || ""));
   const explicitlyPersistent = job?.contextPersistent === true;
   if (allowActive ? !explicitlyPersistent && !(durableRun && durableJob) : !(durableRun && durableJob)) return null;
@@ -110,7 +198,7 @@ export function buildParallelContextOption(run, job, { allowActive = false } = {
     nodeId: cleanId(job.nodeId),
     title: contextLabel(job),
     preview: compactGoalText(job?.contextPreview || job?.summary || job?.instruction || "", 96),
-    lastOutput: String(job?.output || job?.contextResult || "").replace(/\s+/g, " ").trim().slice(-1200),
+    lastOutput: String(job?.output || job?.contextResult || ""),
     source: job?.contextSource || "parallel",
     writeSet: Array.isArray(job.writeSet) ? [...job.writeSet] : [],
     generation: Number(job.contextGeneration) || 1,
@@ -132,7 +220,7 @@ function mergeContextOptions(...groups) {
     if (!key || !threadId) continue;
     merged.set(key, { ...item, contextKey: key, threadId });
   }
-  return [...merged.values()].slice(-MAX_CONTEXT_OPTIONS).reverse();
+  return [...merged.values()].reverse();
 }
 
 async function readContextOptions(runsDir, excludeRunId = "") {
@@ -163,6 +251,90 @@ function graphStateValue(markdown, field) {
   return section.match(new RegExp(`^-\\s+${field}:\\s*(.*)$`, "m"))?.[1]?.trim() || "";
 }
 
+function parsePlannerEdges(markdown) {
+  const lines = String(markdown || "").replace(/\r/g, "").split("\n");
+  const edges = [];
+  let inEdges = false;
+  let edge = null;
+  const flush = () => {
+    if (edge?.endpoints?.length >= 2) edges.push(edge);
+    edge = null;
+  };
+  for (const line of lines) {
+    if (/^# Edges\s*$/.test(line)) {
+      inEdges = true;
+      continue;
+    }
+    if (!inEdges) continue;
+    const heading = line.match(/^##\s+(\S+)\s+-\s+(.+)$/);
+    if (heading) {
+      flush();
+      edge = { id: heading[1], title: heading[2].trim(), endpoints: [], label: "" };
+      continue;
+    }
+    if (!edge) continue;
+    const endpoints = line.match(/^-\s+Endpoints:\s*(.+)$/);
+    if (endpoints) {
+      edge.endpoints = endpoints[1].split(",").map((item) => cleanId(item)).filter(Boolean);
+      continue;
+    }
+    const label = line.match(/^-\s+Label:\s*(.*)$/);
+    if (label) edge.label = label[1].trim();
+  }
+  flush();
+  return edges;
+}
+
+function plannerNodeRecord(node) {
+  if (!node) return null;
+  const allowed = [
+    "Completion", "Problem", "Approach", "Input", "Output", "Metrics", "Notes",
+    "CodeLoc", "CurrentResult", "RootCauseAnalysis", "CaseStudy", "NextIdea",
+    "SelectedSkills", "Folded", "SubtreeFile", "SubtreeCount"
+  ];
+  const fields = Object.fromEntries(allowed
+    .filter((field) => String(node.fields?.[field] || "").trim())
+    .map((field) => [field, String(node.fields[field]).trim()]));
+  return { id: node.id, title: node.title, fields };
+}
+
+export function buildPlannerContext(markdown, objective = "") {
+  const nodes = parseTreeNodeFields(markdown);
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const goal = deriveParallelGoal(markdown, objective);
+  const currentNodeId = cleanId(graphStateValue(markdown, "Current"));
+  const focusIds = new Set(["ROOT", currentNodeId, goal.stageNodeId].filter(Boolean));
+  const edgeAnchors = new Set([currentNodeId, goal.stageNodeId].filter(Boolean));
+  const allEdges = parsePlannerEdges(markdown);
+  const relatedEdges = allEdges.filter((edge) => edge.endpoints.some((id) => edgeAnchors.has(id)));
+  const relatedNodeIds = new Set();
+  for (const edge of relatedEdges) {
+    for (const endpoint of edge.endpoints) {
+      if (!focusIds.has(endpoint)) relatedNodeIds.add(endpoint);
+    }
+  }
+  return {
+    rootGoal: goal.root,
+    currentNodeId,
+    activeStageNodeId: goal.stageNodeId,
+    activeStageGoal: goal.stage,
+    runGoal: goal.immediate,
+    successBasis: goal.success,
+    focusNodes: [...focusIds].map((id) => plannerNodeRecord(byId.get(id))).filter(Boolean),
+    relatedNodes: [...relatedNodeIds].map((id) => {
+      const node = byId.get(id);
+      if (!node) return null;
+      return {
+        id: node.id,
+        title: node.title,
+        completion: String(node.fields?.Completion || "").trim(),
+        currentResult: String(node.fields?.CurrentResult || "").trim()
+      };
+    }).filter(Boolean),
+    relatedEdges
+  };
+}
+
 export function deriveParallelGoal(markdown, objective = "") {
   const nodes = parseTreeNodeFields(markdown);
   const root = nodes.find((node) => node.id === "ROOT") || { fields: {} };
@@ -181,16 +353,15 @@ export function deriveParallelGoal(markdown, objective = "") {
 
 function compactGoalHistoryItem(run) {
   const goal = run?.goal || {};
-  const assessment = run?.review?.goalAssessment || {};
   return {
     runId: cleanId(run?.id),
     status: String(run?.status || "").trim(),
+    failures: [...(run?.planningFailures || []), ...(run?.jobs || []).filter((job) => job.error).map((job) => ({ nodeId: job.nodeId, taskId: job.taskId, error: job.error, output: job.output || "" }))],
     root: compactGoalText(goal.root, 120),
     stage: compactGoalText(goal.stage, 120),
     immediate: compactGoalText(goal.immediate || run?.objective, 140),
-    result: compactGoalText(run?.review?.summary || run?.summary, 140),
-    alignment: String(assessment.alignment || "unknown"),
-    progress: String(assessment.progress || "unknown")
+    result: compactGoalText(run?.result?.summary || run?.summary, 140),
+    jobs: (run?.jobs || []).map(({ taskId, nodeId, instruction, output, error }) => ({ taskId, nodeId, instruction, output, error }))
   };
 }
 
@@ -205,9 +376,8 @@ async function readGoalHistory(runsDir, excludeRunId = "") {
       }
     }));
     return records
-      .filter((run) => run && run.id !== excludeRunId && ["accepted", "review"].includes(run.status) && run.goal)
+      .filter((run) => run && run.id !== excludeRunId && run.goal)
       .sort((left, right) => Date.parse(left.updatedAt || left.createdAt || "") - Date.parse(right.updatedAt || right.createdAt || ""))
-      .slice(-MAX_GOAL_HISTORY)
       .map(compactGoalHistoryItem);
   } catch {
     return [];
@@ -215,35 +385,17 @@ async function readGoalHistory(runsDir, excludeRunId = "") {
 }
 
 function formatGoalHistory(history = []) {
-  if (!history.length) return "(no previous accepted or reviewed run; use baseline)";
-  return history.map((item) => [
-    `${item.status || "review"} ${item.runId || "unknown"}`,
-    `root=${item.root || "unknown"}`,
-    `stage=${item.stage || "unknown"}`,
-    `run=${item.immediate || "unknown"}`,
-    `result=${item.result || "unknown"}`
-  ].join(" | ")).join("\n");
-}
-
-export function normalizeGoalAssessment(value) {
-  const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  const alignment = GOAL_ALIGNMENTS.has(input.alignment) ? input.alignment : "unknown";
-  const progress = GOAL_PROGRESS.has(input.progress) ? input.progress : "unknown";
-  return {
-    alignment,
-    progress,
-    continuity: GOAL_CONTINUITY.has(input.continuity) ? input.continuity : "unknown",
-    achieved: compactGoalText(input.achieved, 180),
-    remaining: compactGoalText(input.remaining, 180)
-  };
-}
-
-export function goalAssessmentAllowsAccept(assessment, history = []) {
-  const normalized = normalizeGoalAssessment(assessment);
-  const requiredContinuity = Array.isArray(history) && history.length ? "stable" : "baseline";
-  return normalized.alignment === "aligned"
-    && ["reached", "progress"].includes(normalized.progress)
-    && normalized.continuity === requiredContinuity;
+  const selected = history
+    .filter((item) => item.status === "failed" || item.result || item.immediate)
+    .slice(-3)
+    .map((item) => ({
+      runId: item.runId,
+      status: item.status,
+      runGoal: item.immediate,
+      result: item.result,
+      failures: (item.failures || []).map(plannerFailureSummary)
+    }));
+  return selected.length ? JSON.stringify(selected) : "(no relevant previous run)";
 }
 
 function humanizeTitle(value, fallback = "并行任务") {
@@ -254,24 +406,15 @@ function humanizeTitle(value, fallback = "并行任务") {
     .replace(/状态同步提示契约/g, "状态同步规则")
     .replace(/契约/g, "规则")
     .replace(/夹具/g, "测试场景")
-    .replace(/语义回归/g, "目标校验")
-    .slice(0, 28);
+    .replace(/语义回归/g, "目标校验");
 }
 
 function conciseInstruction(value) {
-  const text = String(value || "").replace(/\s+/g, " ").trim();
-  const first = text.split(/[。！？；;]/)[0] || text;
-  const colon = first.indexOf("：");
-  return (colon > 8 ? first.slice(0, colon) : first).slice(0, 72);
+  return String(value || "").trim();
 }
 
 function normalizeScope(value) {
-  const raw = String(value || "").trim().replace(/\\/g, "/").replace(/^\.\//, "");
-  if (!raw) throw new Error("每个分支都要填写至少一个负责修改的文件范围");
-  if (path.posix.isAbsolute(raw) || /^[A-Za-z]:\//.test(raw)) throw new Error(`负责修改的文件范围必须是项目内相对路径：${raw}`);
-  const parts = raw.split("/");
-  if (parts.includes("..")) throw new Error(`负责修改的文件范围不能越出项目目录：${raw}`);
-  return raw.replace(/\/{2,}/g, "/");
+  return String(value || "").trim().replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/{2,}/g, "/");
 }
 
 function scopeBase(scope) {
@@ -291,20 +434,6 @@ function scopesOverlap(left, right) {
     || (bDirectory && a.startsWith(b.endsWith("/") ? b : `${b}/`));
 }
 
-function assertScopeAllowed(scope) {
-  const lower = scope.toLowerCase();
-  if (RESERVED_FILES.includes(lower)) {
-    throw new Error(`共享状态只能由 coordinator 维护，不能租给 worker：${scope}`);
-  }
-  for (const directory of RESERVED_DIRECTORIES) {
-    const name = directory.slice(0, -1);
-    const base = scopeBase(lower);
-    if (lower === name || lower.startsWith(directory) || base === directory || base.startsWith(directory)) {
-      throw new Error(`共享状态只能由 coordinator 维护，不能租给 worker：${scope}`);
-    }
-  }
-}
-
 function assertAcyclic(jobs) {
   const byId = new Map(jobs.map((job) => [job.taskId, job]));
   const visiting = new Set();
@@ -320,18 +449,12 @@ function assertAcyclic(jobs) {
   for (const job of jobs) visit(job.taskId);
 }
 
-export function validateParallelJobs(input, { minimum = 2, knownTaskIds = [], existingJobs = [] } = {}) {
+export function validateParallelJobs(input, { minimum = 1, knownTaskIds = [], existingJobs = [] } = {}) {
   if (!Array.isArray(input) || input.length < minimum) {
     throw new Error(minimum <= 1 ? "至少需要 1 个 worker" : "并行运行至少需要 2 个 worker");
   }
 
   const seenTasks = new Set();
-  const leases = [];
-  for (const existing of Array.isArray(existingJobs) ? existingJobs : []) {
-    for (const scope of Array.isArray(existing?.writeSet) ? existing.writeSet : []) {
-      leases.push({ taskId: existing.taskId, scope });
-    }
-  }
   const jobs = input.map((job, index) => {
     const nodeId = cleanId(job?.nodeId);
     const taskId = cleanId(job?.taskId || job?.id || nodeId, `worker-${index + 1}`);
@@ -341,15 +464,7 @@ export function validateParallelJobs(input, { minimum = 2, knownTaskIds = [], ex
     if (!instruction) throw new Error(`worker ${taskId} 缺少任务说明`);
     seenTasks.add(taskId.toLowerCase());
 
-    const writeSet = [...new Set((Array.isArray(job.writeSet) ? job.writeSet : []).map(normalizeScope))];
-    if (!writeSet.length) throw new Error(`分支 ${taskId} 至少需要一个负责修改的文件范围`);
-    for (const scope of writeSet) {
-      assertScopeAllowed(scope);
-      for (const lease of leases) {
-        if (scopesOverlap(scope, lease.scope)) throw new Error(`分支负责修改的文件范围冲突：${taskId}:${scope} 与 ${lease.taskId}:${lease.scope}`);
-      }
-      leases.push({ taskId, scope });
-    }
+    const writeSet = [...new Set((Array.isArray(job.writeSet) ? job.writeSet : []).map(normalizeScope).filter(Boolean))];
 
     return {
       id: taskId,
@@ -357,17 +472,20 @@ export function validateParallelJobs(input, { minimum = 2, knownTaskIds = [], ex
       nodeId,
       title: humanizeTitle(job.title, conciseInstruction(instruction)),
       instruction,
+      branchContext: String(job.branchContext || ""),
       summary: conciseInstruction(job.summary || instruction),
       dependencyPrompt: compactGoalText(job.dependencyPrompt, 420),
       acceptancePrompt: compactGoalText(job.acceptancePrompt, 520),
       writeSet,
       dependsOn: [...new Set((Array.isArray(job.dependsOn) ? job.dependsOn : []).map((item) => cleanId(item)).filter(Boolean))],
-      tests: [...new Set((Array.isArray(job.tests) ? job.tests : []).map((item) => String(item || "").trim()).filter(Boolean))].slice(0, 6),
       contextPolicy: CONTEXT_POLICIES.has(job.contextPolicy) ? job.contextPolicy : "reuse",
       contextKey: cleanId(job.contextKey) || deriveParallelContextKey({ nodeId, writeSet }),
       contextThreadId: String(job.contextThreadId || "").trim(),
       contextSource: String(job.contextSource || "").trim() || "parallel",
-      contextLabel: contextLabel({ ...job, nodeId, taskId })
+      contextLabel: contextLabel({ ...job, nodeId, taskId }),
+      contextPreview: String(job.contextPreview || ""),
+      contextResult: String(job.contextResult || ""),
+      runtimeMetadataPath: String(job.runtimeMetadataPath || "")
     };
   });
 
@@ -427,6 +545,7 @@ export function assignParallelDraftContexts(jobs, options = []) {
       contextThreadId: match?.option.threadId || "",
       contextSource: match?.option.source || job.contextSource || "parallel",
       contextPreview: match?.option.preview || job.contextPreview || "",
+      contextResult: match?.option.lastOutput || job.contextResult || "",
       contextLabel: match?.option.title || contextLabel(job),
       contextGeneration: Number(match?.option.generation || job.contextGeneration || 1),
       contextStatus: match?.option.status || job.contextStatus || "active",
@@ -494,15 +613,16 @@ function executionContexts(input, previous = [], options = [], validationOptions
     };
   });
 
-  const ownerByContext = new Map();
-  const ownerByThread = new Map();
+  const ownerByContext = new Map((validationOptions.existingJobs || []).map((job) => [job.contextKey, job.taskId]));
+  const ownerByThread = new Map((validationOptions.existingJobs || []).filter((job) => job.contextThreadId).map((job) => [job.contextThreadId, job.taskId]));
   for (const job of resolved) {
     const owner = ownerByContext.get(job.contextKey);
-    if (owner) throw new Error(`同一 Codex 对话不能同时分配给多个分支：${owner}、${job.title || job.taskId}`);
+    if (owner || ownerByThread.has(job.contextThreadId)) {
+      job.contextKey = `${job.contextKey}-${job.taskId}-${randomUUID()}`;
+      if (job.contextThreadId) job.contextSource = "codex"; // Fork shared history; never run two turns on the same thread.
+    }
     ownerByContext.set(job.contextKey, job.title || job.taskId);
     if (job.contextThreadId) {
-      const threadOwner = ownerByThread.get(job.contextThreadId);
-      if (threadOwner) throw new Error(`同一 Codex 对话不能同时分配给多个分支：${threadOwner}、${job.title || job.taskId}`);
       ownerByThread.set(job.contextThreadId, job.title || job.taskId);
     }
   }
@@ -544,9 +664,8 @@ async function writeContextHandoff(runsDir, run, job) {
     stageGoal: run.goal?.stage || "",
     runGoal: run.goal?.immediate || run.objective || "",
     task: job.instruction || "",
-    currentResult: String(job.output || job.contextResult || job.contextPreview || "").replace(/\s+/g, " ").trim().slice(-1200),
+    currentResult: String(job.output || job.contextResult || job.contextPreview || ""),
     changedFiles: Array.isArray(job.changedFiles) ? job.changedFiles : [],
-    tests: Array.isArray(job.testResults) ? job.testResults.map((item) => ({ command: item.command, ok: item.ok })) : [],
     nextAction: job.acceptancePrompt || job.instruction || "",
     evidence: [relativePath]
   };
@@ -567,34 +686,80 @@ async function removeWorkerHandoff(workerPath) {
   await rm(path.join(workerPath, ".task-tree-context"), { recursive: true, force: true });
 }
 
+function plannerFailureSummary(failure = {}) {
+  const parsed = parseJsonObject(failure.output);
+  const jobs = Array.isArray(parsed?.jobs) ? parsed.jobs : [];
+  return {
+    nodeId: cleanId(failure.nodeId),
+    taskId: cleanId(failure.taskId),
+    error: String(failure.error || "").trim(),
+    outputShape: parsed ? {
+      keys: Object.keys(parsed),
+      jobCount: jobs.length,
+      taskIds: jobs.map((job) => cleanId(job?.taskId || job?.id)).filter(Boolean)
+    } : {
+      validJson: false,
+      outputChars: String(failure.output || "").length
+    }
+  };
+}
+
+function formatPlannerFailures(failures = []) {
+  const selected = failures.slice(-4).map(plannerFailureSummary);
+  return selected.length ? JSON.stringify(selected) : "(none)";
+}
+
 export function buildPlannerPrompt(markdown, objective = "", history = []) {
-  const goal = deriveParallelGoal(markdown, objective);
+  const context = buildPlannerContext(markdown, objective);
   return [
     "【Task Tree · Automatic Parallel Planner】",
-    "Create a concrete execution plan for 2-4 Codex workers. The plan will be shown to a human before any writable work starts.",
-    "Use the task tree's ROOT purpose and active-stage goals. Ignore stale NextPlan. Exclude work that requires a human or external system; do not disguise review as implementation.",
-    "Decompose broad nodes when that creates genuinely independent write scopes. A source node may own multiple taskIds.",
-    "Each worker needs a disjoint project-relative writeSet. Never include task-tree.md, task-trees.json, scripts/project.json, scripts/run.json, versions/, .task-tree-runs/, or .task-tree-scopes/.",
-    "title is user-facing: use plain Chinese, 4-12 characters, and name the concrete result. Avoid IDs, English, and abstract words such as 契约、夹具、oracle. taskId is a hidden machine id and may remain English.",
-    "summary is user-facing: use one plain Chinese sentence of 16-36 characters explaining how this branch advances the run goal. Do not repeat implementation steps.",
-    "Dependencies must reference taskId. Prefer an immediately runnable frontier rather than a linear chain. Include narrow verification commands that can run without interaction.",
-    "For every worker, also write dependencyPrompt for a human-editable prerequisite explanation and acceptancePrompt for a human-editable proof-of-completion explanation. Do not hide these in instruction.",
-    `Root goal: ${goal.root || "(not recorded)"}`,
-    `Active stage (${goal.stageNodeId}): ${goal.stage || "(not recorded)"}`,
-    `Run goal: ${goal.immediate || "(not recorded)"}`,
-    `Success basis: ${goal.success || "(not recorded)"}`,
-    "Previous target anchors (do not replace the root goal with a local implementation target):",
+    "只做任务拆分，只输出一次完整 JSON；不要调用工具，不要写测试命令。",
+    "覆盖：先把每个明确目标或验收条件写入 coverage，并映射到至少一个 taskId，不能漏项。",
+    "并行：最大化当前可运行前沿。每个能独立推进、上下文不同且有可观察结果的交付物单独成任务；真实强依赖才写 dependsOn。至少两个任务必须无依赖立即运行，不设 Worker 上限，也不制造重复或占位任务。",
+    "粒度：API、UI、文档等独立结果分开；六至八个独立结果就生成六至八个，十二或二十个也全部保留。看似单一的目标也必须拆成至少两个共同完成目标的实质分支。",
+    "冲突：writeSet 只是提示，可重叠，可包含 task-tree.md、项目元数据或明确要求的外部路径；最终合并处理真实冲突。",
+    "边界：不要仅因任务图里存在相关节点就创建任务；只拆本轮目标直接需要的交付物。基线、测试、评审、文档只有在本轮明确要求它们成为交付物时才单独成 Worker。",
+    "字段：title 用简短中文；instruction 写完整可执行结果；dependsOn 只用 taskId。branchContext、依赖说明和验收说明由协调器补齐，Planner 不要生成。",
+    "当前相关任务图上下文：",
+    JSON.stringify(context),
+    "最近相关运行：",
     formatGoalHistory(history),
     "",
-    "Return JSON only, with this exact shape:",
-    '{"summary":"why these branches are sufficient","jobs":[{"taskId":"short-id","nodeId":"N2","title":"short title","summary":"contribution to the run goal","instruction":"observable deliverable and completion test","dependencyPrompt":"human-editable prerequisite explanation","acceptancePrompt":"human-editable proof and remaining gap","writeSet":["public/**"],"dependsOn":[],"tests":["node scripts/test-example.mjs"]}],"integrationTests":["node scripts/test-example.mjs"]}',
-    "",
-    "Current task tree:",
-    String(markdown || "").slice(0, 64000)
+    "严格按此形状返回 JSON：",
+    '{"summary":"覆盖和拆分理由","coverage":[{"goal":"目标或验收条件","taskIds":["short-id"]}],"jobs":[{"taskId":"short-id","nodeId":"N2","title":"中文结果名","instruction":"完整可执行结果","writeSet":["public/**"],"dependsOn":[]}]}'
   ].join("\n");
 }
 
-export function buildWorkerPrompt(job, scope = null, handoffPath = "", peerJobs = []) {
+function enrichPlannedJobs(jobs, { markdown = "", goal = {}, history = [] } = {}) {
+  const byId = new Map(jobs.map((job) => [job.taskId, job]));
+  return jobs.map((job) => {
+    const dependencyNames = job.dependsOn.map((taskId) => {
+      const dependency = byId.get(taskId);
+      return dependency ? `${taskId}（${dependency.title || dependency.nodeId}）` : taskId;
+    });
+    return {
+      ...job,
+      summary: job.summary || job.instruction,
+      branchContext: [
+        `根目标：${goal.root || "(未记录)"}`,
+        `当前阶段（${goal.stageNodeId || "ROOT"}）：${goal.stage || "(未记录)"}`,
+        `本轮目标：${goal.immediate || "(未记录)"}`,
+        `本分支来源节点：${job.nodeId}`,
+        `本分支任务：${job.instruction}`,
+        "Current task tree (complete):",
+        markdown,
+        "Previous run history (complete):",
+        JSON.stringify(history)
+      ].join("\n"),
+      dependencyPrompt: dependencyNames.length
+        ? `等待 ${dependencyNames.join("、")} 完成并由协调器合入后开始；只使用已经合入的真实结果。`
+        : "无前置任务，可立即开始。",
+      acceptancePrompt: `完成“${job.instruction}”；最终返回实际 changedFiles、affectedNodes 和可核验证据，未完成则返回 blocked。`
+    };
+  });
+}
+
+export function buildWorkerPrompt(job, handoffPath = "", peerJobs = []) {
   const peerRoster = peerJobs
     .filter((peer) => peer?.taskId && peer.taskId !== job.taskId)
     .map((peer) => `${peer.taskId}（${peer.title || peer.nodeId}）${peer.threadId ? ` · ${threadDeepLink(peer.threadId)}` : " · 会话尚未建立"}`)
@@ -604,150 +769,25 @@ export function buildWorkerPrompt(job, scope = null, handoffPath = "", peerJobs 
     `Task id: ${job.taskId}`,
     `Source node: ${job.nodeId}${job.title ? ` - ${job.title}` : ""}`,
     `Task: ${job.instruction}`,
-    `Branch-owned file scope (must not overlap another branch): ${job.writeSet.join(", ")}`,
+    `Advisory file context (overlap is allowed): ${job.writeSet.join(", ") || "not specified"}`,
     `Dependency note: ${job.dependencyPrompt || "none recorded; verify prerequisites before coding"}`,
     `Acceptance note: ${job.acceptancePrompt || "state the solved problem, evidence, and remaining gap"}`,
     job.dependsOn?.length ? `Dependencies already integrated: ${job.dependsOn.join(", ")}` : "Dependencies: none",
-    job.tests?.length ? `Verification: ${job.tests.join(" ; ")}` : "Verification: choose a proportionate non-interactive check",
+    `Prior branch description: ${job.contextPreview || "(none)"}`,
+    `Prior branch result (complete): ${job.contextResult || "(none)"}`,
+    `Branch input context (complete): ${job.branchContext || "(none)"}`,
+    `Shared run metadata directory (direct shared state, not Git-isolated): ${job.runtimeMetadataPath || "(not available)"}`,
     peerRoster ? `Peer branches that may be consulted by taskId:\n${peerRoster}` : "Peer branches: none have a visible conversation yet; use the taskId from this run if consultation is needed.",
-    scope?.scopeId ? `Execution scope: ${scope.scopeId}` : "",
     `Branch context generation: ${Number(job.contextGeneration) || 1}`,
     handoffPath ? `Previous generation handoff: ${handoffPath}` : "",
     handoffPath ? "Start by reading this short handoff and the current task-tree checkpoint. Treat the handoff as evidence, not as a replacement for the current tree." : "",
     "",
-    "You are working in an isolated worktree. Implement the assigned result completely and run the relevant checks.",
-    "Do not edit task-tree.md, subtrees, GraphState, flow JSON, versions, or runtime run state. The coordinator updates shared state after human acceptance.",
-    "Do not delegate implementation. Do not touch files outside the exclusive write scope. Read other files only when needed to understand contracts.",
+    "You are working in an isolated Git worktree. Implement the assigned result completely. Do not run tests, linters, git diff checks, validation commands, code review, or approval stages.",
+    "You may edit task-tree.md, task-trees.json, tracked flow JSON, versions, run metadata, and any project file required by the task. Project edits are merged like ordinary Git changes; shared run metadata edits are direct concurrent effects.",
+    "Do not delegate implementation. The advisory file context is not an enforcement boundary. Modify outside-worktree paths only when the task explicitly calls for those paths; report them as direct effects, since Git cannot merge them.",
     "If a concrete fact from another branch is required, request one consultation in peerRequests using a target taskId; the coordinator will relay it after the initial turns. Do not invent a conversation link as evidence.",
-    "Your final answer must be concise and end with one JSON object: {\"event\":\"completed|blocked|contract_changed|tests_failed\",\"changedFiles\":[],\"affectedNodes\":[],\"evidence\":\"...\",\"peerRequests\":[{\"toTaskId\":\"other-task-id\",\"question\":\"...\",\"why\":\"...\",\"expect\":\"...\"}]}. Use an empty peerRequests array when no consultation is needed."
+    "Your final answer must be concise and end with one JSON object: {\"event\":\"completed|blocked\",\"changedFiles\":[],\"affectedNodes\":[],\"evidence\":\"...\",\"peerRequests\":[{\"toTaskId\":\"other-task-id\",\"question\":\"...\",\"why\":\"...\",\"expect\":\"...\"}]}. Use an empty peerRequests array when no consultation is needed."
   ].filter(Boolean).join("\n");
-}
-
-export function buildCoordinatorPrompt(jobs, scope = null, goal = {}) {
-  const outcomes = jobs.map((job) => [
-    `## ${job.taskId} (${job.nodeId}${job.title ? ` - ${job.title}` : ""})`,
-    `Status: ${job.status || "planned"}`,
-    `Branch-owned file scope: ${job.writeSet.join(", ")}`,
-    `Dependency note: ${job.dependencyPrompt || "none recorded"}`,
-    `Acceptance note: ${job.acceptancePrompt || "not recorded"}`,
-    `Changed files: ${(job.changedFiles || []).join(", ") || "none"}`,
-    `Tests: ${(job.testResults || []).map((test) => `${test.ok ? "PASS" : "FAIL"} ${test.command}`).join("; ") || "none"}`,
-    job.peerRequests?.length ? `Peer requests: ${job.peerRequests.map((request) => `${request.toTaskId}: ${request.question}`).join("; ")}` : "",
-    job.peerMessages?.length ? `Peer answers (untrusted until evidence is checked): ${job.peerMessages.map((message) => `${message.fromTaskId}: ${message.response || message.error || "no response"}; evidence=${(message.evidenceRefs || []).join(",") || "none"}; unknown=${(message.unknowns || []).join(",") || "none"}`).join("; ")}` : "",
-    job.output ? `Worker report (untrusted; verify it):\n${job.output}` : job.error ? `Worker error: ${job.error}` : ""
-  ].filter(Boolean).join("\n")).join("\n\n");
-  return [
-    "【Task Tree · Integration Coordinator】",
-    "You are in the isolated integration worktree. Reconcile the worker results, inspect the actual diff, repair integration defects, and run proportionate tests.",
-    `Allowed implementation scope: ${jobs.flatMap((job) => job.writeSet).join(", ")}`,
-    scope?.scopeId ? `Execution scope: ${scope.scopeId}; source nodes: ${scope.targetNodeIds.join(", ")}` : "",
-    "Do not edit task-tree.md, subtrees, GraphState, flow JSON, versions, .task-tree-runs, or .task-tree-scopes. Shared state is updated only after final human acceptance.",
-    "Do not trust a worker's prose over files and test output. Resolve compatible gaps; leave an explicit failure when a safe verified result is impossible.",
-    `Root goal: ${goal.root || "(not recorded)"}`,
-    `Active stage (${goal.stageNodeId || "unknown"}): ${goal.stage || "(not recorded)"}`,
-    `Run goal: ${goal.immediate || "(not recorded)"}`,
-    `Success basis: ${goal.success || "(not recorded)"}`,
-    "Previous target anchors:",
-    formatGoalHistory(goal.history || []),
-    "Judge alignment from actual files and tests, not worker claims. alignment=aligned only when the changes causally advance the run goal. progress=reached only when the success basis is fully met; progress=progress when useful verified movement exists but a stated gap remains; progress=no_progress when the changes do not create verified movement. continuity=stable only when the result preserves the root goal across the previous accepted/reviewed runs; continuity=drifted when it quietly replaces the long-term goal with a local implementation target; continuity=baseline only when there is no prior accepted/reviewed run; continuity=unknown when the evidence is insufficient.",
-    "End with one JSON object: {\"event\":\"completed|tests_failed|blocked\",\"summary\":\"one short result\",\"affectedNodes\":[\"N2\"],\"evidence\":\"tests and key files\",\"goalAssessment\":{\"alignment\":\"aligned|off_target|unknown\",\"progress\":\"reached|progress|no_progress|unknown\",\"continuity\":\"baseline|stable|drifted|unknown\",\"achieved\":\"verified capability\",\"remaining\":\"unresolved gap\"}}.",
-    "",
-    outcomes
-  ].filter(Boolean).join("\n").slice(0, 96000);
-}
-
-export function buildSupervisorPrompt(run, userMessages = []) {
-  const completed = (run.jobs || []).filter((job) => job.status === "completed").map((job) => ({
-    taskId: job.taskId,
-    nodeId: job.nodeId,
-    title: job.title,
-    evidence: compactGoalText(parseJsonObject(job.output)?.evidence || job.error || job.output, 500),
-    changedFiles: job.changedFiles || []
-  }));
-  const failed = (run.jobs || []).filter((job) => ["failed", "blocked"].includes(job.status)).map((job) => ({
-    taskId: job.taskId,
-    nodeId: job.nodeId,
-    title: job.title,
-    error: compactGoalText(job.error, 300)
-  }));
-  const existing = (run.jobs || []).map((job) => ({
-    taskId: job.taskId,
-    nodeId: job.nodeId,
-    title: job.title,
-    status: job.status,
-    writeSet: job.writeSet || [],
-    dependsOn: job.dependsOn || []
-  }));
-  return [
-    "【Task Tree · Continuous Supervisor】",
-    "You are the persistent supervisor for one approved parallel run. You schedule workers but never edit project files or task-tree state.",
-    "Keep the user's root and active-stage goals fixed. Decide whether the verified worker results are sufficient to enter final integration, or whether another independently verifiable worker task is necessary.",
-    "Temporary execution tasks belong to the runtime tree. Do not propose adding them to the durable method tree.",
-    "Prefer finishing over inventing work. Add a task only when a concrete unresolved gap blocks the run goal. Never duplicate an existing task, repeat completed work, or create process-only tasks.",
-    "Every new job must reference an existing task-tree nodeId, name its contribution to the run goal, declare a non-overlapping project-relative writeSet, dependencies, and an acceptancePrompt. Reserved task-tree and run-state paths are forbidden.",
-    `Root goal: ${run.goal?.root || "(not recorded)"}`,
-    `Active stage (${run.goal?.stageNodeId || "ROOT"}): ${run.goal?.stage || "(not recorded)"}`,
-    `Approved run goal: ${run.goal?.immediate || run.objective || "(not recorded)"}`,
-    `Success definition: ${run.goal?.success || "(not recorded)"}`,
-    `Supervisor round: ${Number(run.supervisor?.rounds) || 0}`,
-    `Existing runtime tasks: ${JSON.stringify(existing)}`,
-    `Completed evidence: ${JSON.stringify(completed)}`,
-    `Failures or blockers: ${JSON.stringify(failed)}`,
-    `Queued user messages: ${JSON.stringify(userMessages.map((item) => item.text))}`,
-    "Return JSON only. Use action=continue only when newJobs is non-empty. Use action=finish when final integration should start. Use action=waiting_user only when a decision truly requires the user.",
-    '{"action":"finish|continue|waiting_user","summary":"一句话说明当前推进到哪里","reason":"为何收束、继续或需要用户","newJobs":[{"taskId":"stable-id","nodeId":"N1","parentTaskId":"optional-existing-task-id","title":"短标题","summary":"怎样推进本轮目标","instruction":"明确交付物","dependencyPrompt":"开始前确认什么","acceptancePrompt":"如何证明解决了问题，还剩什么未证实","writeSet":["src/area/**"],"dependsOn":["existing-task-id"],"tests":[]}],"messageToUser":"仅 waiting_user 时填写"}'
-  ].join("\n");
-}
-
-export function normalizeSupervisorDecision(output) {
-  const parsed = parseJsonObject(output) || {};
-  const action = ["finish", "continue", "waiting_user"].includes(parsed.action) ? parsed.action : "waiting_user";
-  return {
-    action,
-    summary: compactGoalText(parsed.summary, 240),
-    reason: compactGoalText(parsed.reason, 360),
-    messageToUser: compactGoalText(parsed.messageToUser, 360),
-    newJobs: Array.isArray(parsed.newJobs) ? parsed.newJobs.slice(0, MAX_SUPERVISOR_JOBS_PER_ROUND) : []
-  };
-}
-
-export function buildSupervisorFinalPrompt(run, integration, coordinatorOutput) {
-  const queuedMessages = (run.supervisor?.messages || []).filter((message) => message.status === "queued");
-  return [
-    "【Task Tree · Supervisor Final Review】",
-    "All worker execution and integration checks have finished. Give the final concise report to the user from this same supervisor context.",
-    "Do not edit files or create more tasks in this turn. Judge the approved run goal, not implementation activity alone.",
-    `Root goal: ${run.goal?.root || "(not recorded)"}`,
-    `Active-stage goal: ${run.goal?.stage || "(not recorded)"}`,
-    `Approved run goal: ${run.goal?.immediate || run.objective || "(not recorded)"}`,
-    "Previous accepted or reviewed runs:",
-    formatGoalHistory(run.goal?.history || []),
-    `Continuity rule: use ${run.goal?.history?.length ? "stable when this run preserves the same long-term goal" : "baseline because no previous accepted or reviewed run exists"}.`,
-    `Integration result: ${JSON.stringify(integration)}`,
-    `Coordinator report: ${String(coordinatorOutput || "").slice(0, MAX_REPORT_CHARS)}`,
-    `Late user messages: ${JSON.stringify(queuedMessages.map((message) => message.text))}`,
-    "Return JSON only. Keep summary and evidence concise. goalAssessment must state what is achieved, what remains, and whether the result still follows the stable goal.",
-    '{"event":"completed","summary":"最终结果","affectedNodes":["N1"],"evidence":"关键可验证证据","goalAssessment":{"alignment":"aligned|off_target|unknown","progress":"reached|progress|no_progress|unknown","continuity":"baseline|stable|drifted|unknown","achieved":"已经达到什么","remaining":"还缺什么"}}'
-  ].join("\n");
-}
-
-export function buildGoalAuditPrompt(run) {
-  const goal = run.goal || {};
-  const tests = (run.integrationTestResults || []).map((test) => `${test.ok ? "PASS" : "FAIL"} ${test.command}`).join("; ") || "none";
-  return [
-    "【Task Tree · Parallel Goal Audit】",
-    `Root goal: ${goal.root || "(not recorded)"}`,
-    `Active stage (${goal.stageNodeId || "unknown"}): ${goal.stage || "(not recorded)"}`,
-    `Run goal: ${goal.immediate || "(not recorded)"}`,
-    `Success basis: ${goal.success || "(not recorded)"}`,
-    `Integrated result: ${run.review?.summary || run.summary || "(not recorded)"}`,
-    `Changed files: ${(run.review?.changedFiles || []).join(", ") || "none"}`,
-    `Tests: ${tests}`,
-    "Previous target anchors:",
-    formatGoalHistory(goal.history || []),
-    "Inspect the integration worktree and judge the result against the stated goals. File existence, tests, and summaries are evidence leads, not proof of goal completion.",
-    "Compare the current result with the previous run anchors, not only with this run's wording. Return JSON only: {\"alignment\":\"aligned|off_target|unknown\",\"progress\":\"reached|progress|no_progress|unknown\",\"continuity\":\"baseline|stable|drifted|unknown\",\"achieved\":\"one verified sentence\",\"remaining\":\"one unresolved sentence\"}."
-  ].join("\n");
 }
 
 function parseJsonObject(text) {
@@ -772,27 +812,26 @@ function normalizePeerRequests(output, jobs = [], sourceTaskId = "") {
     .map((request, index) => ({
       id: cleanId(request?.id || `${sourceTaskId}-peer-${index + 1}`, `${sourceTaskId || "worker"}-peer-${index + 1}`),
       toTaskId: cleanId(request?.toTaskId || request?.targetTaskId || request?.to || ""),
-      question: String(request?.question || request?.message || "").replace(/\s+/g, " ").trim().slice(0, 1600),
-      why: String(request?.why || request?.reason || "").replace(/\s+/g, " ").trim().slice(0, 500),
-      expect: String(request?.expect || request?.expected || "").replace(/\s+/g, " ").trim().slice(0, 500)
+      question: String(request?.question || request?.message || "").replace(/\s+/g, " ").trim(),
+      why: String(request?.why || request?.reason || "").replace(/\s+/g, " ").trim(),
+      expect: String(request?.expect || request?.expected || "").replace(/\s+/g, " ").trim()
     }))
-    .filter((request) => request.toTaskId && request.toTaskId !== sourceTaskId && known.has(request.toTaskId) && request.question)
-    .slice(0, MAX_PEER_REQUESTS);
+    .filter((request) => request.toTaskId && request.toTaskId !== sourceTaskId && known.has(request.toTaskId) && request.question);
 }
 
 function normalizePeerAnswer(output) {
   const parsed = parseJsonObject(output);
   if (!parsed || typeof parsed !== "object") return null;
-  const conclusion = String(parsed.conclusion || parsed.response || "").replace(/\s+/g, " ").trim().slice(0, MAX_PEER_RESPONSE_CHARS);
+  const conclusion = String(parsed.conclusion || parsed.response || "").replace(/\s+/g, " ").trim();
   if (!conclusion) return null;
   return {
     conclusion,
     evidenceRefs: [...new Set((Array.isArray(parsed.evidenceRefs) ? parsed.evidenceRefs : [])
       .map((item) => String(item || "").trim().replace(/\\/g, "/"))
-      .filter((item) => item && !/^codex:\/\//i.test(item)))].slice(0, 12),
+      .filter((item) => item && !/^codex:\/\//i.test(item)))],
     unknowns: [...new Set((Array.isArray(parsed.unknowns) ? parsed.unknowns : [])
-      .map((item) => String(item || "").replace(/\s+/g, " ").trim().slice(0, 500))
-      .filter(Boolean))].slice(0, 8)
+      .map((item) => String(item || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean))]
   };
 }
 
@@ -822,60 +861,6 @@ function buildPeerAnswerPrompt(sourceJob, targetJob, request, answer) {
   ].join("\n");
 }
 
-function inferWriteSet(node, slot) {
-  const codeLoc = String(node.fields.CodeLoc || "");
-  const paths = codeLoc.split(/[\n,;]+/).map((item) => item.trim().replace(/\\/g, "/")).filter((item) => /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.*-]+)+$/.test(item));
-  if (paths.length) return paths.slice(0, 3);
-  const text = `${node.title} ${node.fields.Problem || ""}`;
-  if (/界面|前端|编辑器|可视化|UI/i.test(text)) return ["public/**"];
-  if (/测试|验证|回归/i.test(text)) return ["scripts/**"];
-  if (/文档|研究|说明/i.test(text)) return ["docs/**"];
-  return [["server/**"], ["public/**"], ["scripts/**"], ["docs/**"]][slot % 4];
-}
-
-function fallbackPlan(markdown, reason = "", objective = "") {
-  const goal = deriveParallelGoal(markdown, objective);
-  const nodes = parseTreeNodeFields(markdown).filter((node) => node.id !== "ROOT" && node.fields.Completion !== "已完成");
-  const agentNodes = nodes.filter((node) => {
-    const execution = String(node.fields.Execution || "").toLowerCase();
-    if (execution === "human" || execution === "external") return false;
-    return !/请用户|用户手动|人工审核|等待用户/.test(String(node.fields.NextIdea || ""));
-  });
-  const chosen = (agentNodes.length ? agentNodes : nodes).slice(0, 4);
-  while (chosen.length < 2 && nodes.length) chosen.push(nodes[0]);
-  if (chosen.length < 2) throw new Error("当前任务树没有至少两个可自动执行的未完成节点");
-  const usedScopes = new Set();
-  const fallbackScopes = ["server/**", "public/**", "scripts/**", "docs/**"];
-  const jobs = chosen.slice(0, Math.max(2, Math.min(4, chosen.length))).map((node, index) => ({
-    node,
-    index
-  })).map(({ node, index }) => {
-    let writeSet = inferWriteSet(node, index);
-    if (writeSet.some((scope) => usedScopes.has(scope.toLowerCase()))) {
-      const replacement = fallbackScopes.find((scope) => !usedScopes.has(scope.toLowerCase()));
-      if (replacement) writeSet = [replacement];
-    }
-    for (const scope of writeSet) usedScopes.add(scope.toLowerCase());
-    return {
-      taskId: cleanId(`${node.id}-${index + 1}`, `worker-${index + 1}`),
-      nodeId: node.id,
-      title: humanizeTitle(node.title, node.id),
-      summary: conciseInstruction(node.fields.Problem || `推进${goal.immediate}`),
-      instruction: String(node.fields.NextIdea || node.fields.Problem || `核验并推进 ${node.title}`).trim(),
-      dependencyPrompt: "开始前确认该节点的现有接口和依赖分支已满足；没有依赖时明确写无。",
-      acceptancePrompt: `说明如何证明“${node.title}”解决了当前问题，并指出仍未覆盖的目标缺口。`,
-      writeSet,
-      dependsOn: [],
-      tests: []
-    };
-  });
-  return {
-    summary: `模型规划不可用，已生成可审核的保守草案${reason ? `：${reason}` : ""}`,
-    jobs: validateParallelJobs(jobs),
-    integrationTests: []
-  };
-}
-
 function nextBranchTaskId(nodeId, existingJobs = []) {
   const base = cleanId(nodeId, "node");
   const used = new Set(existingJobs.map((job) => String(job?.taskId || "").toLowerCase()));
@@ -888,98 +873,57 @@ function nextBranchTaskId(nodeId, existingJobs = []) {
   return taskId;
 }
 
-function fallbackBranchPlan(markdown, nodeId, objective = "", existingJobs = [], reason = "") {
-  const nodes = parseTreeNodeFields(markdown);
-  const node = nodes.find((item) => item.id === cleanId(nodeId)) || nodes.find((item) => item.id !== "ROOT");
-  if (!node) throw new Error("找不到要继续并行的任务节点");
-  const instruction = String(node.fields.NextIdea || node.fields.Problem || node.fields.Approach || `推进${node.title}`).trim();
-  const occupied = existingJobs.flatMap((job) => job.writeSet || []);
-  const candidates = [inferWriteSet(node, existingJobs.length), "server/**", "public/**", "scripts/**", "docs/**"]
-    .flat()
-    .filter(Boolean);
-  const writeSet = candidates.find((scope) => !occupied.some((item) => scopesOverlap(scope, item)))
-    || `parallel/${cleanId(node.id)}-${existingJobs.length + 1}/**`;
-  return {
-    summary: `已按 ${node.id} 生成可审核的单分支草案${reason ? `：${reason}` : ""}`,
-    job: validateParallelJobs([{
-      taskId: nextBranchTaskId(node.id, existingJobs),
-      nodeId: node.id,
-      title: humanizeTitle(node.title, node.id),
-      summary: conciseInstruction(node.fields.Problem || objective || `推进${node.title}`),
-      instruction,
-      dependencyPrompt: "开始前确认该节点的现有接口和依赖分支已满足；没有依赖时明确写无。",
-      acceptancePrompt: `说明如何证明“${node.title}”解决了当前问题，并指出仍未覆盖的目标缺口。`,
-      writeSet: [writeSet],
-      dependsOn: [],
-      tests: [],
-      contextPolicy: "reuse"
-    }], { minimum: 1, knownTaskIds: existingJobs.map((job) => job.taskId), existingJobs }).at(0)
-  };
-}
-
 export function buildBranchPlannerPrompt(markdown, nodeId, objective = "", existingJobs = []) {
-  const goal = deriveParallelGoal(markdown, objective);
   const nodes = parseTreeNodeFields(markdown);
   const node = nodes.find((item) => item.id === cleanId(nodeId)) || nodes.find((item) => item.id !== "ROOT");
-  const fields = node?.fields || {};
   const existing = existingJobs.map((job) => `${job.taskId}: ${job.title || job.nodeId} [${(job.writeSet || []).join(", ")}]`).join("\n") || "(none)";
   return [
     "【Task Tree · Single Parallel Branch Planner】",
-    "Generate exactly one new, independently reviewable worker branch for the human-selected node.",
-    "Derive the branch from ROOT purpose, active-stage goals, and the selected node. Do not replace the root goal with a local implementation detail.",
-    "The result is a draft for a human to edit. Give a concrete deliverable, a dependency explanation, an acceptance explanation, and a non-overlapping project-relative writeSet.",
-    "A dependency explanation is for a person; dependsOn is only the machine taskId list. An acceptance explanation must say what problem is solved, what evidence to inspect, and what remains unproven.",
-    "Use plain Chinese titles and short sentences. Never include task-tree.md, flow JSON, versions/, .task-tree-runs/, or .task-tree-scopes/ in writeSet.",
-    `Root goal: ${goal.root || "(not recorded)"}`,
-    `Active stage (${goal.stageNodeId}): ${goal.stage || "(not recorded)"}`,
-    `Run goal: ${goal.immediate || "(not recorded)"}`,
-    `Selected node: ${node?.id || nodeId} - ${node?.title || "unknown"}`,
-    `Selected node Problem: ${compactGoalText(fields.Problem, 500)}`,
-    `Selected node Approach: ${compactGoalText(fields.Approach, 700)}`,
-    `Selected node NextIdea: ${compactGoalText(fields.NextIdea, 500)}`,
-    "Existing branches and write scopes:",
+    "只输出一个新增 Worker 的 JSON，不调用工具，不写测试命令。",
+    "从根目标、当前阶段和所选节点推导一个具体可执行结果；不要重复现有分支。writeSet 可与现有分支重叠。",
+    "branchContext、依赖说明和验收说明由协调器补齐，Planner 不要生成。",
+    "当前相关上下文：",
+    JSON.stringify({
+      ...buildPlannerContext(markdown, objective),
+      selectedNode: plannerNodeRecord(node)
+    }),
+    "现有分支：",
     existing,
     "",
-    "Return JSON only with this shape:",
-    '{"job":{"nodeId":"N3","title":"短标题","summary":"说明该分支怎样推进根本目标","instruction":"可执行任务和结果","dependencyPrompt":"开始前要确认什么","acceptancePrompt":"如何判断问题已解决、还缺什么","writeSet":["public/**"],"dependsOn":[],"tests":[]}}'
+    "严格按此形状返回 JSON：",
+    '{"job":{"nodeId":"N3","title":"中文结果名","instruction":"完整可执行结果","writeSet":["public/**"],"dependsOn":[]}}'
   ].join("\n");
 }
 
 function normalizeBranchPlan(output, markdown, nodeId, objective = "", existingJobs = []) {
   const parsed = parseJsonObject(output);
   const input = parsed?.job || parsed;
-  if (!input || typeof input !== "object") return fallbackBranchPlan(markdown, nodeId, objective, existingJobs, "规划结果不是有效 JSON");
+  if (!input || typeof input !== "object") throw new Error("规划结果不是有效 JSON");
   const taskId = nextBranchTaskId(nodeId, existingJobs);
   const job = validateParallelJobs([{ ...input, taskId, nodeId: input.nodeId || nodeId, contextPolicy: input.contextPolicy || "reuse" }], {
     minimum: 1,
     knownTaskIds: existingJobs.map((item) => item.taskId),
     existingJobs
   }).at(0);
-  return { summary: compactGoalText(parsed.summary || "已生成一个可审核分支", 240), job };
+  return { summary: compactGoalText(parsed.summary || "已生成一个分支", 240), job };
 }
 
-function normalizePlan(output, markdown, objective = "") {
+function normalizePlan(output, markdown, objective = "", { minimum = 2 } = {}) {
   const parsed = parseJsonObject(output);
-  if (!parsed?.jobs) return fallbackPlan(markdown, "规划结果不是有效 JSON", objective);
+  if (!parsed?.jobs) throw new Error("规划结果不是有效 JSON，缺少 jobs");
+  const jobs = validateParallelJobs(parsed.jobs, { minimum });
+  const readyJobs = jobs.filter((job) => job.dependsOn.length === 0);
+  if (readyJobs.length < 2) {
+    throw new Error("自动并行计划必须至少有 2 个无前置依赖的可立即并行 Worker");
+  }
   return {
     summary: String(parsed.summary || "自动生成的并行计划").trim(),
-    jobs: validateParallelJobs(parsed.jobs),
-    integrationTests: [...new Set((Array.isArray(parsed.integrationTests) ? parsed.integrationTests : []).map((item) => String(item || "").trim()).filter(Boolean))].slice(0, 8)
+    jobs,
+    coverage: Array.isArray(parsed.coverage) ? parsed.coverage : []
   };
 }
 
-  function publicRun(run) {
-  const planner = run.planner ? { ...run.planner } : null;
-  if (planner) delete planner.output;
-  const coordinator = run.coordinator ? { ...run.coordinator } : null;
-  if (coordinator) delete coordinator.output;
-  const supervisor = run.supervisor ? { ...run.supervisor } : null;
-  if (supervisor) {
-    delete supervisor.output;
-    supervisor.deepLink = supervisor.threadId ? threadDeepLink(supervisor.threadId) : "";
-    supervisor.messages = (supervisor.messages || []).slice(-12);
-    supervisor.decisions = (supervisor.decisions || []).slice(-8);
-  }
+function publicRun(run) {
   return {
     id: run.id,
     status: run.status,
@@ -988,13 +932,15 @@ function normalizePlan(output, markdown, objective = "") {
     summary: run.summary || "",
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
-    approvedAt: run.approvedAt || "",
     finishedAt: run.finishedAt || "",
+    acceptedAt: run.acceptedAt || "",
+    completedAt: run.completedAt || "",
+    totalDurationMs: Number.isFinite(run.totalDurationMs) ? run.totalDurationMs : null,
     error: run.error || "",
-    planner,
-    jobs: (run.jobs || []).map(({ output, workerPath, commit, sourceCommit, ...job }) => ({
+    planner: run.planner || null,
+    jobs: (run.jobs || []).map(({ workerPath, commit, sourceCommit, ...job }) => ({
       ...job,
-      reportChars: output?.length || 0,
+      reportChars: job.output?.length || 0,
       deepLink: job.threadId ? threadDeepLink(job.threadId) : ""
     })),
     peerMessages: (run.peerMessages || []).map((message) => ({
@@ -1003,14 +949,13 @@ function normalizePlan(output, markdown, objective = "") {
       toDeepLink: message.toThreadId ? threadDeepLink(message.toThreadId) : ""
     })),
     contextOptions: run.contextOptions || [],
-    integrationTests: run.integrationTests || [],
-    integrationTestResults: run.integrationTestResults || [],
-    coordinator,
-    supervisor,
+    mergeConflicts: run.mergeConflicts || [],
+    coverage: run.coverage || [],
+    workspaceTimings: run.workspaceTimings || {},
+    gitCommandTimings: run.gitCommandTimings || null,
     executionTree: runtimeTree(run),
-    events: (run.events || []).slice(-40),
-    review: run.review || null,
-    deepLink: run.coordinator?.threadId ? threadDeepLink(run.coordinator.threadId) : ""
+    events: run.events || [],
+    result: run.result || null
   };
 }
 
@@ -1018,18 +963,97 @@ export function createParallelCodexCoordinator({
   projectRoot,
   startTurn = startCodexTurn,
   archiveThread = archiveCodexThread,
-  scopeStore = createExecutionScopeStore({ projectRoot }),
   workspace = createGitWorkspaceManager({ projectRoot }),
-  onAccepted = async () => null
 } = {}) {
+  const injectedStartTurn = startTurn !== startCodexTurn;
+  if (!injectedStartTurn) {
+    const providerStartTurn = startTurn;
+    startTurn = (options = {}) => providerStartTurn({
+      ...options,
+      environment: {
+        ...(options.environment || {}),
+        TASK_TREE_PROJECT_ROOT: projectRoot
+      }
+    });
+  }
+  // Keep per-run timings for every workspace operation.  This is deliberately
+  // outside the Git manager: it measures the real coordinator boundary (the
+  // part that can become a bottleneck) without changing Git semantics.
+  const workspaceRuns = new Map();
+  const workspaceTimingContext = new AsyncLocalStorage();
+  const rawWorkspace = workspace;
+  const workspaceTiming = new Proxy(rawWorkspace, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (typeof value !== "function") return value;
+      return async (...args) => {
+        const startedAt = Date.now();
+        let run = workspaceTimingContext.getStore() || null;
+        const first = args[0];
+        if (!run && typeof first === "string") run = workspaceRuns.get(first) || workspaceRuns.get(path.resolve(first)) || null;
+        if (!run && first && typeof first === "object") {
+          run = workspaceRuns.get(String(first.runId || ""))
+            || workspaceRuns.get(path.resolve(String(first.integrationPath || "")))
+            || null;
+        }
+        let result;
+        try {
+          const invoke = () => Reflect.apply(value, receiver, args);
+          result = await (run ? workspaceTimingContext.run(run, invoke) : invoke());
+          if (run && property === "prepare" && result?.integrationPath) {
+            workspaceRuns.set(path.resolve(result.integrationPath), run);
+            if (result.runDir) workspaceRuns.set(path.resolve(result.runDir), run);
+          }
+          if (run && property === "createWorker" && result) workspaceRuns.set(path.resolve(String(result)), run);
+          return result;
+        } finally {
+          if (run) {
+            run.workspaceTimings ||= {};
+            const key = String(property);
+            const entry = run.workspaceTimings[key] || { calls: 0, totalMs: 0, maxMs: 0, lastMs: 0 };
+            const elapsed = Date.now() - startedAt;
+            entry.calls += 1;
+            entry.totalMs += elapsed;
+            entry.maxMs = Math.max(entry.maxMs, elapsed);
+            entry.lastMs = elapsed;
+            run.workspaceTimings[key] = entry;
+            event(run, "workspace_timing", { operation: key, durationMs: elapsed, calls: entry.calls });
+          }
+        }
+      };
+    }
+  });
+  if (typeof rawWorkspace.setTimingObserver === "function") {
+    rawWorkspace.setTimingObserver((detail) => {
+      const run = workspaceTimingContext.getStore();
+      if (!run) return;
+      run.gitCommandTimings ||= { calls: 0, totalMs: 0, maxMs: 0, byCommand: {} };
+      const timings = run.gitCommandTimings;
+      const command = String(detail.command || "unknown");
+      const entry = timings.byCommand[command] || { calls: 0, totalMs: 0, maxMs: 0, lastMs: 0 };
+      timings.calls += 1;
+      timings.totalMs += detail.durationMs;
+      timings.maxMs = Math.max(timings.maxMs, detail.durationMs);
+      entry.calls += 1;
+      entry.totalMs += detail.durationMs;
+      entry.maxMs = Math.max(entry.maxMs, detail.durationMs);
+      entry.lastMs = detail.durationMs;
+      timings.byCommand[command] = entry;
+      event(run, "git_command_timing", { command, args: detail.args, durationMs: detail.durationMs, failed: Boolean(detail.failed) });
+    });
+  }
+  workspace = workspaceTiming;
+  const registerWorkspaceRun = (run) => workspaceRuns.set(run.id, run);
   const runs = new Map();
   const pending = new Map();
   const background = new Map();
-  const supervisorTurns = new Map();
+  const additions = new Map();
+  const wakeups = new Map();
   const runsDir = path.join(projectRoot, ".task-tree-runs");
   const systemContextsFile = path.join(runsDir, "system-contexts");
   let systemContextsPromise = null;
   let persistQueue = Promise.resolve();
+  let plannerQueue = Promise.resolve();
 
   async function readSystemContexts() {
     if (!systemContextsPromise) {
@@ -1077,7 +1101,6 @@ export function createParallelCodexCoordinator({
   function event(run, type, data = {}) {
     run.events ||= [];
     run.events.push({ id: randomUUID(), at: new Date().toISOString(), type, ...data });
-    if (run.events.length > MAX_EVENTS) run.events.splice(0, run.events.length - MAX_EVENTS);
   }
 
   function persist(run) {
@@ -1164,218 +1187,7 @@ export function createParallelCodexCoordinator({
     }
   }
 
-  function ensureSupervisor(run) {
-    run.supervisor ||= {
-      status: "idle",
-      threadId: "",
-      turnId: "",
-      rounds: 0,
-      paused: false,
-      lastDecision: "",
-      error: "",
-      messages: [],
-      decisions: []
-    };
-    run.supervisor.messages ||= [];
-    run.supervisor.decisions ||= [];
-    return run.supervisor;
-  }
-
-  async function appendSupervisorJobs(run, decision) {
-    if (decision.newJobs.length > MAX_SUPERVISOR_JOBS_PER_ROUND) throw new Error("Supervisor 单轮新增任务过多");
-    if (run.jobs.length + decision.newJobs.length > MAX_SUPERVISOR_JOBS) throw new Error("本轮运行任务已达到安全上限，需要用户审核");
-    const markdown = await readFile(path.join(projectRoot, "task-tree.md"), "utf8");
-    const validNodeIds = new Set(parseTreeNodeFields(markdown).map((node) => node.id));
-    const validParentIds = new Set(["RUN", ...run.jobs.map((job) => job.taskId), ...decision.newJobs.map((job) => cleanId(job?.taskId || job?.id)).filter(Boolean)]);
-    for (const job of decision.newJobs) {
-      if (!validNodeIds.has(cleanId(job?.nodeId))) throw new Error(`Supervisor 新任务引用了不存在的树节点：${job?.nodeId || "(empty)"}`);
-      if (job?.parentTaskId && !validParentIds.has(cleanId(job.parentTaskId))) throw new Error(`Supervisor 新任务引用了不存在的运行树父节点：${job.parentTaskId}`);
-      if (!compactGoalText(job?.summary, 400)) throw new Error(`Supervisor 新任务 ${job?.taskId || "(unknown)"} 没有说明对目标的贡献`);
-      if (!compactGoalText(job?.acceptancePrompt, 520)) throw new Error(`Supervisor 新任务 ${job?.taskId || "(unknown)"} 没有验收说明`);
-    }
-    const liveJobs = run.jobs.filter((job) => job.status !== "completed");
-    const validated = validateParallelJobs(decision.newJobs, {
-      minimum: 1,
-      knownTaskIds: run.jobs.map((job) => job.taskId),
-      existingJobs: liveJobs
-    });
-    const rawById = new Map(decision.newJobs.map((job) => [cleanId(job?.taskId || job?.id), job]));
-    const appended = executionContexts(validated, run.jobs, run.contextOptions || [], {
-      minimum: 1,
-      knownTaskIds: run.jobs.map((job) => job.taskId),
-      existingJobs: liveJobs
-    }).map((job) => ({
-      ...job,
-      parentTaskId: cleanId(rawById.get(job.taskId)?.parentTaskId) || "RUN",
-      supervisorRound: Number(run.supervisor.rounds) || 1,
-      status: "queued",
-      threadId: job.contextThreadId || "",
-      turnId: "",
-      changedFiles: [],
-      testResults: [],
-      error: ""
-    }));
-    run.jobs.push(...appended);
-    event(run, "supervisor_jobs_added", { taskIds: appended.map((job) => job.taskId), round: run.supervisor.rounds });
-    return appended;
-  }
-
-  async function supervise(run) {
-    const supervisor = ensureSupervisor(run);
-    if (supervisor.paused) {
-      supervisor.status = "paused";
-      run.status = "paused";
-      await persist(run);
-      return { action: "paused", newTaskIds: [] };
-    }
-    if (supervisor.rounds >= MAX_SUPERVISOR_ROUNDS) {
-      supervisor.status = "waiting_user";
-      supervisor.lastDecision = "已达到自动调度轮次上限，需要用户决定是否继续。";
-      run.status = "waiting_user";
-      await persist(run);
-      return { action: "waiting_user", newTaskIds: [] };
-    }
-
-    const previous = supervisorTurns.get(run.id) || Promise.resolve();
-    const turn = previous.catch(() => {}).then(async () => {
-      const queuedMessages = supervisor.messages.filter((message) => message.status === "queued");
-      queuedMessages.forEach((message) => { message.status = "delivering"; });
-      supervisor.status = "running";
-      supervisor.error = "";
-      supervisor.rounds += 1;
-      run.status = "supervising";
-      event(run, "supervisor_started", { round: supervisor.rounds, messages: queuedMessages.length });
-      await persist(run);
-      try {
-        const result = await startTurn({
-          prompt: buildSupervisorPrompt(run, queuedMessages),
-          cwd: run.workspace.integrationPath,
-          threadId: supervisor.threadId || "",
-          threadName: `任务图 · 总控 · ${humanizeTitle(run.goal?.immediate, "自动并行")}`,
-          sandbox: "read-only",
-          approvalPolicy: "never",
-          developerInstructions: "Supervise this approved run from provided structured state. Do not edit files, task-tree state, flow state, or run metadata. Return JSON only.",
-          waitForCompletion: true,
-          completionTimeoutMs: PLANNER_TIMEOUT_MS,
-          onAccepted: async ({ threadId, turnId }) => {
-            supervisor.threadId = threadId;
-            supervisor.turnId = turnId;
-            event(run, "supervisor_turn_started", { threadId, round: supervisor.rounds });
-            await persist(run);
-          }
-        });
-        supervisor.threadId = result.threadId;
-        supervisor.turnId = result.turnId;
-        supervisor.output = String(result.output || "").slice(0, MAX_REPORT_CHARS);
-        queuedMessages.forEach((message) => { message.status = "delivered"; message.deliveredAt = new Date().toISOString(); });
-        const decision = normalizeSupervisorDecision(result.output);
-        supervisor.lastDecision = decision.summary || decision.reason || decision.action;
-        supervisor.decisions.push({
-          at: new Date().toISOString(),
-          round: supervisor.rounds,
-          action: decision.action,
-          summary: decision.summary,
-          reason: decision.reason,
-          taskIds: decision.newJobs.map((job) => cleanId(job?.taskId || job?.id)).filter(Boolean)
-        });
-        supervisor.decisions = supervisor.decisions.slice(-MAX_SUPERVISOR_MESSAGES);
-
-        if (supervisor.messages.some((message) => message.status === "queued")) {
-          supervisor.status = "running";
-          supervisor.lastDecision = "已收到新的用户消息，正在同一总控对话中重新决策。";
-          event(run, "supervisor_message_followup", { round: supervisor.rounds });
-          await persist(run);
-          return { action: "continue", newTaskIds: [] };
-        }
-
-        if (decision.action === "continue") {
-          if (!decision.newJobs.length) throw new Error("Supervisor 要求继续，但没有给出可执行任务");
-          const appended = await appendSupervisorJobs(run, decision);
-          supervisor.status = "running";
-          event(run, "supervisor_continued", { taskIds: appended.map((job) => job.taskId), round: supervisor.rounds });
-          await persist(run);
-          return { action: "continue", newTaskIds: appended.map((job) => job.taskId) };
-        }
-        if (decision.action === "waiting_user") {
-          supervisor.status = "waiting_user";
-          supervisor.lastDecision = decision.messageToUser || supervisor.lastDecision;
-          run.status = "waiting_user";
-          event(run, "supervisor_waiting_user", { reason: supervisor.lastDecision, round: supervisor.rounds });
-          await persist(run);
-          return { action: "waiting_user", newTaskIds: [] };
-        }
-        supervisor.status = "completed";
-        event(run, "supervisor_finished", { round: supervisor.rounds, summary: supervisor.lastDecision });
-        await persist(run);
-        return { action: "finish", newTaskIds: [] };
-      } catch (error) {
-        queuedMessages.forEach((message) => { if (message.status === "delivering") message.status = "queued"; });
-        supervisor.status = "waiting_user";
-        supervisor.error = error.message;
-        supervisor.lastDecision = `总控无法继续自动调度：${error.message}`;
-        run.status = "waiting_user";
-        event(run, "supervisor_failed", { error: error.message, round: supervisor.rounds });
-        await persist(run);
-        return { action: "waiting_user", newTaskIds: [] };
-      }
-    });
-    supervisorTurns.set(run.id, turn);
-    try {
-      return await turn;
-    } finally {
-      if (supervisorTurns.get(run.id) === turn) supervisorTurns.delete(run.id);
-    }
-  }
-
-  async function finalizeSupervisorReview(run, integration, coordinatorOutput, followup = 0) {
-    const supervisor = ensureSupervisor(run);
-    const queuedMessages = supervisor.messages.filter((message) => message.status === "queued");
-    queuedMessages.forEach((message) => { message.status = "delivering"; });
-    supervisor.status = "finalizing";
-    event(run, "supervisor_finalizing", { messages: queuedMessages.length });
-    await persist(run);
-    try {
-      const result = await startTurn({
-        prompt: buildSupervisorFinalPrompt(run, integration, coordinatorOutput),
-        cwd: run.workspace.integrationPath,
-        threadId: supervisor.threadId || "",
-        threadName: `任务图 · 总控 · ${humanizeTitle(run.goal?.immediate, "自动并行")}`,
-        sandbox: "read-only",
-        approvalPolicy: "never",
-        developerInstructions: "Give the final user-facing review for this supervised run. Do not edit files or state. Return JSON only.",
-        waitForCompletion: true,
-        completionTimeoutMs: PLANNER_TIMEOUT_MS,
-        onAccepted: async ({ threadId, turnId }) => {
-          supervisor.threadId = threadId;
-          supervisor.turnId = turnId;
-          await persist(run);
-        }
-      });
-      supervisor.threadId = result.threadId;
-      supervisor.turnId = result.turnId;
-      supervisor.output = String(result.output || "").slice(0, MAX_REPORT_CHARS);
-      const report = parseJsonObject(supervisor.output) || {};
-      supervisor.lastDecision = compactGoalText(report.summary || "并行执行已完成，等待结束审核。", 240);
-      supervisor.status = "completed";
-      queuedMessages.forEach((message) => { message.status = "delivered"; message.deliveredAt = new Date().toISOString(); });
-      event(run, "supervisor_finalized", { summary: supervisor.lastDecision });
-      await persist(run);
-      if (followup < 3 && supervisor.messages.some((message) => message.status === "queued")) {
-        return finalizeSupervisorReview(run, integration, supervisor.output, followup + 1);
-      }
-      return supervisor.output;
-    } catch (error) {
-      queuedMessages.forEach((message) => { if (message.status === "delivering") message.status = "queued"; });
-      supervisor.status = "failed";
-      supervisor.error = error.message;
-      event(run, "supervisor_final_review_failed", { error: error.message });
-      await persist(run);
-      return coordinatorOutput;
-    }
-  }
-
   async function runWorker(run, job, integrate) {
-    let scope = null;
     let workerHandoffStaged = false;
     try {
       job.status = "preparing";
@@ -1386,15 +1198,6 @@ export function createParallelCodexCoordinator({
         contextKey: job.contextKey,
         persistentContext: true
       });
-      scope = await scopeStore.create({
-        runId: run.id,
-        role: "worker",
-        targetNodeIds: [job.nodeId],
-        writableNodeIds: [],
-        writeSet: job.writeSet,
-        instruction: job.instruction
-      });
-      job.scopeId = scope.scopeId;
       job.contextPersistent = true;
       const rotateContext = shouldRotateContext(job);
       let handoffPath = "";
@@ -1408,7 +1211,7 @@ export function createParallelCodexCoordinator({
           threadId: job.contextThreadId || job.threadId || "",
           status: "archived",
           handoffPath: handoff.archivePath
-        }].slice(-8);
+        }];
         job.contextGeneration = (Number(job.contextGeneration) || 1) + 1;
         job.contextHandoffPath = handoff.archivePath;
         job.contextStatus = "rotating";
@@ -1427,16 +1230,15 @@ export function createParallelCodexCoordinator({
       await persist(run);
 
       const result = await startTurn({
-        prompt: buildWorkerPrompt(job, scope, handoffPath, run.jobs),
+        prompt: buildWorkerPrompt(job, handoffPath, run.jobs),
         cwd: job.workerPath,
         threadId: job.contextSource === "codex" ? "" : (job.contextThreadId || ""),
         forkThreadId: job.contextSource === "codex" ? (job.contextThreadId || "") : "",
         forceNewThread: rotateContext,
         threadName: `任务图 · 并行 ${String(run.jobs.indexOf(job) + 1).padStart(2, "0")} · ${humanizeTitle(job.title, job.taskId)}`,
-        sandbox: "workspace-write",
+        sandbox: "danger-full-access",
         approvalPolicy: "never",
-        developerInstructions: "Implement only the assigned task inside its isolated worktree and declared write scope. Never modify task-tree or flow state.",
-        environment: executionScopeEnvironment(scope),
+        developerInstructions: "Implement the assigned task. File scopes are advisory; task-tree, project metadata, and shared run metadata may be edited. Do not run tests, lint, diff checks, validation commands, or reviews. Changes outside the worktree are direct concurrent effects and are not Git-isolated.",
         waitForCompletion: true,
         onAccepted: async ({ threadId, turnId }) => {
           job.threadId = threadId;
@@ -1450,6 +1252,7 @@ export function createParallelCodexCoordinator({
           await persist(run);
         }
       });
+      if (result.timing) event(run, "worker_turn_timing", { taskId: job.taskId, nodeId: job.nodeId, timing: result.timing });
       job.threadId = result.threadId;
       job.contextThreadId = result.threadId;
       job.contextSource = "parallel";
@@ -1476,7 +1279,8 @@ export function createParallelCodexCoordinator({
       }
       rememberRunContext(run, job);
       job.turnId = result.turnId;
-      job.output = String(result.output || "").slice(0, MAX_REPORT_CHARS);
+      job.output = String(result.output || "");
+      if (parseJsonObject(job.output)?.event === "blocked") throw new Error(job.output);
       job.evidence = compactGoalText(parseJsonObject(job.output)?.evidence || job.output, 600);
       job.peerRequests = normalizePeerRequests(job.output, run.jobs, job.taskId);
       if (job.peerRequests.length) {
@@ -1496,9 +1300,6 @@ export function createParallelCodexCoordinator({
 
       const inspected = await workspace.inspectChanges(job.workerPath, job.sourceCommit, job.writeSet);
       job.changedFiles = inspected.changedFiles;
-      if (inspected.violations.length) throw new Error(`worker 越出写集：${inspected.violations.join(", ")}`);
-      job.testResults = await workspace.runTests(job.workerPath, job.tests);
-      if (job.testResults.some((test) => !test.ok)) throw new Error("worker 测试失败，改动未进入 integration");
       job.commit = await workspace.commit(job.workerPath, `parallel ${job.taskId}`, job.sourceCommit);
       await integrate(job.commit, job.sourceCommit);
       job.status = "completed";
@@ -1514,18 +1315,127 @@ export function createParallelCodexCoordinator({
       event(run, "blocked", { taskId: job.taskId, nodeId: job.nodeId, error: error.message });
     } finally {
       if (workerHandoffStaged && job.workerPath) await removeWorkerHandoff(job.workerPath).catch(() => {});
-      if (scope) await scopeStore.close(scope.scopeId).catch(() => {});
       if (job.workerPath) await workspace.removeWorker(job.workerPath, { preserveContext: true, contextKey: job.contextKey }).catch(() => {});
       delete job.workerPath;
       await persist(run);
     }
   }
 
-  async function execute(run, { retryTaskIds = null, taskIds = null } = {}) {
+  async function resolveMergeConflict(run, sourceJob, files, integrationPath = run.workspace.integrationPath, liveWorkspace = false) {
+    const conflictFiles = [...new Set(files)].sort();
+    const peers = run.jobs.filter((job) => job.taskId !== sourceJob?.taskId
+      && (job.changedFiles || []).some((file) => conflictFiles.includes(file)));
+    const participants = [sourceJob, ...peers].filter(Boolean);
+    const threadLinks = participants.map((job) => ({
+      taskId: job.taskId,
+      threadId: job.contextThreadId || job.threadId || "",
+      deepLink: job.contextThreadId || job.threadId ? threadDeepLink(job.contextThreadId || job.threadId) : "",
+      instruction: job.instruction,
+      output: job.output || ""
+    }));
+    run.mergeConflicts ||= [];
+    const conflict = {
+      id: randomUUID(),
+      at: new Date().toISOString(),
+      files: conflictFiles,
+      sourceTaskId: sourceJob?.taskId || "",
+      participantTaskIds: participants.map((job) => job.taskId),
+      status: "resolving",
+      consultationMode: "single-resolver",
+      consultationCount: 0,
+      messages: []
+    };
+    run.mergeConflicts.push(conflict);
+    event(run, "merge_conflict_detected", { taskId: sourceJob?.taskId || "", files: conflictFiles, participants: conflict.participantTaskIds });
+    await persist(run);
+
+    const sourceThread = sourceJob?.contextThreadId || sourceJob?.threadId || "";
     try {
+      if (!sourceThread) throw new Error(`无法协商合并冲突：${sourceJob?.taskId || "worker"} 没有可用上下文`);
+      // The old implementation opened one model turn per peer and waited for each
+      // turn before starting the resolver. That made conflict latency grow with
+      // the number of participants even though every worker's original task,
+      // branch context, and result were already available to the coordinator.
+      // Send one complete, lossless participant packet to the source context and
+      // let one resolver turn reconcile it. This keeps the semantic decision in a
+      // worker conversation while reducing the normal path to one model round.
+      const participantPacket = participants.map((job) => ({
+        taskId: job.taskId,
+        nodeId: job.nodeId,
+        title: job.title,
+        instruction: job.instruction,
+        summary: job.summary,
+        dependencyPrompt: job.dependencyPrompt,
+        acceptancePrompt: job.acceptancePrompt,
+        writeSet: job.writeSet,
+        dependsOn: job.dependsOn,
+        branchContext: job.branchContext || "",
+        output: job.output || "",
+        evidence: job.evidence || "",
+        changedFiles: job.changedFiles || [],
+        threadId: job.contextThreadId || job.threadId || "",
+        deepLink: job.contextThreadId || job.threadId ? threadDeepLink(job.contextThreadId || job.threadId) : ""
+      }));
+      const resolutionStartedAt = Date.now();
+      conflict.resolutionStartedAt = new Date().toISOString();
+      await persist(run);
+      const result = await startTurn({
+        prompt: [
+          "【Task Tree · Merge conflict resolution】",
+          `Git has paused a cherry-pick with conflicts in: ${conflictFiles.join(", ")}.`,
+          "You are the source worker whose commit is being integrated. Resolve every conflict in the current worktree, preserving both branches' stated intent where compatible.",
+          liveWorkspace ? "The current side also contains the user's latest live workspace edits. Preserve those edits as well as the worker results." : "",
+          "The following packet is the complete context collected before this conflict. It includes every participant's task, branch context, output, changed files, and conversation link. Do not start separate peer consultations; use this packet and inspect the actual conflict markers.",
+          `Participant packet: ${JSON.stringify(participantPacket)}`,
+          `All participant conversation links: ${JSON.stringify(threadLinks)}`,
+          "Inspect the conflict markers and edit the current integration worktree. Stage the resolved files with git add. Do not commit or continue/abort the cherry-pick; the host does that. Do not discard another worker merely to make Git clean. Do not run tests. Finish by explaining the merged intent in JSON: {\"event\":\"completed|blocked\",\"evidence\":\"...\",\"peerRequests\":[]}."
+        ].join("\n"),
+        cwd: integrationPath,
+        forkThreadId: sourceThread,
+        threadName: `任务图 · 冲突合并 · ${sourceJob.taskId}`,
+        sandbox: "workspace-write",
+        approvalPolicy: "never",
+        developerInstructions: "Resolve only the active Git conflict in the integration worktree. Preserve both worker intents and do not edit outside this Git project.",
+        waitForCompletion: true,
+        completionTimeoutMs: PLANNER_TIMEOUT_MS
+      });
+      conflict.resolverTiming = result.timing || null;
+      if (result.timing) event(run, "merge_resolver_turn_timing", { taskId: sourceJob.taskId, timing: result.timing });
+      conflict.messages.push({
+        fromTaskId: sourceJob.taskId,
+        toTaskId: peers.map((job) => job.taskId).join(","),
+        mode: "single-resolver",
+        conclusion: String(result.output || "")
+      });
+      if (parseJsonObject(result.output)?.event === "blocked") throw new Error(String(result.output));
+      await workspace.continueIntegration(integrationPath);
+      conflict.status = "resolved";
+      conflict.resolvedAt = new Date().toISOString();
+      conflict.durationMs = Date.now() - resolutionStartedAt;
+      event(run, "merge_conflict_resolved", {
+        taskId: sourceJob.taskId,
+        files: conflictFiles,
+        consultationMode: conflict.consultationMode,
+        consultationCount: conflict.consultationCount,
+        durationMs: conflict.durationMs
+      });
+    } catch (error) {
+      await workspace.abortIntegration(integrationPath);
+      conflict.status = "failed";
+      conflict.error = error.message;
+      event(run, "merge_conflict_failed", { taskId: sourceJob?.taskId || "", files: conflictFiles, error: error.message });
+      throw error;
+    } finally {
+      await persist(run);
+    }
+  }
+
+  async function execute(run) {
+    try {
+      registerWorkspaceRun(run);
       run.status = run.workspace?.integrationPath ? "running" : "preparing";
       run.error = "";
-      run.review = null;
+      run.result = null;
       run.finishedAt = "";
       if (!run.workspace?.integrationPath) {
         event(run, "snapshot_started");
@@ -1534,13 +1444,20 @@ export function createParallelCodexCoordinator({
         run.status = "running";
         event(run, "run_started", { snapshotCommit: run.workspace.snapshotCommit });
       } else {
-        event(run, "retry_started", { taskIds: retryTaskIds || [] });
+        event(run, "run_resumed");
       }
       await persist(run);
 
       let integrationQueue = Promise.resolve();
-      const integrate = (commit, sourceCommit) => {
-        const next = integrationQueue.then(() => workspace.integrate(run.workspace.integrationPath, commit, sourceCommit));
+      const integrate = (commit, sourceCommit, job) => {
+        const next = integrationQueue.then(async () => {
+          try {
+            return await workspace.integrate(run.workspace.integrationPath, commit, sourceCommit);
+          } catch (error) {
+            if (error.code !== "CHERRY_PICK_CONFLICT") throw error;
+            return resolveMergeConflict(run, job, error.files || []);
+          }
+        });
         integrationQueue = next.catch(() => {});
         return next;
       };
@@ -1554,7 +1471,7 @@ export function createParallelCodexCoordinator({
         if (!requests.length) return;
         run.peerMessages ||= [];
 
-        for (const { source, request } of requests.slice(0, MAX_PEER_MESSAGES)) {
+        for (const { source, request } of requests) {
           const target = jobsById.get(request.toTaskId);
           const message = {
             id: request.id,
@@ -1573,12 +1490,10 @@ export function createParallelCodexCoordinator({
             createdAt: new Date().toISOString()
           };
           run.peerMessages.push(message);
-          run.peerMessages = run.peerMessages.slice(-MAX_PEER_MESSAGES);
           await persist(run);
 
           let targetPath = "";
           let sourcePath = "";
-          let sourceScope = null;
           try {
             if (source.status !== "completed") throw new Error("提问分支没有完成初始工作，不能发起续接");
             if (!target || target.status !== "completed") throw new Error("目标分支没有完成初始工作，无法回答");
@@ -1631,14 +1546,6 @@ export function createParallelCodexCoordinator({
                 contextKey: source.contextKey,
                 persistentContext: true
               });
-              sourceScope = await scopeStore.create({
-                runId: run.id,
-                role: "peer-continuation",
-                targetNodeIds: [source.nodeId],
-                writableNodeIds: [],
-                writeSet: source.writeSet,
-                instruction: "使用另一个并行分支的回答完成一次受限续接"
-              });
               const continuation = await startTurn({
                 prompt: buildPeerAnswerPrompt(source, target, request, {
                   conclusion: message.response,
@@ -1647,10 +1554,9 @@ export function createParallelCodexCoordinator({
                 }),
                 cwd: sourcePath,
                 threadId: source.contextThreadId,
-                sandbox: "workspace-write",
+                sandbox: "danger-full-access",
                 approvalPolicy: "never",
-                developerInstructions: "Continue only the assigned worker task using the peer answer. Do not edit task-tree or flow state and do not ask another peer.",
-                environment: executionScopeEnvironment(sourceScope),
+                developerInstructions: "Continue the assigned worker task using the peer answer. The write set is only a planning hint: you may edit task-tree.md, task-trees.json, project metadata, and any path required by the explicit task. Do not ask another peer during this continuation.",
                 waitForCompletion: true,
                 completionTimeoutMs: PLANNER_TIMEOUT_MS
               });
@@ -1664,13 +1570,9 @@ export function createParallelCodexCoordinator({
                 source.contextUsagePercent = continuation.tokenUsage.percent;
               }
               const inspected = await workspace.inspectChanges(sourcePath, sourceBase, source.writeSet);
-              if (inspected.violations.length) throw new Error(`peer 续接越出写集：${inspected.violations.join(", ")}`);
-              const continuationTests = await workspace.runTests(sourcePath, source.tests);
-              if (continuationTests.some((test) => !test.ok)) throw new Error("peer 续接后的分支测试失败");
-              source.testResults = continuationTests;
               source.changedFiles = [...new Set([...(source.changedFiles || []), ...inspected.changedFiles])].sort();
               source.commit = await workspace.commit(sourcePath, `peer continuation ${source.taskId}`, sourceBase);
-              await integrate(source.commit, sourceBase);
+              await integrate(source.commit, sourceBase, source);
               source.peerMessages ||= [];
               source.peerMessages.push({
                 requestId: message.id,
@@ -1688,33 +1590,24 @@ export function createParallelCodexCoordinator({
               source.error = message.error;
               event(run, "peer_continuation_failed", { requestId: message.id, taskId: source.taskId, error: error.message });
             } finally {
-              if (sourceScope) await scopeStore.close(sourceScope.scopeId).catch(() => {});
               if (sourcePath) await workspace.removeWorker(sourcePath, { preserveContext: true }).catch(() => {});
             }
           }
           await persist(run);
         }
       }
-      const initialJobIds = new Set(run.jobs.map((job) => job.taskId));
-      const restrictedIds = retryTaskIds
-        ? new Set(retryTaskIds)
-        : taskIds
-          ? new Set(taskIds)
-          : null;
       const queued = new Set(run.jobs
-        .filter((job) => ["queued", "planned"].includes(job.status)
-          && (!restrictedIds || restrictedIds.has(job.taskId)))
+        .filter((job) => ["queued", "planned"].includes(job.status))
         .map((job) => job.taskId));
       const active = new Map();
 
-      while (queued.size || active.size || run.jobs.some((job) => ["queued", "planned"].includes(job.status))) {
+      while (queued.size || active.size || additions.get(run.id)?.size || run.jobs.some((job) => ["queued", "planned"].includes(job.status))) {
+        const awakened = new Promise((resolve) => wakeups.set(run.id, () => resolve(null)));
         const byId = new Map(run.jobs.map((job) => [job.taskId, job]));
-        // New jobs appended through the API enter this same scheduler. During a retry,
-        // only jobs that did not exist when the retry started are admitted dynamically.
+        // New jobs appended through the API enter this same scheduler immediately.
         for (const job of run.jobs) {
           if (!active.has(job.taskId)
-            && ["queued", "planned"].includes(job.status)
-            && (!restrictedIds || !initialJobIds.has(job.taskId))) {
+            && ["queued", "planned"].includes(job.status)) {
             queued.add(job.taskId);
           }
         }
@@ -1732,10 +1625,11 @@ export function createParallelCodexCoordinator({
           }
         }
         const ready = [...queued].filter((taskId) => byId.get(taskId).dependsOn.every((id) => byId.get(id)?.status === "completed"));
-        while (ready.length && active.size < MAX_WORKERS) {
+        while (ready.length) {
           const taskId = ready.shift();
           queued.delete(taskId);
-          const promise = runWorker(run, byId.get(taskId), integrate).then(() => taskId);
+          const job = byId.get(taskId);
+          const promise = runWorker(run, job, (commit, sourceCommit) => integrate(commit, sourceCommit, job)).then(() => taskId);
           active.set(taskId, promise);
         }
         if (!active.size && queued.size) {
@@ -1747,273 +1641,237 @@ export function createParallelCodexCoordinator({
           queued.clear();
           break;
         }
-        if (active.size) {
-          const finished = await Promise.race(active.values());
+        if (active.size || additions.get(run.id)?.size) {
+          const finished = await Promise.race([...active.values(), awakened]);
           active.delete(finished);
         }
+        wakeups.delete(run.id);
       }
       await integrationQueue;
       await relayPeerRequests();
       await integrationQueue;
 
-      const supervision = await supervise(run);
-      if (supervision.action === "continue") {
-        return execute(run, { taskIds: supervision.newTaskIds });
-      }
-      if (["paused", "waiting_user"].includes(supervision.action)) {
-        return publicRun(run);
-      }
-      const queuedAfterSupervision = run.jobs.filter((job) => ["queued", "planned"].includes(job.status)).map((job) => job.taskId);
-      if (queuedAfterSupervision.length) return execute(run, { taskIds: queuedAfterSupervision });
-
-      run.status = "coordinating";
-      run.coordinator = { status: "running", threadId: "", turnId: "", error: "" };
-      event(run, "coordinator_started");
+      run.status = "applying";
       await persist(run);
-      const coordinatorScope = await scopeStore.create({
-        runId: run.id,
-        role: "coordinator",
-        targetNodeIds: [...new Set(run.jobs.map((job) => job.nodeId))],
-        writableNodeIds: [],
-        writeSet: run.jobs.flatMap((job) => job.writeSet),
-        instruction: "核验并集成并行 worker 的隔离改动"
-      });
-      try {
-        const result = await startTurn({
-          prompt: buildCoordinatorPrompt(run.jobs, coordinatorScope, run.goal),
-          cwd: run.workspace.integrationPath,
-          threadName: "任务图 · 并行汇总",
-          sandbox: "workspace-write",
-          approvalPolicy: "never",
-          developerInstructions: "Verify and repair only the integrated implementation. Never edit task-tree, flow state, version history, or run metadata.",
-          environment: executionScopeEnvironment(coordinatorScope),
-          waitForCompletion: true,
-          onAccepted: async ({ threadId, turnId }) => {
-            run.coordinator = { ...run.coordinator, scopeId: coordinatorScope.scopeId, threadId, turnId };
-            event(run, "coordinator_turn_started", { threadId });
-            await persist(run);
-          }
-        });
-        run.coordinator = {
-          status: "completed",
-          scopeId: coordinatorScope.scopeId,
-          threadId: result.threadId,
-          turnId: result.turnId,
-          error: "",
-          output: String(result.output || "").slice(0, MAX_REPORT_CHARS)
-        };
-      } finally {
-        await scopeStore.close(coordinatorScope.scopeId).catch(() => {});
-      }
-      const coordinatorChanges = await workspace.inspectChanges(
-        run.workspace.integrationPath,
-        run.workspace.snapshotCommit,
-        run.jobs.flatMap((job) => job.writeSet)
-      );
-      if (coordinatorChanges.violations.length) {
-        throw new Error(`coordinator 越出批准写集：${coordinatorChanges.violations.join(", ")}`);
-      }
-      await workspace.commit(run.workspace.integrationPath, `parallel integration ${run.id.slice(0, 8)}`, run.workspace.snapshotCommit);
-      run.integrationTestResults = await workspace.runTests(run.workspace.integrationPath, run.integrationTests);
       const summary = await workspace.summarize(run.workspace.integrationPath, run.workspace.snapshotCommit);
-      const finalSupervisorOutput = await finalizeSupervisorReview(run, {
-        changedFiles: summary.changedFiles,
-        stat: summary.stat,
-        tests: run.integrationTestResults
-      }, run.coordinator.output);
-      const parsedCoordinator = parseJsonObject(finalSupervisorOutput) || {};
-      const goalAssessment = normalizeGoalAssessment(parsedCoordinator.goalAssessment);
-      const testsPassed = run.integrationTestResults.every((test) => test.ok);
       const failedTasks = run.jobs.filter((job) => job.status !== "completed").map((job) => job.taskId);
-      const readyByImplementation = failedTasks.length === 0 && testsPassed && summary.changedFiles.length > 0;
-      run.review = {
+      run.result = {
         ...summary,
-        readyToAccept: readyByImplementation && goalAssessmentAllowsAccept(goalAssessment, run.goal?.history),
-        summary: String(parsedCoordinator.summary || run.summary || "并行结果已完成隔离集成").trim(),
-        affectedNodes: [...new Set(Array.isArray(parsedCoordinator.affectedNodes) ? parsedCoordinator.affectedNodes.map(cleanId).filter(Boolean) : run.jobs.map((job) => job.nodeId))],
-        evidence: String(parsedCoordinator.evidence || "").trim(),
-        goalAssessment,
+        summary: run.summary || "本轮执行结束",
+        affectedNodes: [...new Set(run.jobs.map((job) => job.nodeId))],
         failedTasks,
-        warnings: [
-          ...(run.supervisor?.status === "failed" ? [`总控最终反馈失败：${run.supervisor.error}`] : []),
-          ...(failedTasks.length ? [`${failedTasks.length} 个分支未完成，接受操作已锁定`] : []),
-          ...(testsPassed ? [] : ["集成测试仍有失败，接受操作已锁定"]),
-          ...(goalAssessment.alignment === "off_target" ? ["结果偏离本轮目标，接受操作已锁定"] : []),
-          ...(goalAssessment.alignment === "unknown" ? ["目标一致性无法判断，接受操作已锁定"] : []),
-          ...(goalAssessment.alignment === "aligned" && ["no_progress", "unknown"].includes(goalAssessment.progress) ? ["尚无可验证的目标推进，接受操作已锁定"] : []),
-          ...(goalAssessment.continuity === "drifted" ? ["长期目标发生漂移，接受操作已锁定"] : []),
-          ...(goalAssessment.continuity === "unknown" ? ["长期目标连续性无法判断，接受操作已锁定"] : []),
-          ...(goalAssessment.continuity === "baseline" && run.goal?.history?.length ? ["已有历史运行，不能把本轮当作首次基线，接受操作已锁定"] : [])
-        ]
+        warnings: failedTasks.length ? [`${failedTasks.length} 个分支未完成`] : []
       };
-      run.status = "review";
+      run.summary = run.result.summary;
       run.finishedAt = new Date().toISOString();
-      event(run, "review_ready", { changedFiles: summary.changedFiles, readyToAccept: run.review.readyToAccept });
-      const appendedTaskIds = run.jobs
-        .filter((job) => ["queued", "planned"].includes(job.status))
-        .map((job) => job.taskId);
-      if (appendedTaskIds.length) {
-        event(run, "append_continuation", { taskIds: appendedTaskIds });
-        await persist(run);
-        return execute(run, { taskIds: appendedTaskIds });
+      if (run.jobs.some((job) => ["queued", "planned"].includes(job.status))) return execute(run);
+      if (failedTasks.length) {
+        run.status = "failed";
+        run.error = run.jobs.filter((job) => job.status !== "completed").map((job) => `${job.taskId}: ${job.error || job.status}`).join("\n");
+      } else {
+        await applyRun(run);
       }
     } catch (error) {
       run.status = "failed";
       run.error = error.message;
-      if (run.coordinator?.status === "running") run.coordinator = { ...run.coordinator, status: "failed", error: error.message };
       event(run, "run_failed", { error: error.message });
     }
     await persist(run);
     return publicRun(run);
   }
 
-  async function generatePlan(run, objective) {
-    const markdown = await readFile(path.join(projectRoot, "task-tree.md"), "utf8");
-    run.objective = cleanObjective(objective);
-    run.goal = deriveParallelGoal(markdown, objective);
-    run.goal.history = await readGoalHistory(runsDir, run.id);
-    run.contextOptions = await readContextOptions(runsDir, run.id);
-    try {
-      const result = await startTurn({
-        prompt: buildPlannerPrompt(markdown, objective, run.goal.history),
+  function requestPlan(run, prompt, normalize, nodeId, outputSchema = PLANNER_OUTPUT_SCHEMA) {
+    // One reusable planner conversation cannot accept simultaneous turns. Workers
+    // remain concurrent; only planning turns sharing this conversation are queued.
+    const result = plannerQueue.catch(() => {}).then(() => requestPlanTurn(run, prompt, normalize, nodeId, outputSchema));
+    plannerQueue = result;
+    return result;
+  }
+
+  async function requestPlanTurn(run, prompt, normalize, nodeId, outputSchema) {
+    const records = await readGoalHistory(runsDir, run.id);
+    const failures = records.flatMap((record) => (record.failures || [])
+      .filter((failure) => !failure.nodeId || failure.nodeId === nodeId));
+    const seen = new Set();
+    let plannerAttempt = 0;
+    for (;;) {
+      const plannerStartedAt = Date.now();
+      const plannerPrompt = [prompt, "本节点最近规划失败（只纠正这些失败，不重放完整历史输出）：", formatPlannerFailures(failures)].join("\n");
+      const plannerTiming = {
+        startedAt: new Date(plannerStartedAt).toISOString(),
+        model: PLANNER_MODEL,
+        reasoningEffort: PLANNER_REASONING_EFFORT,
+        inputChars: plannerPrompt.length,
+        outputChars: null,
+        acceptedMs: null,
+        firstReasoningMs: null,
+        firstAgentMessageMs: null,
+        finalAgentMessageMs: null,
+        completedMs: null
+      };
+      const markPlannerItem = (message) => {
+        const itemType = message?.params?.item?.type;
+        const elapsed = Date.now() - plannerStartedAt;
+        if (itemType === "reasoning" && plannerTiming.firstReasoningMs === null) plannerTiming.firstReasoningMs = elapsed;
+        if (itemType === "agentMessage" && plannerTiming.firstAgentMessageMs === null) plannerTiming.firstAgentMessageMs = elapsed;
+        if (message?.method === "item/completed" && itemType === "agentMessage" && plannerTiming.finalAgentMessageMs === null) {
+          plannerTiming.finalAgentMessageMs = elapsed;
+        }
+      };
+      let result;
+      try {
+      result = await requestDeepSeekPlanner({ projectRoot, prompt: plannerPrompt, outputSchema });
+      // Tests may inject a deterministic startTurn; production has no Codex fallback.
+      if (!result && injectedStartTurn) result = await startTurn({
+        prompt: plannerPrompt,
         cwd: projectRoot,
-        threadId: await plannerThreadId(),
+        threadId: "",
         threadName: "任务图 · 自动规划（系统）",
         ...(PLANNER_MODEL ? { model: PLANNER_MODEL } : {}),
-        sandbox: "read-only",
-        approvalPolicy: "never",
-        developerInstructions: "All required context is already in the prompt. Do not call tools, inspect files, or edit state. Return only the JSON execution plan.",
+        ...(PLANNER_REASONING_EFFORT ? { config: { model_reasoning_effort: PLANNER_REASONING_EFFORT } } : {}),
+        outputSchema,
+        sandbox: "read-only", approvalPolicy: "never",
+        developerInstructions: "All supplied text is complete. Return only a JSON plan. Do not call tools or edit files.",
         waitForCompletion: true,
         completionTimeoutMs: PLANNER_TIMEOUT_MS,
-        totalTimeoutMs: PLANNER_TIMEOUT_MS
-      });
-      const plan = normalizePlan(result.output, markdown, objective);
-      await rememberPlannerThread(result.threadId);
-      run.summary = plan.summary;
-      run.jobs = assignParallelDraftContexts(plan.jobs, run.contextOptions).map((job) => ({ ...job, status: "planned", threadId: "", turnId: "", changedFiles: [], testResults: [], error: "" }));
-      run.integrationTests = plan.integrationTests;
-      run.planner = { status: "completed", threadId: result.threadId, turnId: result.turnId, contextResumed: Boolean(result.resumed), error: "", output: String(result.output || "").slice(0, MAX_REPORT_CHARS) };
-    } catch (error) {
-      let plan;
-      try {
-        plan = fallbackPlan(markdown, error.message, objective);
-      } catch (fallbackError) {
-        run.status = "failed";
-        run.error = fallbackError.message;
-        run.planner = { status: "failed", threadId: error.threadId || "", turnId: error.turnId || "", error: fallbackError.message };
-        event(run, "planning_failed", { error: fallbackError.message });
+        totalTimeoutMs: PLANNER_TIMEOUT_MS,
+        forceNewThread: true,
+          onAccepted: async ({ threadId, turnId }) => {
+          plannerTiming.acceptedMs = Date.now() - plannerStartedAt;
+          run.planner = {
+            ...(run.planner || {}),
+            status: "running",
+            threadId: threadId || "",
+            turnId: turnId || "",
+            timing: plannerTiming
+          };
+          event(run, "planner_turn_started", { nodeId, threadId, turnId, timing: plannerTiming });
+          await rememberPlannerThread(threadId);
+          await persist(run);
+          },
+          onNotification: markPlannerItem
+        });
+      if (!result) throw new Error("缺少 DeepSeek Planner 配置：请在项目 .env 设置 MODEL_AGENT_MAIN_BASE_URL、MODEL_AGENT_MAIN_API_KEY、MODEL_AGENT_MAIN_MODEL");
+        if (result.timing) plannerTiming.codexTurn = result.timing;
+      } catch (error) {
+        plannerTiming.completedMs = Date.now() - plannerStartedAt;
+        run.planner = {
+          ...(run.planner || {}),
+          status: "failed",
+          error: error.message,
+          timing: plannerTiming
+        };
+        event(run, "planner_turn_failed", { nodeId, error: error.message, timing: plannerTiming });
         await persist(run);
-        return publicRun(run);
+        // A slow or wedged reused context is not evidence that the plan is
+        // impossible. Retry once in a clean thread; the full failure is kept in
+        // the run record and passed to the next prompt for diagnosis.
+        if (plannerAttempt === 0 && /超时|timeout/i.test(String(error.message || error))) {
+          plannerAttempt += 1;
+          failures.push({ nodeId, error: error.message, output: "Planner completion timeout; retrying with a fresh thread." });
+          event(run, "planning_retry", { nodeId, error: error.message, reason: "fresh_planner_thread_after_timeout" });
+          await persist(run);
+          continue;
+        }
+        throw error;
       }
-      run.summary = plan.summary;
-      run.jobs = assignParallelDraftContexts(plan.jobs, run.contextOptions).map((job) => ({ ...job, status: "planned", threadId: "", turnId: "", changedFiles: [], testResults: [], error: "" }));
-      run.integrationTests = plan.integrationTests;
-      run.planner = { status: "fallback", threadId: error.threadId || "", turnId: error.turnId || "", error: error.message };
+      plannerTiming.completedMs = Date.now() - plannerStartedAt;
+      plannerTiming.outputChars = String(result.output || "").length;
+      result.plannerTiming = plannerTiming;
+      await rememberPlannerThread(result.threadId);
+      try {
+        return { plan: normalize(result.output), result };
+      } catch (error) {
+        const failure = { nodeId, error: error.message, output: String(result.output || "") };
+        run.planningFailures ||= [];
+        run.planningFailures.push(failure);
+        failures.push(failure);
+        event(run, "planning_retry", { nodeId, error: error.message });
+        await persist(run);
+        const key = JSON.stringify([failure.error, failure.output]);
+        if (seen.has(key)) throw new Error(`Planner 重复返回相同不可执行计划：${error.message}`);
+        seen.add(key);
+      }
     }
-    run.status = "draft";
-    event(run, "draft_ready", { jobs: run.jobs.map((job) => job.taskId) });
-    await persist(run);
-    return publicRun(run);
+  }
+
+  async function generatePlan(run, objective) {
+    try {
+      const markdown = await readFile(path.join(projectRoot, "task-tree.md"), "utf8");
+      run.objective = cleanObjective(objective);
+      run.goal = deriveParallelGoal(markdown, objective);
+      [run.goal.history, run.contextOptions] = await Promise.all([
+        readGoalHistory(runsDir, run.id), readContextOptions(runsDir, run.id)
+      ]);
+      const { plan, result } = await requestPlan(run,
+        buildPlannerPrompt(markdown, objective, run.goal.history),
+        (output) => normalizePlan(output, markdown, objective, { minimum: 2 }), run.goal.stageNodeId);
+      run.summary = plan.summary;
+      const enrichedJobs = enrichPlannedJobs(plan.jobs, {
+        markdown,
+        goal: run.goal,
+        history: run.goal.history
+      });
+      const jobs = assignParallelDraftContexts(enrichedJobs, run.contextOptions);
+      run.jobs = executionContexts(jobs, [], run.contextOptions).map((job) => ({
+        ...job,
+        runtimeMetadataPath: runsDir,
+        status: "queued", threadId: job.contextThreadId || "", turnId: "", changedFiles: [], error: ""
+      }));
+      run.coverage = plan.coverage || [];
+      run.planner = { status: "completed", threadId: result.threadId, turnId: result.turnId,
+        contextResumed: Boolean(result.resumed), error: "", output: String(result.output || ""),
+        timing: result.plannerTiming || run.planner?.timing || null };
+      run.status = "queued";
+      event(run, "plan_started", {
+        jobs: run.jobs.map((job) => job.taskId),
+        automatic: true,
+        parallelRequired: true,
+        workerCount: run.jobs.length
+      });
+      await persist(run);
+      return execute(run);
+    } catch (error) {
+      run.status = "failed";
+      run.error = error.message;
+      run.planner = { ...run.planner, status: "failed", error: error.message };
+      event(run, "planning_failed", { error: error.message });
+      await persist(run);
+      return publicRun(run);
+    }
   }
 
   async function recoverAbandonedPlan(run) {
     if (run.status !== "planning" || pending.has(run.id)) return run;
     const lastUpdate = Date.parse(run.updatedAt || run.createdAt || "");
     if (Number.isFinite(lastUpdate) && Date.now() - lastUpdate < ABANDONED_PLANNING_MS) return run;
-
-    try {
-      const markdown = await readFile(path.join(projectRoot, "task-tree.md"), "utf8");
-      run.goal ||= deriveParallelGoal(markdown, run.objective);
-      run.goal.history ||= await readGoalHistory(runsDir, run.id);
-      run.contextOptions = await readContextOptions(runsDir, run.id);
-      const plan = fallbackPlan(markdown, "规划任务已中断，已自动恢复", run.objective);
-      run.summary = plan.summary;
-      run.jobs = assignParallelDraftContexts(plan.jobs, run.contextOptions).map((job) => ({ ...job, status: "planned", threadId: "", turnId: "", changedFiles: [], testResults: [], error: "" }));
-      run.integrationTests = plan.integrationTests;
-      run.planner = { status: "fallback", threadId: run.planner?.threadId || "", turnId: run.planner?.turnId || "", error: "规划任务已中断" };
-      run.status = "draft";
-      event(run, "planning_recovered", { jobs: run.jobs.map((job) => job.taskId) });
-    } catch (error) {
-      run.status = "failed";
-      run.error = error.message;
-      run.planner = { status: "failed", threadId: run.planner?.threadId || "", turnId: run.planner?.turnId || "", error: error.message };
-      event(run, "planning_failed", { error: error.message });
-    }
-    await persist(run);
+    event(run, "planning_recovered");
+    const promise = Promise.resolve().then(() => generatePlan(run, run.objective)).finally(() => pending.delete(run.id));
+    pending.set(run.id, promise);
     return run;
   }
 
   async function recoverAbandonedExecution(run) {
-    if (pending.has(run.id) || !["approved", "preparing", "running", "supervising", "coordinating"].includes(run.status)) return run;
-    if (!run.workspace?.integrationPath) {
-      run.status = "draft";
-      run.jobs = (run.jobs || []).map((job) => ({ ...job, status: "planned", threadId: "", turnId: "", error: "" }));
-      run.summary = "上次启动在隔离区准备完成前中断，请重新确认开始";
-      event(run, "execution_reset_after_restart");
+    if (pending.has(run.id) || !["queued", "preparing", "running", "applying"].includes(run.status)) return run;
+    // An interrupted model turn may have made direct external edits. Resume only
+    // preparation or application automatically; don't replay a worker's side effects.
+    if (!run.workspace?.integrationPath || run.jobs.every((job) => job.status === "completed")) {
+      run.jobs = run.jobs.map((job) => job.status === "completed" ? job : { ...job, status: "queued" });
+      run.status = "queued";
+      event(run, "execution_requeued_after_restart");
       await persist(run);
-      return run;
-    }
-
-    const unfinished = (run.jobs || []).filter((job) => job.status !== "completed");
-    if (!unfinished.length) {
-      run.status = "approved";
-      run.coordinator = { ...(run.coordinator || {}), status: "queued", error: "" };
-      event(run, "coordinator_resume_queued");
-      await persist(run);
-      const promise = Promise.resolve()
-        .then(() => execute(run, { retryTaskIds: [] }))
-        .finally(() => pending.delete(run.id));
+      const promise = Promise.resolve().then(() => execute(run)).finally(() => pending.delete(run.id));
       pending.set(run.id, promise);
       return run;
     }
-
-    try {
-      const summary = await workspace.summarize(run.workspace.integrationPath, run.workspace.snapshotCommit);
-      run.jobs = (run.jobs || []).map((job) => job.status === "completed" ? job : {
-        ...job,
-        status: "failed",
-        error: "运行服务曾中断，请重跑此分支",
-        threadId: job.threadId || "",
-        turnId: job.turnId || ""
-      });
-      const failedTasks = run.jobs.filter((job) => job.status !== "completed").map((job) => job.taskId);
-      run.status = "review";
-      run.finishedAt = new Date().toISOString();
-      run.review = {
-        ...summary,
-        readyToAccept: false,
-        summary: "运行服务曾中断；已保留完成分支，可只重跑未完成分支",
-        affectedNodes: [...new Set(run.jobs.map((job) => job.nodeId))],
-        evidence: "",
-        failedTasks,
-        warnings: [`${failedTasks.length} 个分支需要重跑，接受操作已锁定`]
-      };
-      if (run.coordinator?.status === "running") run.coordinator = { ...run.coordinator, status: "failed", error: "运行服务曾中断" };
-      event(run, "execution_recovered", { failedTasks });
-    } catch (error) {
-      run.status = "failed";
-      run.error = `运行服务曾中断，隔离结果无法恢复：${error.message}`;
-      event(run, "run_failed", { error: run.error });
-    }
+    run.jobs = run.jobs.map((job) => job.status === "completed" ? job : {
+      ...job, status: "failed", error: "运行服务中断；已保留分支上下文与隔离结果"
+    });
+    run.status = "failed";
+    run.error = "运行服务中断；重新规划时会带上本轮失败记录";
+    event(run, "execution_recovered");
     await persist(run);
     return run;
-  }
-
-  function implementationReady(run) {
-    const testsPassed = (run.integrationTestResults || []).every((test) => test.ok);
-    const failedTasks = (run.review?.failedTasks || []).length;
-    return failedTasks === 0 && testsPassed && (run.review?.changedFiles || []).length > 0;
-  }
-
-  function goalWarnings(assessment, history = []) {
-    const value = normalizeGoalAssessment(assessment);
-    if (value.alignment === "off_target") return ["结果偏离本轮目标，接受操作已锁定"];
-    if (value.alignment === "unknown") return ["目标一致性无法判断，接受操作已锁定"];
-    if (["no_progress", "unknown"].includes(value.progress)) return ["尚无可验证的目标推进，接受操作已锁定"];
-    if (value.continuity === "drifted") return ["长期目标发生漂移，接受操作已锁定"];
-    if (value.continuity === "unknown") return ["长期目标连续性无法判断，接受操作已锁定"];
-    if (value.continuity === "baseline" && history.length) return ["已有历史运行，不能把本轮当作首次基线，接受操作已锁定"];
-    return [];
   }
 
   async function ensureGoalState(run) {
@@ -2025,12 +1883,6 @@ export function createParallelCodexCoordinator({
     }
     if (run.goal && !Array.isArray(run.goal.history)) {
       run.goal.history = await readGoalHistory(runsDir, run.id);
-      changed = true;
-    }
-    if (run.status === "review" && run.review && !run.review.goalAssessment) {
-      run.review.goalAssessment = normalizeGoalAssessment(null);
-      run.review.readyToAccept = false;
-      run.review.warnings = [...new Set([...(run.review.warnings || []), ...goalWarnings(run.review.goalAssessment, run.goal?.history)])];
       changed = true;
     }
     if (changed) await persist(run);
@@ -2046,66 +1898,46 @@ export function createParallelCodexCoordinator({
     return promise;
   }
 
-  async function runGoalAudit(run) {
-    try {
-      const result = await startTurn({
-        prompt: buildGoalAuditPrompt(run),
-        cwd: run.workspace.integrationPath,
-        threadName: `任务图 · 目标核验 · ${humanizeTitle(run.goal?.immediate, "当前任务")}`,
-        sandbox: "read-only",
-        approvalPolicy: "never",
-        developerInstructions: "Audit goal alignment from the integration worktree. Do not edit files or task-tree state. Return JSON only.",
-        waitForCompletion: true,
-        completionTimeoutMs: 3 * 60 * 1000,
-        onAccepted: async ({ threadId, turnId }) => {
-          run.review.goalAudit = { status: "running", threadId, turnId, error: "" };
-          await persist(run);
-        }
-      });
-      const assessment = normalizeGoalAssessment(parseJsonObject(result.output));
-      run.review.goalAssessment = assessment;
-      run.review.goalAudit = { status: "completed", threadId: result.threadId, turnId: result.turnId, error: "" };
-      run.review.warnings = [
-        ...(run.review.warnings || []).filter((warning) => !/目标一致性|偏离本轮目标|可验证的目标推进|长期目标/.test(warning)),
-        ...goalWarnings(assessment, run.goal?.history)
-      ];
-      run.review.readyToAccept = implementationReady(run) && goalAssessmentAllowsAccept(assessment, run.goal?.history);
-      event(run, "goal_audit_completed", { alignment: assessment.alignment, progress: assessment.progress });
-    } catch (error) {
-      run.review.goalAssessment = normalizeGoalAssessment(null);
-      run.review.goalAudit = { status: "failed", threadId: error.threadId || "", turnId: error.turnId || "", error: error.message };
-      run.review.readyToAccept = false;
-      run.review.warnings = [...new Set([...(run.review.warnings || []), `目标核验失败：${error.message}`])];
-      event(run, "goal_audit_failed", { error: error.message });
-    }
-    run.status = "review";
+  async function applyRun(run) {
+    registerWorkspaceRun(run);
+    if (run.status === "accepted") return publicRun(run);
+    const applied = await workspace.accept({
+      integrationPath: run.workspace.integrationPath,
+      snapshotCommit: run.workspace.snapshotCommit,
+      changedFiles: run.result?.changedFiles || [],
+      resolveConflict: (integrationPath, files) => {
+        const source = [...run.jobs].reverse().find((job) => job.changedFiles?.some((file) => files.includes(file))) || run.jobs.at(-1);
+        return resolveMergeConflict(run, source, files, integrationPath, true);
+      }
+    });
+    run.result ||= {};
+    run.result.appliedFiles = applied.appliedFiles;
+    run.result.cleanup = { status: "queued", error: "" };
+    run.status = "accepted";
+    run.acceptedAt = new Date().toISOString();
+    event(run, "accepted", { appliedFiles: applied.appliedFiles, automatic: true });
     await persist(run);
+    scheduleBackground(run.id, () => finalizeAcceptedRun(run));
     return publicRun(run);
   }
 
   async function finalizeAcceptedRun(run) {
-    if (["queued", "running"].includes(run.review?.treeSync?.status)) {
-      run.review.treeSync = { ...run.review.treeSync, status: "running", error: "" };
-      event(run, "tree_sync_started");
-      await persist(run);
-      try {
-        run.review.treeSync = await onAccepted({ run, appliedFiles: run.review.appliedFiles || [] });
-      } catch (error) {
-        run.review.treeSync = { status: "failed", error: error.message };
-        run.review.warnings = [...new Set([...(run.review.warnings || []), `代码已应用，但任务树自动同步失败：${error.message}`])];
-      }
-      event(run, "tree_sync_finished", { status: run.review.treeSync?.status || "unknown" });
-      await persist(run);
-    }
-    if (["queued", "running"].includes(run.review?.cleanup?.status)) {
-      run.review.cleanup = { status: "running", error: "" };
+    if (["queued", "running"].includes(run.result?.cleanup?.status)) {
+      const cleanupStartedAt = Date.now();
+      run.result.cleanup = { status: "running", error: "", startedAt: new Date(cleanupStartedAt).toISOString() };
       await persist(run);
       try {
         await workspace.cleanup({ ...run.workspace, runId: run.id });
-        run.review.cleanup = { status: "completed", error: "" };
+        run.result.cleanup = { status: "completed", error: "" };
       } catch (error) {
-        run.review.cleanup = { status: "failed", error: error.message };
+        run.result.cleanup = { status: "failed", error: error.message };
       }
+      const completedAt = new Date().toISOString();
+      run.result.cleanup.completedAt = completedAt;
+      run.result.cleanup.durationMs = Date.now() - cleanupStartedAt;
+      run.completedAt = completedAt;
+      run.totalDurationMs = Math.max(0, Date.parse(completedAt) - Date.parse(run.createdAt || completedAt));
+      event(run, "run_finalized", { cleanupDurationMs: run.result.cleanup.durationMs, totalDurationMs: run.totalDurationMs });
       await persist(run);
     }
     return publicRun(run);
@@ -2113,9 +1945,8 @@ export function createParallelCodexCoordinator({
 
   async function recoverAcceptedFinalization(run) {
     if (run.status !== "accepted" || background.has(run.id)) return run;
-    const needsSync = ["queued", "running"].includes(run.review?.treeSync?.status);
-    const needsCleanup = ["queued", "running"].includes(run.review?.cleanup?.status);
-    if (needsSync || needsCleanup) scheduleBackground(run.id, () => finalizeAcceptedRun(run));
+    const needsCleanup = ["queued", "running"].includes(run.result?.cleanup?.status);
+    if (needsCleanup) scheduleBackground(run.id, () => finalizeAcceptedRun(run));
     return run;
   }
 
@@ -2133,9 +1964,6 @@ export function createParallelCodexCoordinator({
         planner: { status: "running", threadId: "", turnId: "", error: "" },
         jobs: [],
         contextOptions: [],
-        integrationTests: [],
-        coordinator: null,
-        supervisor: { status: "idle", threadId: "", turnId: "", rounds: 0, paused: false, lastDecision: "", error: "", messages: [], decisions: [] },
         events: [],
         peerMessages: []
       };
@@ -2147,198 +1975,100 @@ export function createParallelCodexCoordinator({
       return publicRun(run);
     },
 
-    async branchPlan(id, { nodeId = "", objective = "", existingJobs = [] } = {}) {
+    async addBranch(id, { nodeId = "", objective = "" } = {}) {
       const run = await load(id);
       if (!run) throw new Error("找不到这次并行运行");
-      if (["accepted", "rejected", "auditing"].includes(run.status)) {
-        throw new Error("当前并行运行已经结束或正在核验，不能新增分支");
+      if (!["queued", "preparing", "running"].includes(run.status)) {
+        throw new Error("当前并行运行已在收尾，不能新增分支");
       }
-      const markdown = await readFile(path.join(projectRoot, "task-tree.md"), "utf8");
-      const submittedJobs = Array.isArray(existingJobs) && existingJobs.length ? existingJobs : (run.jobs || []);
-      const liveJobs = submittedJobs.filter((job) => job.status !== "completed");
-      const selectedNodeId = cleanId(nodeId || run.goal?.stageNodeId);
+      const token = randomUUID();
+      if (!additions.has(run.id)) additions.set(run.id, new Set());
+      additions.get(run.id).add(token);
       try {
-        const result = await startTurn({
-          prompt: buildBranchPlannerPrompt(markdown, selectedNodeId, objective || run.objective, liveJobs),
-          cwd: projectRoot,
-          threadId: await plannerThreadId(),
-          threadName: "任务图 · 自动规划（系统）",
-          ...(PLANNER_MODEL ? { model: PLANNER_MODEL } : {}),
-          sandbox: "read-only",
-          approvalPolicy: "never",
-          developerInstructions: "All required context is already in the prompt. Do not call tools, inspect files, or edit state. Return exactly one JSON branch draft.",
-          waitForCompletion: true,
-          completionTimeoutMs: PLANNER_TIMEOUT_MS,
-          totalTimeoutMs: PLANNER_TIMEOUT_MS
-        });
-        const proposal = normalizeBranchPlan(result.output, markdown, selectedNodeId, objective || run.objective, liveJobs);
-        await rememberPlannerThread(result.threadId);
-        return { ...proposal, planner: { status: "completed", threadId: result.threadId, turnId: result.turnId, contextResumed: Boolean(result.resumed) } };
-      } catch (error) {
-        return {
-          ...fallbackBranchPlan(markdown, selectedNodeId, objective || run.objective, liveJobs, error.message),
-          planner: { status: "fallback", error: error.message }
-        };
-      }
-    },
-
-    async approve(id, changes = {}) {
-      const run = await load(id);
-      if (!run) throw new Error("找不到这次并行运行");
-      if (run.status !== "draft") throw new Error("只能批准待审核的并行草案");
-      run.contextOptions = mergeContextOptions(await readContextOptions(runsDir, run.id), run.contextOptions || []);
-      const approvedJobs = executionContexts(changes.jobs || run.jobs, run.jobs, run.contextOptions);
-      run.jobs = approvedJobs.map((job) => ({ ...job, status: "queued", threadId: job.contextThreadId || "", turnId: "", changedFiles: [], testResults: [], error: "" }));
-      if (changes.objective !== undefined) {
-        run.objective = cleanObjective(changes.objective);
-        const markdown = await readFile(path.join(projectRoot, "task-tree.md"), "utf8");
-        run.goal = deriveParallelGoal(markdown, run.objective);
-        run.goal.history = await readGoalHistory(runsDir, run.id);
-      }
-      if (changes.summary !== undefined) run.summary = String(changes.summary || "").trim();
-      if (changes.integrationTests) run.integrationTests = [...new Set(changes.integrationTests.map((item) => String(item || "").trim()).filter(Boolean))].slice(0, 8);
-      run.status = "approved";
-      run.approvedAt = new Date().toISOString();
-      event(run, "approved");
-      await persist(run);
-      const promise = Promise.resolve().then(() => execute(run)).finally(() => pending.delete(run.id));
-      pending.set(run.id, promise);
-      return publicRun(run);
-    },
-
-    async retry(id, changes = {}) {
-      const run = await load(id);
-      if (!run) throw new Error("找不到这次并行运行");
-      if (run.status !== "review") throw new Error("只能从结束审核重跑失败分支");
-      if (!run.workspace?.integrationPath) throw new Error("这次运行的隔离工作区已不存在，请重新规划");
-
-      const retryableIds = new Set(run.jobs.filter((job) => job.status !== "completed").map((job) => job.taskId));
-      if (!retryableIds.size) throw new Error("当前没有需要重跑的失败分支");
-      run.contextOptions = mergeContextOptions(await readContextOptions(runsDir, run.id), run.contextOptions || []);
-      const proposed = executionContexts(changes.jobs || run.jobs, run.jobs, run.contextOptions);
-      const proposedIds = new Set(proposed.map((job) => job.taskId));
-      if (proposedIds.size !== run.jobs.length || run.jobs.some((job) => !proposedIds.has(job.taskId))) {
-        throw new Error("失败分支重跑不能新增、删除或改名任务");
-      }
-      const proposedById = new Map(proposed.map((job) => [job.taskId, job]));
-      run.jobs = run.jobs.map((job) => {
-        if (!retryableIds.has(job.taskId)) return job;
-        const next = proposedById.get(job.taskId);
-        return {
-          ...job,
-          ...next,
-          status: "queued",
-          threadId: next.contextThreadId || "",
-          turnId: "",
-          contextResumed: false,
-          output: "",
-          changedFiles: [],
-          testResults: [],
-          error: "",
-          commit: "",
-          sourceCommit: "",
-          scopeId: ""
-        };
+      const markdown = await readFile(path.join(projectRoot, "task-tree.md"), "utf8");
+      const submittedJobs = run.jobs || [];
+      const selectedNodeId = cleanId(nodeId || run.goal?.stageNodeId);
+      const { plan, result } = await requestPlan(run,
+        buildBranchPlannerPrompt(markdown, selectedNodeId, objective || run.objective, submittedJobs),
+        (output) => normalizeBranchPlan(output, markdown, selectedNodeId, objective || run.objective, submittedJobs),
+        selectedNodeId,
+        BRANCH_OUTPUT_SCHEMA);
+      const [enriched] = enrichPlannedJobs([plan.job], {
+        markdown,
+        goal: run.goal || deriveParallelGoal(markdown, objective || run.objective),
+        history: run.goal?.history || []
       });
-      if (changes.integrationTests) {
-        run.integrationTests = [...new Set(changes.integrationTests.map((item) => String(item || "").trim()).filter(Boolean))].slice(0, 8);
+      enriched.branchContext = [enriched.branchContext, "Existing branches:", JSON.stringify(submittedJobs)].join("\n");
+      return await this.append(id, { jobs: [enriched] });
+      } finally {
+        additions.get(run.id)?.delete(token);
+        wakeups.get(run.id)?.();
       }
-      run.retryCount = Number(run.retryCount || 0) + 1;
-      run.status = "approved";
-      run.approvedAt = new Date().toISOString();
-      event(run, "retry_approved", { taskIds: [...retryableIds] });
-      await persist(run);
-      const promise = Promise.resolve().then(() => execute(run, { retryTaskIds: [...retryableIds] })).finally(() => pending.delete(run.id));
-      pending.set(run.id, promise);
-      return publicRun(run);
     },
 
     async append(id, changes = {}) {
       const run = await load(id);
       if (!run) throw new Error("找不到这次并行运行");
+      if (!["queued", "preparing", "running", "failed"].includes(run.status)) {
+        throw new Error("本轮已在收尾，请在下一轮添加任务");
+      }
+      const markdown = await readFile(path.join(projectRoot, "task-tree.md"), "utf8");
       const jobsInput = Array.isArray(changes.jobs) ? changes.jobs : [];
-      if (!jobsInput.length) throw new Error("至少要添加 1 个并行分支");
-      if (["accepted", "rejected"].includes(run.status)) {
-        throw new Error("这次并行运行已经结束，请重新开始一轮");
-      }
-      if (["auditing"].includes(run.status)) {
-        throw new Error("目标核验进行中，完成后再添加分支");
-      }
-
+      run.contextOptions = mergeContextOptions(await readContextOptions(runsDir, run.id), run.contextOptions || []);
       const existingIds = new Set(run.jobs.map((job) => job.taskId.toLowerCase()));
       const duplicate = jobsInput.find((job) => existingIds.has(cleanId(job?.taskId || job?.id).toLowerCase()));
       if (duplicate) throw new Error(`任务不能重复：${duplicate.taskId || duplicate.id}`);
-      const liveJobs = run.jobs.filter((job) => job.status !== "completed");
-      const validated = validateParallelJobs(jobsInput, {
-        minimum: 1,
-        knownTaskIds: run.jobs.map((job) => job.taskId),
-        existingJobs: liveJobs
-      });
-      run.contextOptions = mergeContextOptions(await readContextOptions(runsDir, run.id), run.contextOptions || []);
-      const appended = executionContexts(validated, run.jobs, run.contextOptions, {
-        minimum: 1,
-        knownTaskIds: run.jobs.map((job) => job.taskId),
-        existingJobs: liveJobs
+      const jobs = assignParallelDraftContexts(jobsInput, run.contextOptions.filter((option) =>
+        !run.jobs.some((job) => job.contextThreadId === option.threadId)));
+      const appended = executionContexts(jobs, [], run.contextOptions, {
+        knownTaskIds: run.jobs.map((job) => job.taskId), existingJobs: run.jobs
       }).map((job) => ({
         ...job,
-        status: "queued",
-        threadId: job.contextThreadId || "",
-        turnId: "",
-        changedFiles: [],
-        testResults: [],
-        error: ""
+        runtimeMetadataPath: runsDir,
+        branchContext: [job.branchContext, "Current task tree:", markdown,
+          "Previous run history:", JSON.stringify(run.goal?.history || []),
+          "Existing branches:", JSON.stringify(run.jobs)].filter(Boolean).join("\n"),
+        status: "queued", threadId: job.contextThreadId || "", turnId: "", changedFiles: [], error: ""
       }));
+      // Recheck after async context reads: application must have a fixed set of jobs.
+      if (!["queued", "preparing", "running", "failed"].includes(run.status)) {
+        throw new Error("本轮已在收尾，请在下一轮添加任务");
+      }
       run.jobs.push(...appended);
-      const appendedTaskIds = appended.map((job) => job.taskId);
-      event(run, "branches_appended", { taskIds: appendedTaskIds, nodeIds: appended.map((job) => job.nodeId) });
-
-      if (run.status === "draft") {
-        await persist(run);
-        return publicRun(run);
-      }
-
-      if (["coordinating"].includes(run.status)) {
-        // The current coordinator finishes its review first; execute() will pick
-        // these queued jobs up immediately afterward in the same run.
-        await persist(run);
-        return publicRun(run);
-      }
-
-      if (!["approved", "preparing", "running", "supervising", "waiting_user", "paused", "review", "failed"].includes(run.status)) {
-        throw new Error(`当前状态不能添加分支：${run.status}`);
-      }
-      const paused = run.status === "paused" || run.supervisor?.paused;
-      const shouldStart = !paused && (run.status === "review" || run.status === "failed" || run.status === "waiting_user" || !pending.has(run.id));
-      if (["review", "failed", "waiting_user"].includes(run.status)) {
-        run.status = "approved";
-        run.review = null;
-        run.error = "";
-        run.finishedAt = "";
-      }
+      wakeups.get(run.id)?.();
+      event(run, "branches_appended", { taskIds: appended.map((job) => job.taskId) });
       await persist(run);
-      if (shouldStart) {
-        const promise = Promise.resolve().then(() => execute(run, { taskIds: appendedTaskIds })).finally(() => pending.delete(run.id));
+      if (!pending.has(run.id)) {
+        const promise = Promise.resolve().then(() => execute(run)).finally(() => pending.delete(run.id));
         pending.set(run.id, promise);
       }
       return publicRun(run);
     },
 
-    // Backward-compatible API: supplied jobs still get a draft record, then enter the same state machine.
     async start(input) {
       const now = new Date().toISOString();
       const markdown = await readFile(path.join(projectRoot, "task-tree.md"), "utf8");
+      const contextOptions = await readContextOptions(runsDir);
+      const history = await readGoalHistory(runsDir);
+      const jobs = executionContexts(assignParallelDraftContexts(validateParallelJobs(input), contextOptions), [], contextOptions);
       const run = {
-        id: randomUUID(), status: "draft", objective: "", summary: "手动提供的并行计划", createdAt: now, updatedAt: now, error: "",
-        goal: { ...deriveParallelGoal(markdown), history: await readGoalHistory(runsDir) },
+        id: randomUUID(), status: "queued", objective: "", summary: "直接执行的并行计划",
+        createdAt: now, updatedAt: now, error: "",
+        goal: { ...deriveParallelGoal(markdown), history },
         planner: { status: "manual", threadId: "", turnId: "", error: "" },
-        jobs: validateParallelJobs(input).map((job) => ({ ...job, status: "planned", threadId: "", turnId: "", changedFiles: [], testResults: [], error: "" })),
-        integrationTests: [], coordinator: null,
-        supervisor: { status: "idle", threadId: "", turnId: "", rounds: 0, paused: false, lastDecision: "", error: "", messages: [], decisions: [] },
+        contextOptions,
+        jobs: jobs.map((job) => ({
+          ...job, branchContext: [job.branchContext, markdown, JSON.stringify(history)].filter(Boolean).join("\n"),
+          runtimeMetadataPath: runsDir,
+          status: "queued", threadId: job.contextThreadId || "", turnId: "", changedFiles: [], error: ""
+        })),
         events: [], peerMessages: []
       };
       runs.set(run.id, run);
       await persist(run);
-      return this.approve(run.id);
+      const promise = Promise.resolve().then(() => execute(run)).finally(() => pending.delete(run.id));
+      pending.set(run.id, promise);
+      return publicRun(run);
     },
 
     async get(id) {
@@ -2348,76 +2078,7 @@ export function createParallelCodexCoordinator({
       await recoverAbandonedExecution(run);
       await ensureGoalState(run);
       await recoverAcceptedFinalization(run);
-      if (run.status === "draft" && !(run.contextOptions || []).length) {
-        const recovered = await readContextOptions(runsDir, run.id);
-        if (recovered.length) {
-          run.contextOptions = recovered;
-          run.jobs = assignParallelDraftContexts(run.jobs || [], recovered);
-          await persist(run);
-        }
-      }
       return publicRun(run);
-    },
-
-    async supervisorMessage(id, text) {
-      const run = await load(id);
-      if (!run) throw new Error("找不到这次并行运行");
-      if (["accepted", "rejected"].includes(run.status)) throw new Error("这次并行运行已经结束");
-      const message = cleanObjective(text);
-      if (!message) throw new Error("消息不能为空");
-      const supervisor = ensureSupervisor(run);
-      supervisor.messages.push({ id: randomUUID(), text: message, status: "queued", createdAt: new Date().toISOString() });
-      supervisor.messages = supervisor.messages.slice(-MAX_SUPERVISOR_MESSAGES);
-      event(run, "supervisor_message_queued", { messageId: supervisor.messages.at(-1).id });
-      await persist(run);
-      if (!supervisor.paused && !pending.has(run.id) && !supervisorTurns.has(run.id)) {
-        run.review = null;
-        run.finishedAt = "";
-        const promise = Promise.resolve().then(() => execute(run, { taskIds: [] })).finally(() => pending.delete(run.id));
-        pending.set(run.id, promise);
-      }
-      return publicRun(run);
-    },
-
-    async pause(id) {
-      const run = await load(id);
-      if (!run) throw new Error("找不到这次并行运行");
-      if (["accepted", "rejected"].includes(run.status)) throw new Error("这次并行运行已经结束");
-      const supervisor = ensureSupervisor(run);
-      supervisor.paused = true;
-      supervisor.status = "paused";
-      event(run, "supervisor_paused");
-      await persist(run);
-      return publicRun(run);
-    },
-
-    async resume(id) {
-      const run = await load(id);
-      if (!run) throw new Error("找不到这次并行运行");
-      if (["accepted", "rejected"].includes(run.status)) throw new Error("这次并行运行已经结束");
-      const supervisor = ensureSupervisor(run);
-      supervisor.paused = false;
-      supervisor.status = "idle";
-      event(run, "supervisor_resumed");
-      await persist(run);
-      if (!pending.has(run.id) && !supervisorTurns.has(run.id)) {
-        run.review = null;
-        run.finishedAt = "";
-        const promise = Promise.resolve().then(() => execute(run, { taskIds: [] })).finally(() => pending.delete(run.id));
-        pending.set(run.id, promise);
-      }
-      return publicRun(run);
-    },
-
-    async openSupervisor(id) {
-      const run = await load(id);
-      const supervisor = run ? ensureSupervisor(run) : null;
-      if (!supervisor?.threadId) {
-        const error = new Error("总控对话还没有建立");
-        error.code = "THREAD_NOT_READY";
-        throw error;
-      }
-      return { threadId: supervisor.threadId, deepLink: threadDeepLink(supervisor.threadId) };
     },
 
     async openThread(id, taskId) {
@@ -2435,54 +2096,6 @@ export function createParallelCodexCoordinator({
       if (pending.has(id)) return pending.get(id);
       if (background.has(id)) return background.get(id);
       return this.get(id);
-    },
-
-    async audit(id) {
-      const run = await load(id);
-      if (!run) throw new Error("找不到这次并行运行");
-      await ensureGoalState(run);
-      if (run.status !== "review") throw new Error("只能核验待审核的并行结果");
-      if (!run.workspace?.integrationPath) throw new Error("隔离工作区已不存在，无法核验目标");
-      run.status = "auditing";
-      run.review.readyToAccept = false;
-      run.review.goalAudit = { status: "queued", threadId: "", turnId: "", error: "" };
-      event(run, "goal_audit_queued");
-      await persist(run);
-      scheduleBackground(run.id, () => runGoalAudit(run));
-      return publicRun(run);
-    },
-
-    async accept(id) {
-      const run = await load(id);
-      if (!run) throw new Error("找不到这次并行运行");
-      if (run.status !== "review") throw new Error("只能接受待审核的并行结果");
-      if (!run.review?.readyToAccept || !goalAssessmentAllowsAccept(run.review?.goalAssessment, run.goal?.history)) throw new Error("实现或目标一致性尚未通过验收，不能接受");
-      const applied = await workspace.accept({
-        integrationPath: run.workspace.integrationPath,
-        snapshotCommit: run.workspace.snapshotCommit,
-        changedFiles: run.review.changedFiles
-      });
-      run.review.appliedFiles = applied.appliedFiles;
-      run.review.treeSync = { status: "queued", threadId: "", turnId: "", error: "" };
-      run.review.cleanup = { status: "queued", error: "" };
-      run.status = "accepted";
-      run.acceptedAt = new Date().toISOString();
-      event(run, "accepted", { appliedFiles: applied.appliedFiles });
-      await persist(run);
-      scheduleBackground(run.id, () => finalizeAcceptedRun(run));
-      return publicRun(run);
-    },
-
-    async reject(id) {
-      const run = await load(id);
-      if (!run) throw new Error("找不到这次并行运行");
-      if (run.status !== "review") throw new Error("只能拒绝待审核的并行结果");
-      run.status = "rejected";
-      run.rejectedAt = new Date().toISOString();
-      event(run, "rejected");
-      await workspace.cleanup({ ...run.workspace, runId: run.id }).catch((error) => { run.review.cleanupWarning = error.message; });
-      await persist(run);
-      return publicRun(run);
     },
 
     async drain() {

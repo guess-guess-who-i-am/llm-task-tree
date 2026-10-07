@@ -43,32 +43,16 @@ const startTurn = async (options) => {
       resumed: Boolean(options.threadId),
       output: JSON.stringify({
         summary: "两个独立分支验证上下文机制",
-        jobs: [
-          { taskId: "ui", nodeId: "N2", title: "界面验证", summary: "验证用户能看见上下文代际", instruction: "验证界面上下文状态", writeSet: ["public/**"], dependsOn: [], tests: [] },
-          { taskId: "server", nodeId: "N2", title: "服务验证", summary: "验证服务会自动生成交接", instruction: "验证服务上下文轮换", writeSet: ["server/**"], dependsOn: [], tests: [] }
+        coverage: [
+          { goal: "验证用户能看见上下文代际", taskIds: ["ui"] },
+          { goal: "验证服务会自动生成交接", taskIds: ["server"] }
         ],
-        integrationTests: []
+        jobs: [
+          { taskId: "ui", nodeId: "N2", title: "界面验证", summary: "验证用户能看见上下文代际", instruction: "验证界面上下文状态", writeSet: ["public/**"], dependsOn: [] },
+          { taskId: "server", nodeId: "N2", title: "服务验证", summary: "验证服务会自动生成交接", instruction: "验证服务上下文轮换", writeSet: ["server/**"], dependsOn: [] }
+        ]
       })
     };
-  }
-  if (options.prompt.includes("Integration Coordinator")) {
-    return {
-      threadId: `coordinator-${calls.filter((item) => item.prompt.includes("Integration Coordinator")).length}`,
-      turnId: "coordinator-turn",
-      output: JSON.stringify({
-        summary: "上下文轮换结果可验证",
-        affectedNodes: ["N2"],
-        evidence: "交接文件与新旧 thread",
-        goalAssessment: { alignment: "aligned", progress: "progress", continuity: "baseline", achieved: "完成上下文轮换", remaining: "仍需真实使用验证" }
-      })
-    };
-  }
-  if (options.prompt.includes("Continuous Supervisor")) {
-    await options.onAccepted?.({ threadId: options.threadId || "supervisor-thread", turnId: "supervisor-turn" });
-    return { threadId: options.threadId || "supervisor-thread", turnId: "supervisor-turn", output: JSON.stringify({ action: "finish", summary: "上下文结果可汇总", reason: "两个分支均已完成", newJobs: [] }) };
-  }
-  if (options.prompt.includes("Supervisor Final Review")) {
-    return { threadId: options.threadId || "supervisor-thread", turnId: "supervisor-final-turn", output: JSON.stringify({ summary: "上下文轮换结果可验证", affectedNodes: ["N2"], evidence: "交接文件与新旧 thread", goalAssessment: { alignment: "aligned", progress: "progress", continuity: "baseline", achieved: "完成上下文轮换", remaining: "仍需真实使用验证" } }) };
   }
   workerTurn += 1;
   const taskId = options.prompt.match(/Task id: ([^\n]+)/)?.[1] || "worker";
@@ -97,7 +81,6 @@ const workspace = {
   async head() { return "snapshot"; },
   async createWorker(runId, taskId) { const workerPath = path.join(root, "worker", runId, taskId); await mkdir(workerPath, { recursive: true }); return workerPath; },
   async inspectChanges(workerPath = "") { return { changedFiles: [String(workerPath).includes("server") ? "server.js" : "public/app.js"], violations: [] }; },
-  async runTests() { return []; },
   async commit() { return "commit"; },
   async integrate() {},
   async summarize() { return { changedFiles: ["public/app.js"], stat: "1 file changed", patchPreview: "diff" }; },
@@ -109,19 +92,12 @@ const workspace = {
 try {
   const manager = createParallelCodexCoordinator({ projectRoot: root, startTurn, workspace, archiveThread: async (threadId) => { archivedThreads.push(threadId); return true; } });
   const firstPlan = await manager.plan({ objective: "验证上下文可以在长期工作中换代" });
-  const firstDraft = await manager.wait(firstPlan.id);
-  const firstApproved = await manager.approve(firstPlan.id, { jobs: firstDraft.jobs });
-  assert.equal(firstApproved.status, "approved");
   const firstReview = await manager.wait(firstPlan.id);
-  assert.equal(firstReview.status, "review", firstReview.error || "first run failed");
-  await manager.reject(firstPlan.id);
+  assert.equal(firstReview.status, "accepted", firstReview.error || "first run failed");
 
   const secondPlan = await manager.plan({ objective: "继续验证同一分支并自动换代" });
-  const secondDraft = await manager.wait(secondPlan.id);
-  assert.ok(secondDraft.jobs.every((job) => job.contextThreadId.endsWith("-g1")));
-  await manager.approve(secondPlan.id, { jobs: secondDraft.jobs });
   const secondReview = await manager.wait(secondPlan.id);
-  assert.equal(secondReview.status, "review", secondReview.error || "second run failed");
+  assert.equal(secondReview.status, "accepted", secondReview.error || "second run failed");
   assert.ok(secondReview.jobs.every((job) => job.contextGeneration === 2));
   assert.ok(secondReview.jobs.every((job) => job.contextHistory?.some((item) => item.threadId.endsWith("-g1"))));
   assert.ok(secondReview.jobs.every((job) => job.threadId.endsWith("-g2")));
@@ -137,6 +113,7 @@ try {
   for (const job of secondReview.jobs) {
     await assert.rejects(access(path.join(root, "worker", secondPlan.id, job.taskId, ".task-tree-context", "handoff.json")));
   }
+  await manager.drain();
   console.log("PASS context lifecycle rotates long branch contexts with traceable handoffs");
 } finally {
   await rm(root, { recursive: true, force: true });

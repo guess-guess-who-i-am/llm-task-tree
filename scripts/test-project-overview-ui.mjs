@@ -28,6 +28,10 @@ try {
   });
   await desktop.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await desktop.waitForFunction(() => document.querySelectorAll(".graphNode").length > 0);
+  // A fresh project intentionally shows the daily decision overview once. Close that
+  // onboarding modal before testing the toolbar entry point itself.
+  const initialOverview = desktop.locator("#projectOverviewDialog");
+  if (await initialOverview.evaluate((element) => element.open)) await desktop.locator("#projectOverviewClose").click();
   await desktop.locator("#projectOverviewBtn").click();
   await desktop.waitForFunction(() => document.querySelector("#projectOverviewDialog")?.open);
   assert.match(await desktop.locator("#projectOverviewMeta").innerText(), /一眼看清/);
@@ -53,6 +57,8 @@ try {
   await mobile.addInitScript(() => localStorage.clear());
   await mobile.goto(`${baseUrl}?mobile-overview=1`, { waitUntil: "domcontentloaded" });
   await mobile.waitForFunction(() => document.querySelectorAll(".graphNode").length > 0);
+  const initialMobileOverview = mobile.locator("#projectOverviewDialog");
+  if (await initialMobileOverview.evaluate((element) => element.open)) await mobile.locator("#projectOverviewClose").click();
   await mobile.locator("#projectOverviewBtn").click();
   await mobile.waitForFunction(() => document.querySelector("#projectOverviewDialog")?.open);
   const bounds = await mobile.locator("#projectOverviewDialog").boundingBox();

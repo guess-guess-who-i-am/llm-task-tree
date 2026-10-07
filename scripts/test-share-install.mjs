@@ -23,6 +23,11 @@ const kitArg = process.argv.slice(2).find((item) => !item.startsWith("-"));
 const kitDir = kitArg ? path.resolve(kitArg) : path.join(repoRoot, "llm-task-tree-kit");
 const failures = [];
 
+if (process.platform !== "win32") {
+  console.log("SKIP shared Windows install E2E: PowerShell launcher and registry are Windows-only");
+  process.exit(0);
+}
+
 async function runCase(name, fn) {
   try {
     await fn();

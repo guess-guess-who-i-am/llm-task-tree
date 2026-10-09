@@ -99,7 +99,7 @@ export async function createSharedAgentRuntime(options={}) {
 export async function serveSharedAgentWorker(socketPath) {
   const bridges=new Map();let bridgeStarts=0;
   const treeBridgeFactory=async({cwd,environment})=>{
-    const key=JSON.stringify([cwd,environment.CODEX_HOME,environment.TASK_TREE_QUALITY_MODE === 'advisory' ? 'advisory' : 'strict']);
+    const key=JSON.stringify([cwd,environment.CODEX_HOME,environment.TASK_TREE_CONTEXT_TREE_FILE || '',environment.TASK_TREE_QUALITY_MODE === 'advisory' ? 'advisory' : 'strict']);
     let entry=bridges.get(key);
     if(!entry){bridgeStarts++;entry=createTaskTreeAgentTools({cwd,environment:{...environment,TASK_TREE_EXECUTION_SCOPE:''}}).catch(error=>{bridges.delete(key);throw error;});bridges.set(key,entry);}
     const bridge=await entry;

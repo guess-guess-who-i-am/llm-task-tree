@@ -10,6 +10,9 @@ if (-not (Test-Path -LiteralPath $configFile)) {
 }
 $config = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
 $sharedKit = [string]$config.sharedKitDir
+if (-not [System.IO.Path]::IsPathRooted($sharedKit)) {
+  $sharedKit = [System.IO.Path]::GetFullPath((Join-Path $StubDir $sharedKit))
+}
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $StubDir ([string]$config.projectRoot)))
 $checker = Join-Path $sharedKit "scripts\check-tree-compact.mjs"
 if (-not (Test-Path -LiteralPath $checker)) {

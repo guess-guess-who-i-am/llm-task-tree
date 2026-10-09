@@ -50,6 +50,9 @@ function canonicalKey(value) {
 function resolveProjectRoot() {
   const index = process.argv.indexOf("--project-root");
   const explicit = index >= 0 ? process.argv[index + 1] : "";
+  // Worktree callers pass an exact tool workspace. The provider configuration
+  // root in the inherited environment must never redirect writes to live files.
+  if (explicit) return path.resolve(explicit);
   return locateProjectRoot({
     cwd: explicit || process.cwd(),
     fallbackDir: explicit || process.cwd()
@@ -66,6 +69,14 @@ const knownPortsFile = path.join(projectRoot, ".task-tree-ports");
 async function activeTree() {
   const registryFile = path.join(projectRoot, "task-trees.json");
   const registry = await loadTreeRegistry({ projectRoot, registryFile, create: false });
+  const contextFile = String(process.env.TASK_TREE_CONTEXT_TREE_FILE || '').trim();
+  if (contextFile) {
+    if (!isTreeMarkdownPath(contextFile)) throw new Error('模型任务树上下文路径不合法');
+    const file = path.resolve(projectRoot, contextFile);
+    if (!file.startsWith(projectRoot + path.sep)) throw new Error('模型任务树上下文越出工具工作区');
+    const registered = registry.trees.find(item => item.path === contextFile);
+    return { id: registered?.id || '', title: registered?.title || '当前执行分支', file, relative: contextFile };
+  }
   const tree = findTree(registry, registry.activeMethod);
   const file = tree ? resolveTreeFile(projectRoot, tree) : path.join(projectRoot, "task-tree.md");
   return {
@@ -782,7 +793,10 @@ async function toolWrite(args) {
     ? { markdown: next, reason }
     : { nodeId: String(args.nodeId).trim(), fields: args.fields, reason, ...(scopeId ? { scopeId } : {}), ...(QUALITY_ADVISORY ? {qualityMode:'advisory'} : {}) };
   const endpoint = writeBody.markdown ? "/api/tree" : "/api/tree/node-patch";
-  const { payload, startedServer } = await api(writeBody.markdown ? "PUT" : "POST", endpoint, writeBody);
+  const subtree = tree.relative.startsWith('subtrees/');
+  const { payload, startedServer } = subtree
+    ? await api('POST', '/api/subtree-file', { path: tree.relative, markdown: next, reason })
+    : await api(writeBody.markdown ? "PUT" : "POST", endpoint, { ...writeBody, ...(tree.id ? { treeId: tree.id } : {}) });
   const persisted = existsSync(tree.file) ? await readFile(tree.file, "utf8") : next;
   const after = inspectTreeMarkdown(persisted, { file: tree.relative, maxBytes: ACTIVE_METHOD_TREE_MAX_BYTES });
   return {

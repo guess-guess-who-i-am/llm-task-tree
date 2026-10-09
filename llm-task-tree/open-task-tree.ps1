@@ -16,6 +16,9 @@ $sharedKit = [string]$config.sharedKitDir
 if (-not $sharedKit) {
   throw "Not a shared-kit stub. Re-run deploy with -UseSharedKit or migrate-to-shared-kit.ps1"
 }
+if (-not [System.IO.Path]::IsPathRooted($sharedKit)) {
+  $sharedKit = [System.IO.Path]::GetFullPath((Join-Path $StubDir $sharedKit))
+}
 
 $launcher = Join-Path $sharedKit "open-task-tree.ps1"
 if (-not (Test-Path -LiteralPath $launcher)) {

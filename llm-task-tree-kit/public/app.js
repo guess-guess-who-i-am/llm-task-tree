@@ -335,6 +335,7 @@ const els = {
   codexThreadMenu: document.querySelector("#codexThreadMenu"),
   codexParallelDialog: document.querySelector("#codexParallelDialog"),
   codexParallelClose: document.querySelector("#codexParallelClose"),
+  parallelOpenTree: document.querySelector('#parallelOpenTree'),
   codexParallelForm: document.querySelector("#codexParallelForm"),
   codexParallelStageRail: document.querySelector("#codexParallelStageRail"),
   codexParallelObjectiveBar: document.querySelector("#codexParallelObjectiveBar"),
@@ -7539,6 +7540,7 @@ function renderParallelRun(run) {
   codexParallelRun = run;
   codexParallelRunId = run.id;
   rememberCodexParallelRun(run);
+  if (els.parallelOpenTree) els.parallelOpenTree.hidden = !run.branchTree;
   renderParallelStageRail(run);
 
   const objective = run.objective || run.goal?.immediate || "";
@@ -7573,6 +7575,7 @@ function resetParallelDialog() {
   codexParallelRunId = "";
   codexParallelRun = null;
   codexParallelBranchPlanning = false;
+  if (els.parallelOpenTree) els.parallelOpenTree.hidden = true;
   els.codexParallelRows.textContent = "";
   els.codexParallelTableWrap.hidden = true;
   els.codexParallelGoalReview.hidden = true;
@@ -7611,7 +7614,9 @@ async function generateCodexParallelPlan() {
     const response = await fetch("/api/codex/parallel/plan", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ objective })
+      body: JSON.stringify({ objective, treeId: viewTreeId,
+        ...(workspaceMode === 'subtree' ? { subtree: activeSubtreePath } : {}),
+        ...(selectedId ? { nodeId: selectedId } : {}) })
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
@@ -7950,6 +7955,13 @@ els.codexThreadsBtn?.addEventListener("click", () => {
   else closeCodexThreadMenu();
 });
 els.codexParallelClose?.addEventListener("click", () => els.codexParallelDialog.close());
+els.parallelOpenTree?.addEventListener('click', async () => {
+  const treeId = codexParallelRun?.branchTree?.id;
+  if (!treeId) return;
+  els.codexParallelDialog.close();
+  await loadTreeRegistryState();
+  await switchViewedTree(treeId);
+});
 els.codexParallelRegenerate?.addEventListener("click", generateCodexParallelPlan);
 els.codexParallelAddBranch?.addEventListener("click", planCodexParallelBranch);
 els.codexParallelDialog?.addEventListener("close", () => clearTimeout(codexParallelPollTimer));

@@ -24,12 +24,12 @@ function parseEnv(text) {
   return values;
 }
 
-function loadConfig(cwd, { environment = {}, model = "" } = {}) {
+export function loadDeepSeekConfig(cwd, { environment = {}, model = "", role = 'main' } = {}) {
   let file = {};
   // Workers run in temporary Git worktrees, which intentionally do not copy the ignored
   // project `.env`. Resolve configuration from the owning project root as a second source.
-  const globalEnvFile = process.env.TASK_TREE_GLOBAL_ENV_FILE || path.join(moduleRoot, ".env");
-  const roots = [path.resolve(cwd || process.cwd()), process.env.TASK_TREE_PROJECT_ROOT, path.dirname(path.resolve(globalEnvFile))].filter(Boolean).map((root) => path.resolve(root));
+  const globalEnvFile = environment.TASK_TREE_GLOBAL_ENV_FILE || process.env.TASK_TREE_GLOBAL_ENV_FILE || path.join(moduleRoot, ".env");
+  const roots = [path.resolve(cwd || process.cwd()), environment.TASK_TREE_PROJECT_ROOT || process.env.TASK_TREE_PROJECT_ROOT, path.dirname(path.resolve(globalEnvFile))].filter(Boolean).map((root) => path.resolve(root));
   for (const root of [...new Set(roots)]) {
     try {
       const envFile = path.join(root, ".env");
@@ -41,11 +41,12 @@ function loadConfig(cwd, { environment = {}, model = "" } = {}) {
     } catch {}
   }
   const env = { ...file, ...process.env, ...environment };
-  const baseUrl = String(env.MODEL_AGENT_MAIN_BASE_URL || env.TASK_TREE_PLANNER_BASE_URL || "").trim().replace(/\/+$/, "");
-  const apiKey = String(env.MODEL_AGENT_MAIN_API_KEY || env.TASK_TREE_PLANNER_API_KEY || "").trim();
-  const selectedModel = String(model || env.MODEL_AGENT_MAIN_MODEL || env.TASK_TREE_PLANNER_MODEL || "deepseek-v4.1-flash").trim();
+  const prefix = role === 'planner' ? 'TASK_TREE_PLANNER' : 'MODEL_AGENT_MAIN';
+  const baseUrl = String(env[prefix + '_BASE_URL'] || env.MODEL_AGENT_MAIN_BASE_URL || env.TASK_TREE_PLANNER_BASE_URL || "").trim().replace(/\/+$/, "");
+  const apiKey = String(env[prefix + '_API_KEY'] || env.MODEL_AGENT_MAIN_API_KEY || env.TASK_TREE_PLANNER_API_KEY || "").trim();
+  const selectedModel = String(model || env[prefix + '_MODEL'] || env.MODEL_AGENT_MAIN_MODEL || env.TASK_TREE_PLANNER_MODEL || "deepseek-v4.1-flash").trim();
   if (!baseUrl || !apiKey || !selectedModel) throw new Error("缺少 DeepSeek 配置：需要 MODEL_AGENT_MAIN_BASE_URL、MODEL_AGENT_MAIN_API_KEY、MODEL_AGENT_MAIN_MODEL");
-  const rawFallbacks=String(env.MODEL_AGENT_MAIN_FALLBACK_BASE_URLS||'').split(/[\s,]+/).filter(Boolean);
+  const rawFallbacks=String(env[prefix + '_FALLBACK_BASE_URLS'] || (role === 'planner' && env.TASK_TREE_PLANNER_BASE_URL ? '' : env.MODEL_AGENT_MAIN_FALLBACK_BASE_URLS) || '').split(/[\s,]+/).filter(Boolean);
   const fallbacks=rawFallbacks.map(raw=>{
     let url;try{url=new URL(raw);}catch{throw new Error('备用地址必须是有效 HTTPS API 地址');}
     const local=['localhost','127.0.0.1','[::1]'].includes(url.hostname);
@@ -280,7 +281,7 @@ export async function startDeepSeekTurn({
   signal = null,
   runtimeFactory = createSharedAgentRuntime
 } = {}) {
-  const config = loadConfig(cwd, { environment: environment || {}, model });
+  const config = loadDeepSeekConfig(cwd, { environment: environment || {}, model });
   const resumed = !forceNewThread && String(previousThreadId).startsWith('deepseek-');
   const threadId = resumed ? previousThreadId : `deepseek-${randomUUID()}`;
   const turnId = `turn-${randomUUID()}`;

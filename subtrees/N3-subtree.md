@@ -16,20 +16,20 @@
   - 完整上下文一次规划；就绪任务全部并发；写集仅作提示。
   - 独立工作树执行；真实冲突续接双方对话；完成自动应用。
 - Input: 现有自动并行源码、任务树状态、官方工程实践和用户并发方案。
-- Output: 自动并行实现说明；docs/subtree-parallel/concurrent-agent-isolation-design.zh.md。
+- Output: 工程入口与并行链路修复、真实六路计时及使用方法；docs/parallel-pipeline-repair.zh.md。
 - Metrics: 同文件和任务树保留双方结果；超过四个任务并发；追加即时执行；无需审批、测试或审核阶段。
-- Notes: 全文与历史结果不截断；项目外路径是直接修改，不在 Git 合并范围内。
+- Notes: 真实六路提交Hook用时49–56秒，工具连接0.09–0.21秒，Git合并单次不超过32毫秒；本轮未优化全局Hook。
 - CodeLoc:
   - server/codex-run.js
   - server/codex-coordinator.js
   - server/parallel-worktree.js
   - public/app.js
-- CurrentResult: 同文件与任务树合并、八路调度和自动应用已验证；取消工具轮数上限与DeepSeek摘要交接通过115项回归，本机HTTP与真实共享服务完成50次调用及重启复用。真实模型摘要质量、拆分最优性与稳定提速仍待验证；证据：docs/deepseek-context-lifecycle.zh.md。
-- RootCauseAnalysis: 旧冲突路径逐个串行咨询，模型回合随人数增加；Git非瓶颈。一次提交分支上下文给解析器；写集可并行，同会话复用需分叉，项目外修改不受 Git 保护。
+- CurrentResult: 工程入口与规划、子树、并发和自动合入链路已修复；真实DeepSeek六路并发169.7秒完成，原树保留。复杂代码拆分质量与稳定提速仍未验证；证据：docs/parallel-pipeline-repair.zh.md。
+- RootCauseAnalysis: 旧入口指向空工作区，Git未初始化、执行树未落盘，且来源树、隔离目录与模型失败状态未贯通。现在分支独立落盘、目录显式绑定、失败不提交，Git只合真实项目改动。
 - CaseStudy:
   - 两任务改同一文件和任务树，通过双方对话合并后同时保留结果。
   - 同节点同写集追加任务，从历史对话分叉，原任务未结束也立即执行。
-- NextIdea: 在真实业务任务中观察拆分质量与冲突协商耗时。
+- NextIdea: 在工程N3提交一次真实代码改进，观察拆分质量并定位全局提交Hook耗时。
 - SelectedSkills: codex:skill-creator
 
 # GraphState

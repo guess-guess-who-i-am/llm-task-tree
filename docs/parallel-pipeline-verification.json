@@ -1,0 +1,163 @@
+{
+  "ok": true,
+  "fixture": "/var/folders/q1/fjylgh7x6cx04ljtdp550ls40000gn/T/parallel-pipeline-ui-lJTH9S",
+  "url": "http://127.0.0.1:56609",
+  "maximumConcurrentRequests": 8,
+  "jobs": 9,
+  "sharedWorkerPid": 14661,
+  "modelRoundsPerBranch": 2,
+  "sourceTreePreserved": true,
+  "realToolWrites": 18,
+  "timing": {
+    "plannerReachedMs": 2138.389875,
+    "totalMs": 6460.411959
+  },
+  "workspaceTimings": {
+    "prepare": {
+      "calls": 2,
+      "totalMs": 367,
+      "maxMs": 237,
+      "lastMs": 130
+    },
+    "head": {
+      "calls": 9,
+      "totalMs": 172,
+      "maxMs": 36,
+      "lastMs": 13
+    },
+    "createWorker": {
+      "calls": 9,
+      "totalMs": 498,
+      "maxMs": 68,
+      "lastMs": 37
+    },
+    "inspectChanges": {
+      "calls": 18,
+      "totalMs": 977,
+      "maxMs": 109,
+      "lastMs": 28
+    },
+    "commit": {
+      "calls": 9,
+      "totalMs": 1284,
+      "maxMs": 160,
+      "lastMs": 87
+    },
+    "integrate": {
+      "calls": 10,
+      "totalMs": 260,
+      "maxMs": 37,
+      "lastMs": 28
+    },
+    "removeWorker": {
+      "calls": 11,
+      "totalMs": 46,
+      "maxMs": 19,
+      "lastMs": 19
+    },
+    "summarize": {
+      "calls": 1,
+      "totalMs": 48,
+      "maxMs": 48,
+      "lastMs": 48
+    },
+    "cleanup": {
+      "calls": 2,
+      "totalMs": 69,
+      "maxMs": 35,
+      "lastMs": 35
+    },
+    "accept": {
+      "calls": 1,
+      "totalMs": 251,
+      "maxMs": 251,
+      "lastMs": 251
+    }
+  },
+  "gitCommandTimings": {
+    "calls": 133,
+    "totalMs": 3294,
+    "maxMs": 67,
+    "byCommand": {
+      "rev-parse": {
+        "calls": 23,
+        "totalMs": 410,
+        "maxMs": 36,
+        "lastMs": 13
+      },
+      "init": {
+        "calls": 1,
+        "totalMs": 19,
+        "maxMs": 19,
+        "lastMs": 19
+      },
+      "hash-object": {
+        "calls": 1,
+        "totalMs": 13,
+        "maxMs": 13,
+        "lastMs": 13
+      },
+      "commit-tree": {
+        "calls": 13,
+        "totalMs": 240,
+        "maxMs": 36,
+        "lastMs": 14
+      },
+      "update-ref": {
+        "calls": 1,
+        "totalMs": 18,
+        "maxMs": 18,
+        "lastMs": 18
+      },
+      "diff": {
+        "calls": 24,
+        "totalMs": 628,
+        "maxMs": 63,
+        "lastMs": 15
+      },
+      "ls-files": {
+        "calls": 20,
+        "totalMs": 459,
+        "maxMs": 46,
+        "lastMs": 13
+      },
+      "read-tree": {
+        "calls": 2,
+        "totalMs": 26,
+        "maxMs": 13,
+        "lastMs": 13
+      },
+      "add": {
+        "calls": 11,
+        "totalMs": 307,
+        "maxMs": 42,
+        "lastMs": 15
+      },
+      "write-tree": {
+        "calls": 11,
+        "totalMs": 293,
+        "maxMs": 37,
+        "lastMs": 18
+      },
+      "worktree": {
+        "calls": 15,
+        "totalMs": 605,
+        "maxMs": 67,
+        "lastMs": 16
+      },
+      "cherry-pick": {
+        "calls": 10,
+        "totalMs": 260,
+        "maxMs": 37,
+        "lastMs": 28
+      },
+      "apply": {
+        "calls": 1,
+        "totalMs": 16,
+        "maxMs": 16,
+        "lastMs": 16
+      }
+    }
+  },
+  "limitation": "本机模型替身验证接线、并行、工具、合并与界面；不代表真实 DeepSeek 的拆分质量或网关速度。"
+}

@@ -7,6 +7,56 @@
   "reportZh": "report.zh.md",
   "substeps": [
     {
+      "title": "工程入口和真实分支并行链路修复",
+      "functions": [
+        {
+          "path": "server/parallel-branch-tree.js",
+          "name": "materializeParallelBranches"
+        },
+        {
+          "path": "server/codex-coordinator.js",
+          "name": "generatePlan"
+        },
+        {
+          "path": "server/parallel-worktree.js",
+          "name": "ensureRepository"
+        },
+        {
+          "path": "scripts/mcp-server.mjs",
+          "name": "resolveProjectRoot"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "loadDeepSeekConfig"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/parallel-pipeline.test.js"
+        },
+        {
+          "path": "scripts/test-ide-launchers.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/parallel-pipeline-repair.zh.md"
+        },
+        {
+          "path": "docs/parallel-pipeline-verification.json"
+        },
+        {
+          "path": "docs/parallel-planner-live.json"
+        },
+        {
+          "path": "docs/parallel-workers-live.json"
+        },
+        {
+          "path": "artifacts/ide-project-entry.png"
+        }
+      ]
+    },
+    {
       "title": "取消工具轮数上限与DeepSeek摘要交接",
       "functions": [
         {

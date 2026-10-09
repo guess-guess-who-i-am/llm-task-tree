@@ -1,0 +1,3642 @@
+{
+  "ok": true,
+  "fixture": "/var/folders/q1/fjylgh7x6cx04ljtdp550ls40000gn/T/parallel-workers-live-d8E5fl",
+  "reusedPlannerThread": "deepseek-9d910241-18e4-4012-839c-56c15baebec3",
+  "runId": "d1a9e8d0-2c23-4637-a328-7f6c0fe72d78",
+  "status": "accepted",
+  "error": "",
+  "totalMs": 169704,
+  "maximumConcurrentWorkers": 6,
+  "workerStarts": [
+    {
+      "taskId": "dlg",
+      "elapsedMs": 314
+    },
+    {
+      "taskId": "nav",
+      "elapsedMs": 319
+    },
+    {
+      "taskId": "att",
+      "elapsedMs": 324
+    },
+    {
+      "taskId": "sub",
+      "elapsedMs": 328
+    },
+    {
+      "taskId": "par",
+      "elapsedMs": 329
+    },
+    {
+      "taskId": "rec",
+      "elapsedMs": 331
+    }
+  ],
+  "workerResults": [
+    {
+      "taskId": "att",
+      "status": "completed",
+      "timing": {
+        "startedAt": "2026-10-09T16:48:30.609Z",
+        "requestMs": 80819,
+        "totalMs": 109407,
+        "provider": "deepseek",
+        "rounds": [
+          {
+            "round": 1,
+            "startedAt": "2026-10-09T16:49:27.344Z",
+            "requestMs": 24084,
+            "streamMs": 202,
+            "totalMs": 24286,
+            "toolCalls": 2,
+            "requestBytes": 57029,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://api.yujianwudi.top/v1",
+                "startedAt": "2026-10-09T16:49:27.344Z",
+                "status": null,
+                "requestMs": 10362,
+                "responseHeaders": {},
+                "errorCode": "UND_ERR_CONNECT_TIMEOUT",
+                "totalMs": 10362,
+                "retryDelayMs": 378
+              },
+              {
+                "attempt": 2,
+                "endpoint": "https://yujianwudi.top/v1",
+                "startedAt": "2026-10-09T16:49:38.085Z",
+                "status": null,
+                "requestMs": 10121,
+                "responseHeaders": {},
+                "errorCode": "UND_ERR_CONNECT_TIMEOUT",
+                "totalMs": 10121,
+                "retryDelayMs": 640
+              },
+              {
+                "attempt": 3,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:49:48.847Z",
+                "status": 200,
+                "requestMs": 2581,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee17b0e5303d3-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 2,
+            "startedAt": "2026-10-09T16:49:51.653Z",
+            "requestMs": 13438,
+            "streamMs": 1039,
+            "totalMs": 14477,
+            "toolCalls": 1,
+            "requestBytes": 62135,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:49:51.653Z",
+                "status": 200,
+                "requestMs": 13438,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee18b89b103d3-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 3,
+            "startedAt": "2026-10-09T16:50:06.149Z",
+            "requestMs": 2345,
+            "streamMs": 207,
+            "totalMs": 2552,
+            "toolCalls": 1,
+            "requestBytes": 72169,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:06.150Z",
+                "status": 200,
+                "requestMs": 2344,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee1e61a4f03d3-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 4,
+            "startedAt": "2026-10-09T16:50:08.775Z",
+            "requestMs": 1412,
+            "streamMs": 2693,
+            "totalMs": 4105,
+            "toolCalls": 1,
+            "requestBytes": 74877,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:08.775Z",
+                "status": 200,
+                "requestMs": 1412,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee1f68d2403d3-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 5,
+            "startedAt": "2026-10-09T16:50:13.384Z",
+            "requestMs": 1948,
+            "streamMs": 197,
+            "totalMs": 2145,
+            "toolCalls": 1,
+            "requestBytes": 77518,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:13.384Z",
+                "status": 200,
+                "requestMs": 1948,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee213580e03d3-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 6,
+            "startedAt": "2026-10-09T16:50:15.560Z",
+            "requestMs": 1921,
+            "streamMs": 2526,
+            "totalMs": 4447,
+            "toolCalls": 0,
+            "requestBytes": 79353,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:15.560Z",
+                "status": 200,
+                "requestMs": 1921,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee220ebe003d3-HKG"
+                }
+              }
+            ],
+            "finishReason": "stop"
+          }
+        ],
+        "tools": [
+          {
+            "round": 0,
+            "toolCallId": "host-node-85229992-16b9-4e1c-bc6a-c521608babaa",
+            "toolName": "task_tree_node",
+            "startedAt": "2026-10-09T16:49:27.336Z",
+            "preHookMs": 1,
+            "executeMs": 4,
+            "postHookMs": 2,
+            "durationMs": 7,
+            "endedAt": "2026-10-09T16:49:27.343Z"
+          },
+          {
+            "round": 1,
+            "toolCallId": "call_00_qH1wCtAUgq3rm1bZHKmj2291",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:49:51.630Z",
+            "preHookMs": 2,
+            "executeMs": 12,
+            "postHookMs": 2,
+            "durationMs": 16,
+            "endedAt": "2026-10-09T16:49:51.646Z"
+          },
+          {
+            "round": 1,
+            "toolCallId": "call_01_0K98xc0iEdNwOnQ3zpeX5014",
+            "toolName": "read_file",
+            "startedAt": "2026-10-09T16:49:51.646Z",
+            "preHookMs": 1,
+            "executeMs": 1,
+            "postHookMs": 1,
+            "durationMs": 4,
+            "endedAt": "2026-10-09T16:49:51.650Z"
+          },
+          {
+            "round": 2,
+            "toolCallId": "call_00_yV0ic6Cwex1uoxgiAOEr2200",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:50:06.131Z",
+            "preHookMs": 2,
+            "executeMs": 12,
+            "postHookMs": 2,
+            "durationMs": 16,
+            "endedAt": "2026-10-09T16:50:06.147Z"
+          },
+          {
+            "round": 3,
+            "toolCallId": "call_00_mVVClvkEZ5pbOAY9QCNe2070",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:50:08.701Z",
+            "preHookMs": 5,
+            "executeMs": 66,
+            "postHookMs": 2,
+            "durationMs": 73,
+            "endedAt": "2026-10-09T16:50:08.774Z"
+          },
+          {
+            "round": 4,
+            "toolCallId": "call_00_HxszVN3yUqdJ0aBVH0dL8251",
+            "toolName": "task_tree_subtree",
+            "startedAt": "2026-10-09T16:50:12.880Z",
+            "preHookMs": 4,
+            "executeMs": 496,
+            "postHookMs": 2,
+            "durationMs": 503,
+            "endedAt": "2026-10-09T16:50:13.383Z"
+          },
+          {
+            "round": 5,
+            "toolCallId": "call_00_IKPdPJ4ZQNzj4HN3ESbv8758",
+            "toolName": "task_tree_subtree",
+            "startedAt": "2026-10-09T16:50:15.529Z",
+            "preHookMs": 5,
+            "executeMs": 20,
+            "postHookMs": 2,
+            "durationMs": 27,
+            "endedAt": "2026-10-09T16:50:15.556Z"
+          }
+        ],
+        "runtimeMs": 178,
+        "workerPid": 12788,
+        "hooks": [
+          {
+            "event": "SessionStart",
+            "toolCallId": null,
+            "durationMs": 185
+          },
+          {
+            "event": "UserPromptSubmit",
+            "toolCallId": null,
+            "durationMs": 56353
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "host-node-85229992-16b9-4e1c-bc6a-c521608babaa",
+            "durationMs": 1
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "host-node-85229992-16b9-4e1c-bc6a-c521608babaa",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_qH1wCtAUgq3rm1bZHKmj2291",
+            "durationMs": 2
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_qH1wCtAUgq3rm1bZHKmj2291",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_01_0K98xc0iEdNwOnQ3zpeX5014",
+            "durationMs": 1
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_01_0K98xc0iEdNwOnQ3zpeX5014",
+            "durationMs": 1
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_yV0ic6Cwex1uoxgiAOEr2200",
+            "durationMs": 2
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_yV0ic6Cwex1uoxgiAOEr2200",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_mVVClvkEZ5pbOAY9QCNe2070",
+            "durationMs": 5
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_mVVClvkEZ5pbOAY9QCNe2070",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_HxszVN3yUqdJ0aBVH0dL8251",
+            "durationMs": 4
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_HxszVN3yUqdJ0aBVH0dL8251",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_IKPdPJ4ZQNzj4HN3ESbv8758",
+            "durationMs": 5
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_IKPdPJ4ZQNzj4HN3ESbv8758",
+            "durationMs": 2
+          },
+          {
+            "event": "Stop",
+            "toolCallId": null,
+            "durationMs": 5
+          }
+        ],
+        "readWaves": [
+          {
+            "round": 0,
+            "wave": 1,
+            "width": 1,
+            "itemIds": [
+              "host-node-85229992-16b9-4e1c-bc6a-c521608babaa"
+            ],
+            "startedAt": "2026-10-09T16:49:27.336Z",
+            "endedAt": "2026-10-09T16:49:27.343Z",
+            "durationMs": 7.174375000002328,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "host-node-85229992-16b9-4e1c-bc6a-c521608babaa",
+                "index": 0,
+                "startedAt": "2026-10-09T16:49:27.336Z",
+                "endedAt": "2026-10-09T16:49:27.343Z",
+                "durationMs": 7.142166999998153,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          },
+          {
+            "round": 1,
+            "wave": 1,
+            "width": 1,
+            "itemIds": [
+              "call_01_0K98xc0iEdNwOnQ3zpeX5014"
+            ],
+            "startedAt": "2026-10-09T16:49:51.646Z",
+            "endedAt": "2026-10-09T16:49:51.650Z",
+            "durationMs": 4.27812499999709,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "call_01_0K98xc0iEdNwOnQ3zpeX5014",
+                "index": 0,
+                "startedAt": "2026-10-09T16:49:51.646Z",
+                "endedAt": "2026-10-09T16:49:51.650Z",
+                "durationMs": 4.219083000003593,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          },
+          {
+            "round": 5,
+            "wave": 1,
+            "width": 1,
+            "itemIds": [
+              "call_00_IKPdPJ4ZQNzj4HN3ESbv8758"
+            ],
+            "startedAt": "2026-10-09T16:50:15.529Z",
+            "endedAt": "2026-10-09T16:50:15.556Z",
+            "durationMs": 26.412542000005487,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "call_00_IKPdPJ4ZQNzj4HN3ESbv8758",
+                "index": 0,
+                "startedAt": "2026-10-09T16:50:15.529Z",
+                "endedAt": "2026-10-09T16:50:15.556Z",
+                "durationMs": 26.39374999998836,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          }
+        ]
+      },
+      "error": ""
+    },
+    {
+      "taskId": "rec",
+      "status": "completed",
+      "timing": {
+        "startedAt": "2026-10-09T16:48:30.616Z",
+        "requestMs": 80660,
+        "totalMs": 115398,
+        "provider": "deepseek",
+        "rounds": [
+          {
+            "round": 1,
+            "startedAt": "2026-10-09T16:49:27.387Z",
+            "requestMs": 23889,
+            "streamMs": 170,
+            "totalMs": 24059,
+            "toolCalls": 2,
+            "requestBytes": 57161,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://api.yujianwudi.top/v1",
+                "startedAt": "2026-10-09T16:49:27.387Z",
+                "status": null,
+                "requestMs": 10321,
+                "responseHeaders": {},
+                "errorCode": "UND_ERR_CONNECT_TIMEOUT",
+                "totalMs": 10321,
+                "retryDelayMs": 311
+              },
+              {
+                "attempt": 2,
+                "endpoint": "https://yujianwudi.top/v1",
+                "startedAt": "2026-10-09T16:49:38.021Z",
+                "status": null,
+                "requestMs": 10185,
+                "responseHeaders": {},
+                "errorCode": "UND_ERR_CONNECT_TIMEOUT",
+                "totalMs": 10185,
+                "retryDelayMs": 731
+              },
+              {
+                "attempt": 3,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:49:48.937Z",
+                "status": 200,
+                "requestMs": 2339,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee17b8960ddc3-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 2,
+            "startedAt": "2026-10-09T16:49:51.468Z",
+            "requestMs": 2163,
+            "streamMs": 209,
+            "totalMs": 2372,
+            "toolCalls": 2,
+            "requestBytes": 59220,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:49:51.468Z",
+                "status": 200,
+                "requestMs": 2163,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee18a5d7fddc3-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 3,
+            "startedAt": "2026-10-09T16:49:53.844Z",
+            "requestMs": 1367,
+            "streamMs": 13931,
+            "totalMs": 15298,
+            "toolCalls": 1,
+            "requestBytes": 64695,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:49:53.844Z",
+                "status": 200,
+                "requestMs": 1367,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee1993b03ddc3-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 4,
+            "startedAt": "2026-10-09T16:50:09.182Z",
+            "requestMs": 1864,
+            "streamMs": 11,
+            "totalMs": 1875,
+            "toolCalls": 1,
+            "requestBytes": 76324,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:09.184Z",
+                "status": 200,
+                "requestMs": 1862,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee1f91f3fddc3-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 5,
+            "startedAt": "2026-10-09T16:50:11.118Z",
+            "requestMs": 4903,
+            "streamMs": 46,
+            "totalMs": 4949,
+            "toolCalls": 1,
+            "requestBytes": 78295,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:11.119Z",
+                "status": 200,
+                "requestMs": 4902,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee2052afaddc3-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 6,
+            "startedAt": "2026-10-09T16:50:16.094Z",
+            "requestMs": 4774,
+            "streamMs": 205,
+            "totalMs": 4979,
+            "toolCalls": 1,
+            "requestBytes": 80813,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:16.094Z",
+                "status": 200,
+                "requestMs": 4774,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee2244905ddc3-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 7,
+            "startedAt": "2026-10-09T16:50:21.566Z",
+            "requestMs": 2137,
+            "streamMs": 2304,
+            "totalMs": 4441,
+            "toolCalls": 0,
+            "requestBytes": 85755,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:21.566Z",
+                "status": 200,
+                "requestMs": 2137,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee2467c6d786c-HKG"
+                }
+              }
+            ],
+            "finishReason": "stop"
+          }
+        ],
+        "tools": [
+          {
+            "round": 0,
+            "toolCallId": "host-node-e3a2d69f-b216-4faa-bd62-ff62efeb4bfa",
+            "toolName": "task_tree_node",
+            "startedAt": "2026-10-09T16:49:27.380Z",
+            "preHookMs": 0,
+            "executeMs": 4,
+            "postHookMs": 1,
+            "durationMs": 6,
+            "endedAt": "2026-10-09T16:49:27.386Z"
+          },
+          {
+            "round": 1,
+            "toolCallId": "call_00_3la4cWXof8zRMdFOavGj2820",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:49:51.446Z",
+            "preHookMs": 2,
+            "executeMs": 11,
+            "postHookMs": 1,
+            "durationMs": 15,
+            "endedAt": "2026-10-09T16:49:51.461Z"
+          },
+          {
+            "round": 1,
+            "toolCallId": "call_01_ShZaUNkqJTynwOi48QWF8631",
+            "toolName": "read_file",
+            "startedAt": "2026-10-09T16:49:51.462Z",
+            "preHookMs": 1,
+            "executeMs": 2,
+            "postHookMs": 3,
+            "durationMs": 6,
+            "endedAt": "2026-10-09T16:49:51.468Z"
+          },
+          {
+            "round": 2,
+            "toolCallId": "call_01_W87nr1nFcFgl04GhguC16172",
+            "toolName": "read_file",
+            "startedAt": "2026-10-09T16:49:53.840Z",
+            "preHookMs": 1,
+            "executeMs": 1,
+            "postHookMs": 1,
+            "durationMs": 3,
+            "endedAt": "2026-10-09T16:49:53.843Z"
+          },
+          {
+            "round": 2,
+            "toolCallId": "call_00_fbD9GNVwdJYsSK8QS48V5078",
+            "toolName": "read_file",
+            "startedAt": "2026-10-09T16:49:53.840Z",
+            "preHookMs": 1,
+            "executeMs": 2,
+            "postHookMs": 1,
+            "durationMs": 4,
+            "endedAt": "2026-10-09T16:49:53.844Z"
+          },
+          {
+            "round": 3,
+            "toolCallId": "call_00_Lzml8DDMsZlOLX23QXLy1014",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:50:09.142Z",
+            "preHookMs": 8,
+            "executeMs": 28,
+            "postHookMs": 2,
+            "durationMs": 39,
+            "endedAt": "2026-10-09T16:50:09.181Z"
+          },
+          {
+            "round": 4,
+            "toolCallId": "call_00_xvh4yP5LSuwv1rRm7Hxm8860",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:50:11.057Z",
+            "preHookMs": 12,
+            "executeMs": 46,
+            "postHookMs": 2,
+            "durationMs": 60,
+            "endedAt": "2026-10-09T16:50:11.117Z"
+          },
+          {
+            "round": 5,
+            "toolCallId": "call_00_P1ebWCF2wjBsFUTrOD2b7482",
+            "toolName": "task_tree_subtree",
+            "startedAt": "2026-10-09T16:50:16.067Z",
+            "preHookMs": 5,
+            "executeMs": 21,
+            "postHookMs": 0,
+            "durationMs": 26,
+            "endedAt": "2026-10-09T16:50:16.093Z"
+          },
+          {
+            "round": 6,
+            "toolCallId": "call_00_k6gWpUgvwnwHr8UqZFz32320",
+            "toolName": "task_tree_subtree",
+            "startedAt": "2026-10-09T16:50:21.073Z",
+            "preHookMs": 5,
+            "executeMs": 486,
+            "postHookMs": 2,
+            "durationMs": 493,
+            "endedAt": "2026-10-09T16:50:21.566Z"
+          }
+        ],
+        "runtimeMs": 209,
+        "workerPid": 12788,
+        "hooks": [
+          {
+            "event": "SessionStart",
+            "toolCallId": null,
+            "durationMs": 189
+          },
+          {
+            "event": "UserPromptSubmit",
+            "toolCallId": null,
+            "durationMs": 56358
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "host-node-e3a2d69f-b216-4faa-bd62-ff62efeb4bfa",
+            "durationMs": 0
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "host-node-e3a2d69f-b216-4faa-bd62-ff62efeb4bfa",
+            "durationMs": 1
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_3la4cWXof8zRMdFOavGj2820",
+            "durationMs": 2
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_3la4cWXof8zRMdFOavGj2820",
+            "durationMs": 1
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_01_ShZaUNkqJTynwOi48QWF8631",
+            "durationMs": 1
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_01_ShZaUNkqJTynwOi48QWF8631",
+            "durationMs": 3
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_fbD9GNVwdJYsSK8QS48V5078",
+            "durationMs": 1
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_01_W87nr1nFcFgl04GhguC16172",
+            "durationMs": 1
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_01_W87nr1nFcFgl04GhguC16172",
+            "durationMs": 1
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_fbD9GNVwdJYsSK8QS48V5078",
+            "durationMs": 1
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_Lzml8DDMsZlOLX23QXLy1014",
+            "durationMs": 8
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_Lzml8DDMsZlOLX23QXLy1014",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_xvh4yP5LSuwv1rRm7Hxm8860",
+            "durationMs": 12
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_xvh4yP5LSuwv1rRm7Hxm8860",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_P1ebWCF2wjBsFUTrOD2b7482",
+            "durationMs": 5
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_k6gWpUgvwnwHr8UqZFz32320",
+            "durationMs": 5
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_k6gWpUgvwnwHr8UqZFz32320",
+            "durationMs": 2
+          },
+          {
+            "event": "Stop",
+            "toolCallId": null,
+            "durationMs": 7
+          }
+        ],
+        "readWaves": [
+          {
+            "round": 0,
+            "wave": 1,
+            "width": 1,
+            "itemIds": [
+              "host-node-e3a2d69f-b216-4faa-bd62-ff62efeb4bfa"
+            ],
+            "startedAt": "2026-10-09T16:49:27.380Z",
+            "endedAt": "2026-10-09T16:49:27.386Z",
+            "durationMs": 6.219708000004175,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "host-node-e3a2d69f-b216-4faa-bd62-ff62efeb4bfa",
+                "index": 0,
+                "startedAt": "2026-10-09T16:49:27.380Z",
+                "endedAt": "2026-10-09T16:49:27.386Z",
+                "durationMs": 6.17949999999837,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          },
+          {
+            "round": 1,
+            "wave": 1,
+            "width": 1,
+            "itemIds": [
+              "call_01_ShZaUNkqJTynwOi48QWF8631"
+            ],
+            "startedAt": "2026-10-09T16:49:51.462Z",
+            "endedAt": "2026-10-09T16:49:51.468Z",
+            "durationMs": 6.003292000008514,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "call_01_ShZaUNkqJTynwOi48QWF8631",
+                "index": 0,
+                "startedAt": "2026-10-09T16:49:51.462Z",
+                "endedAt": "2026-10-09T16:49:51.468Z",
+                "durationMs": 5.962541000000783,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          },
+          {
+            "round": 2,
+            "wave": 1,
+            "width": 2,
+            "itemIds": [
+              "call_00_fbD9GNVwdJYsSK8QS48V5078",
+              "call_01_W87nr1nFcFgl04GhguC16172"
+            ],
+            "startedAt": "2026-10-09T16:49:53.840Z",
+            "endedAt": "2026-10-09T16:49:53.844Z",
+            "durationMs": 4.005958999987342,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "call_00_fbD9GNVwdJYsSK8QS48V5078",
+                "index": 0,
+                "startedAt": "2026-10-09T16:49:53.840Z",
+                "endedAt": "2026-10-09T16:49:53.844Z",
+                "durationMs": 3.9995420000050217,
+                "failed": false,
+                "status": "fulfilled"
+              },
+              {
+                "itemId": "call_01_W87nr1nFcFgl04GhguC16172",
+                "index": 1,
+                "startedAt": "2026-10-09T16:49:53.840Z",
+                "endedAt": "2026-10-09T16:49:53.843Z",
+                "durationMs": 3.1488749999989523,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          }
+        ]
+      },
+      "error": ""
+    },
+    {
+      "taskId": "par",
+      "status": "completed",
+      "timing": {
+        "startedAt": "2026-10-09T16:48:30.615Z",
+        "requestMs": 80228,
+        "totalMs": 121099,
+        "provider": "deepseek",
+        "rounds": [
+          {
+            "round": 1,
+            "startedAt": "2026-10-09T16:49:27.455Z",
+            "requestMs": 23388,
+            "streamMs": 1089,
+            "totalMs": 24477,
+            "toolCalls": 2,
+            "requestBytes": 57115,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://api.yujianwudi.top/v1",
+                "startedAt": "2026-10-09T16:49:27.455Z",
+                "status": null,
+                "requestMs": 10252,
+                "responseHeaders": {},
+                "errorCode": "UND_ERR_CONNECT_TIMEOUT",
+                "totalMs": 10252,
+                "retryDelayMs": 376
+              },
+              {
+                "attempt": 2,
+                "endpoint": "https://yujianwudi.top/v1",
+                "startedAt": "2026-10-09T16:49:38.084Z",
+                "status": null,
+                "requestMs": 10122,
+                "responseHeaders": {},
+                "errorCode": "UND_ERR_CONNECT_TIMEOUT",
+                "totalMs": 10122,
+                "retryDelayMs": 665
+              },
+              {
+                "attempt": 3,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:49:48.872Z",
+                "status": 200,
+                "requestMs": 1971,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee17b2b05786c-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 2,
+            "startedAt": "2026-10-09T16:49:52.422Z",
+            "requestMs": 1395,
+            "streamMs": 19632,
+            "totalMs": 21027,
+            "toolCalls": 1,
+            "requestBytes": 60253,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:49:52.422Z",
+                "status": 200,
+                "requestMs": 1395,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee1907a13d755-NRT"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 3,
+            "startedAt": "2026-10-09T16:50:13.502Z",
+            "requestMs": 1304,
+            "streamMs": 445,
+            "totalMs": 1749,
+            "toolCalls": 1,
+            "requestBytes": 77344,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:13.503Z",
+                "status": 200,
+                "requestMs": 1303,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee2143a27d755-NRT"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 4,
+            "startedAt": "2026-10-09T16:50:15.269Z",
+            "requestMs": 1586,
+            "streamMs": 2901,
+            "totalMs": 4487,
+            "toolCalls": 1,
+            "requestBytes": 86832,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:15.270Z",
+                "status": 200,
+                "requestMs": 1585,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee21f5ba1d755-NRT"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 5,
+            "startedAt": "2026-10-09T16:50:25.204Z",
+            "requestMs": 1326,
+            "streamMs": 967,
+            "totalMs": 2293,
+            "toolCalls": 1,
+            "requestBytes": 63814,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:25.204Z",
+                "status": 200,
+                "requestMs": 1326,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee25d5e22d755-NRT"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 6,
+            "startedAt": "2026-10-09T16:50:27.529Z",
+            "requestMs": 1826,
+            "streamMs": 2349,
+            "totalMs": 4175,
+            "toolCalls": 0,
+            "requestBytes": 65531,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:27.529Z",
+                "status": 200,
+                "requestMs": 1826,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee26befacd755-NRT"
+                }
+              }
+            ],
+            "finishReason": "stop"
+          }
+        ],
+        "tools": [
+          {
+            "round": 0,
+            "toolCallId": "host-node-27a8b4a5-6f49-42e9-bb34-8d58a5166e52",
+            "toolName": "task_tree_node",
+            "startedAt": "2026-10-09T16:49:27.446Z",
+            "preHookMs": 2,
+            "executeMs": 4,
+            "postHookMs": 2,
+            "durationMs": 8,
+            "endedAt": "2026-10-09T16:49:27.454Z"
+          },
+          {
+            "round": 1,
+            "toolCallId": "call_00_8tvEXBd0r7MFKPx9Cogv5427",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:49:51.932Z",
+            "preHookMs": 2,
+            "executeMs": 36,
+            "postHookMs": 2,
+            "durationMs": 40,
+            "endedAt": "2026-10-09T16:49:51.972Z"
+          },
+          {
+            "round": 1,
+            "toolCallId": "call_01_0vED1Uf0hi95o4Uz61RX9780",
+            "toolName": "task_tree_subtree",
+            "startedAt": "2026-10-09T16:49:51.972Z",
+            "preHookMs": 1,
+            "executeMs": 448,
+            "postHookMs": 1,
+            "durationMs": 450,
+            "endedAt": "2026-10-09T16:49:52.422Z"
+          },
+          {
+            "round": 2,
+            "toolCallId": "call_00_5EBssU96cydBGnbGSjOa6547",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:50:13.450Z",
+            "preHookMs": 5,
+            "executeMs": 44,
+            "postHookMs": 2,
+            "durationMs": 51,
+            "endedAt": "2026-10-09T16:50:13.501Z"
+          },
+          {
+            "round": 3,
+            "toolCallId": "call_00_XZ7PBLlgpzjEZCKuM9km9959",
+            "toolName": "read_file",
+            "startedAt": "2026-10-09T16:50:15.251Z",
+            "preHookMs": 7,
+            "executeMs": 5,
+            "postHookMs": 5,
+            "durationMs": 17,
+            "endedAt": "2026-10-09T16:50:15.268Z"
+          },
+          {
+            "round": 4,
+            "toolCallId": "call_00_AmMORyk5gu4hDn6omjRv8906",
+            "toolName": "task_tree_subtree",
+            "startedAt": "2026-10-09T16:50:19.756Z",
+            "preHookMs": 6,
+            "executeMs": 28,
+            "postHookMs": 2,
+            "durationMs": 36,
+            "endedAt": "2026-10-09T16:50:19.792Z"
+          },
+          {
+            "round": 5,
+            "toolCallId": "call_00_fOGfvaaFRF9EF5kCkt9d9490",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:50:27.497Z",
+            "preHookMs": 10,
+            "executeMs": 19,
+            "postHookMs": 2,
+            "durationMs": 31,
+            "endedAt": "2026-10-09T16:50:27.528Z"
+          }
+        ],
+        "runtimeMs": 203,
+        "workerPid": 12788,
+        "hooks": [
+          {
+            "event": "SessionStart",
+            "toolCallId": null,
+            "durationMs": 260
+          },
+          {
+            "event": "UserPromptSubmit",
+            "toolCallId": null,
+            "durationMs": 56360
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "host-node-27a8b4a5-6f49-42e9-bb34-8d58a5166e52",
+            "durationMs": 2
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "host-node-27a8b4a5-6f49-42e9-bb34-8d58a5166e52",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_8tvEXBd0r7MFKPx9Cogv5427",
+            "durationMs": 2
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_8tvEXBd0r7MFKPx9Cogv5427",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_01_0vED1Uf0hi95o4Uz61RX9780",
+            "durationMs": 1
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_01_0vED1Uf0hi95o4Uz61RX9780",
+            "durationMs": 1
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_5EBssU96cydBGnbGSjOa6547",
+            "durationMs": 5
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_5EBssU96cydBGnbGSjOa6547",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_XZ7PBLlgpzjEZCKuM9km9959",
+            "durationMs": 7
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_XZ7PBLlgpzjEZCKuM9km9959",
+            "durationMs": 5
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_AmMORyk5gu4hDn6omjRv8906",
+            "durationMs": 6
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_AmMORyk5gu4hDn6omjRv8906",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_fOGfvaaFRF9EF5kCkt9d9490",
+            "durationMs": 10
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_fOGfvaaFRF9EF5kCkt9d9490",
+            "durationMs": 2
+          },
+          {
+            "event": "Stop",
+            "toolCallId": null,
+            "durationMs": 8
+          }
+        ],
+        "readWaves": [
+          {
+            "round": 0,
+            "wave": 1,
+            "width": 1,
+            "itemIds": [
+              "host-node-27a8b4a5-6f49-42e9-bb34-8d58a5166e52"
+            ],
+            "startedAt": "2026-10-09T16:49:27.446Z",
+            "endedAt": "2026-10-09T16:49:27.454Z",
+            "durationMs": 8.108458999995491,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "host-node-27a8b4a5-6f49-42e9-bb34-8d58a5166e52",
+                "index": 0,
+                "startedAt": "2026-10-09T16:49:27.446Z",
+                "endedAt": "2026-10-09T16:49:27.454Z",
+                "durationMs": 8.090041999996174,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          },
+          {
+            "round": 1,
+            "wave": 1,
+            "width": 1,
+            "itemIds": [
+              "call_01_0vED1Uf0hi95o4Uz61RX9780"
+            ],
+            "startedAt": "2026-10-09T16:49:51.972Z",
+            "endedAt": "2026-10-09T16:49:52.422Z",
+            "durationMs": 449.6948330000014,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "call_01_0vED1Uf0hi95o4Uz61RX9780",
+                "index": 0,
+                "startedAt": "2026-10-09T16:49:51.972Z",
+                "endedAt": "2026-10-09T16:49:52.422Z",
+                "durationMs": 449.685249999995,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          },
+          {
+            "round": 3,
+            "wave": 1,
+            "width": 1,
+            "itemIds": [
+              "call_00_XZ7PBLlgpzjEZCKuM9km9959"
+            ],
+            "startedAt": "2026-10-09T16:50:15.251Z",
+            "endedAt": "2026-10-09T16:50:15.268Z",
+            "durationMs": 17.77379099999962,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "call_00_XZ7PBLlgpzjEZCKuM9km9959",
+                "index": 0,
+                "startedAt": "2026-10-09T16:50:15.251Z",
+                "endedAt": "2026-10-09T16:50:15.268Z",
+                "durationMs": 17.754375000004075,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          }
+        ],
+        "summaryRequests": [
+          {
+            "round": "context-summary",
+            "startedAt": "2026-10-09T16:50:19.797Z",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:19.798Z",
+                "status": 200,
+                "requestMs": 5405,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee23b9fa5d755-NRT",
+                  "x-request-id": "a526d29a-b714-4707-90a3-c54171e18130"
+                }
+              }
+            ],
+            "totalMs": 5407
+          }
+        ],
+        "compactions": [
+          {
+            "phase": "completed",
+            "beforeTokens": 45434,
+            "afterTokens": 31823,
+            "chunks": 1,
+            "durationMs": 5409
+          }
+        ]
+      },
+      "error": ""
+    },
+    {
+      "taskId": "sub",
+      "status": "completed",
+      "timing": {
+        "startedAt": "2026-10-09T16:48:30.613Z",
+        "requestMs": 80881,
+        "totalMs": 142933,
+        "provider": "deepseek",
+        "rounds": [
+          {
+            "round": 1,
+            "startedAt": "2026-10-09T16:49:27.463Z",
+            "requestMs": 24031,
+            "streamMs": 206,
+            "totalMs": 24237,
+            "toolCalls": 2,
+            "requestBytes": 57027,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://api.yujianwudi.top/v1",
+                "startedAt": "2026-10-09T16:49:27.463Z",
+                "status": null,
+                "requestMs": 10242,
+                "responseHeaders": {},
+                "errorCode": "UND_ERR_CONNECT_TIMEOUT",
+                "totalMs": 10242,
+                "retryDelayMs": 321
+              },
+              {
+                "attempt": 2,
+                "endpoint": "https://yujianwudi.top/v1",
+                "startedAt": "2026-10-09T16:49:38.027Z",
+                "status": null,
+                "requestMs": 10180,
+                "responseHeaders": {},
+                "errorCode": "UND_ERR_CONNECT_TIMEOUT",
+                "totalMs": 10180,
+                "retryDelayMs": 736
+              },
+              {
+                "attempt": 3,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:49:48.943Z",
+                "status": 200,
+                "requestMs": 2551,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee17b9ae0a0b0-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 2,
+            "startedAt": "2026-10-09T16:49:52.174Z",
+            "requestMs": 1845,
+            "streamMs": 745,
+            "totalMs": 2590,
+            "toolCalls": 1,
+            "requestBytes": 62801,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:49:52.174Z",
+                "status": 200,
+                "requestMs": 1845,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee18eca9c786c-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 3,
+            "startedAt": "2026-10-09T16:49:54.781Z",
+            "requestMs": 2402,
+            "streamMs": 200,
+            "totalMs": 2602,
+            "toolCalls": 1,
+            "requestBytes": 68749,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:49:54.782Z",
+                "status": 200,
+                "requestMs": 2401,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee19f1988786c-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 4,
+            "startedAt": "2026-10-09T16:49:57.387Z",
+            "requestMs": 2546,
+            "streamMs": 404,
+            "totalMs": 2950,
+            "toolCalls": 2,
+            "requestBytes": 70640,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:49:57.387Z",
+                "status": 200,
+                "requestMs": 2546,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee1af59c1786c-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 5,
+            "startedAt": "2026-10-09T16:50:00.344Z",
+            "requestMs": 1800,
+            "streamMs": 13733,
+            "totalMs": 15533,
+            "toolCalls": 1,
+            "requestBytes": 76209,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:00.344Z",
+                "status": 200,
+                "requestMs": 1800,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee1c1decf786c-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 6,
+            "startedAt": "2026-10-09T16:50:15.918Z",
+            "requestMs": 4338,
+            "streamMs": 612,
+            "totalMs": 4950,
+            "toolCalls": 2,
+            "requestBytes": 87667,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:15.919Z",
+                "status": 200,
+                "requestMs": 4337,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee2232c64786c-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 7,
+            "startedAt": "2026-10-09T16:50:48.134Z",
+            "requestMs": 1870,
+            "streamMs": 3532,
+            "totalMs": 5402,
+            "toolCalls": 0,
+            "requestBytes": 84168,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:48.134Z",
+                "status": 200,
+                "requestMs": 1870,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee2ed8e7585a3-HKG"
+                }
+              }
+            ],
+            "finishReason": "stop"
+          }
+        ],
+        "tools": [
+          {
+            "round": 0,
+            "toolCallId": "host-node-97f500cc-990b-4a76-a061-06c84844fce5",
+            "toolName": "task_tree_node",
+            "startedAt": "2026-10-09T16:49:27.457Z",
+            "preHookMs": 2,
+            "executeMs": 3,
+            "postHookMs": 1,
+            "durationMs": 6,
+            "endedAt": "2026-10-09T16:49:27.463Z"
+          },
+          {
+            "round": 1,
+            "toolCallId": "call_00_mljU17tfPEwdzONr78Th0216",
+            "toolName": "task_tree_subtree",
+            "startedAt": "2026-10-09T16:49:51.700Z",
+            "preHookMs": 3,
+            "executeMs": 450,
+            "postHookMs": 1,
+            "durationMs": 455,
+            "endedAt": "2026-10-09T16:49:52.155Z"
+          },
+          {
+            "round": 1,
+            "toolCallId": "call_01_zZ9oPTwQYXcZXnEJ4Yw25203",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:49:52.155Z",
+            "preHookMs": 2,
+            "executeMs": 14,
+            "postHookMs": 2,
+            "durationMs": 18,
+            "endedAt": "2026-10-09T16:49:52.173Z"
+          },
+          {
+            "round": 2,
+            "toolCallId": "call_00_FQAQFymeV0TN7wa7TGlX9494",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:49:54.764Z",
+            "preHookMs": 2,
+            "executeMs": 13,
+            "postHookMs": 2,
+            "durationMs": 17,
+            "endedAt": "2026-10-09T16:49:54.781Z"
+          },
+          {
+            "round": 3,
+            "toolCallId": "call_00_XZy4iSYIjZuvhQmLNhVB7599",
+            "toolName": "read_file",
+            "startedAt": "2026-10-09T16:49:57.383Z",
+            "preHookMs": 2,
+            "executeMs": 0,
+            "postHookMs": 1,
+            "durationMs": 3,
+            "endedAt": "2026-10-09T16:49:57.386Z"
+          },
+          {
+            "round": 4,
+            "toolCallId": "call_00_QlKgOLjtSGoHUQqWmkKc4309",
+            "toolName": "read_file",
+            "startedAt": "2026-10-09T16:50:00.337Z",
+            "preHookMs": 3,
+            "executeMs": 1,
+            "postHookMs": 1,
+            "durationMs": 6,
+            "endedAt": "2026-10-09T16:50:00.343Z"
+          },
+          {
+            "round": 4,
+            "toolCallId": "call_01_EFuqWq2bfMCpak0W9RWN2183",
+            "toolName": "read_file",
+            "startedAt": "2026-10-09T16:50:00.338Z",
+            "preHookMs": 3,
+            "executeMs": 2,
+            "postHookMs": 0,
+            "durationMs": 5,
+            "endedAt": "2026-10-09T16:50:00.343Z"
+          },
+          {
+            "round": 5,
+            "toolCallId": "call_00_vSllpzbcD6NBbT979pes5156",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:50:15.877Z",
+            "preHookMs": 13,
+            "executeMs": 26,
+            "postHookMs": 2,
+            "durationMs": 41,
+            "endedAt": "2026-10-09T16:50:15.918Z"
+          },
+          {
+            "round": 6,
+            "toolCallId": "call_00_FXD3B93I7lpXO3jJXTrJ3512",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:50:20.868Z",
+            "preHookMs": 5,
+            "executeMs": 28,
+            "postHookMs": 2,
+            "durationMs": 35,
+            "endedAt": "2026-10-09T16:50:20.903Z"
+          },
+          {
+            "round": 6,
+            "toolCallId": "call_01_mtmUrnrk2heolKJKtdqV5767",
+            "toolName": "task_tree_subtree",
+            "startedAt": "2026-10-09T16:50:20.903Z",
+            "preHookMs": 1,
+            "executeMs": 14,
+            "postHookMs": 2,
+            "durationMs": 17,
+            "endedAt": "2026-10-09T16:50:20.920Z"
+          }
+        ],
+        "runtimeMs": 207,
+        "workerPid": 12788,
+        "hooks": [
+          {
+            "event": "SessionStart",
+            "toolCallId": null,
+            "durationMs": 282
+          },
+          {
+            "event": "UserPromptSubmit",
+            "toolCallId": null,
+            "durationMs": 56348
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "host-node-97f500cc-990b-4a76-a061-06c84844fce5",
+            "durationMs": 2
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "host-node-97f500cc-990b-4a76-a061-06c84844fce5",
+            "durationMs": 1
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_mljU17tfPEwdzONr78Th0216",
+            "durationMs": 3
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_mljU17tfPEwdzONr78Th0216",
+            "durationMs": 1
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_01_zZ9oPTwQYXcZXnEJ4Yw25203",
+            "durationMs": 2
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_01_zZ9oPTwQYXcZXnEJ4Yw25203",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_FQAQFymeV0TN7wa7TGlX9494",
+            "durationMs": 2
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_FQAQFymeV0TN7wa7TGlX9494",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_XZy4iSYIjZuvhQmLNhVB7599",
+            "durationMs": 2
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_XZy4iSYIjZuvhQmLNhVB7599",
+            "durationMs": 1
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_QlKgOLjtSGoHUQqWmkKc4309",
+            "durationMs": 3
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_01_EFuqWq2bfMCpak0W9RWN2183",
+            "durationMs": 3
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_QlKgOLjtSGoHUQqWmkKc4309",
+            "durationMs": 1
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_01_EFuqWq2bfMCpak0W9RWN2183",
+            "durationMs": 0
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_vSllpzbcD6NBbT979pes5156",
+            "durationMs": 13
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_vSllpzbcD6NBbT979pes5156",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_FXD3B93I7lpXO3jJXTrJ3512",
+            "durationMs": 5
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_FXD3B93I7lpXO3jJXTrJ3512",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_01_mtmUrnrk2heolKJKtdqV5767",
+            "durationMs": 1
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_01_mtmUrnrk2heolKJKtdqV5767",
+            "durationMs": 2
+          },
+          {
+            "event": "Stop",
+            "toolCallId": null,
+            "durationMs": 7
+          }
+        ],
+        "readWaves": [
+          {
+            "round": 0,
+            "wave": 1,
+            "width": 1,
+            "itemIds": [
+              "host-node-97f500cc-990b-4a76-a061-06c84844fce5"
+            ],
+            "startedAt": "2026-10-09T16:49:27.457Z",
+            "endedAt": "2026-10-09T16:49:27.463Z",
+            "durationMs": 5.691665999998804,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "host-node-97f500cc-990b-4a76-a061-06c84844fce5",
+                "index": 0,
+                "startedAt": "2026-10-09T16:49:27.457Z",
+                "endedAt": "2026-10-09T16:49:27.463Z",
+                "durationMs": 5.668209000003117,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          },
+          {
+            "round": 1,
+            "wave": 1,
+            "width": 1,
+            "itemIds": [
+              "call_00_mljU17tfPEwdzONr78Th0216"
+            ],
+            "startedAt": "2026-10-09T16:49:51.700Z",
+            "endedAt": "2026-10-09T16:49:52.155Z",
+            "durationMs": 455.147667000012,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "call_00_mljU17tfPEwdzONr78Th0216",
+                "index": 0,
+                "startedAt": "2026-10-09T16:49:51.700Z",
+                "endedAt": "2026-10-09T16:49:52.155Z",
+                "durationMs": 455.0914579999953,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          },
+          {
+            "round": 3,
+            "wave": 1,
+            "width": 1,
+            "itemIds": [
+              "call_00_XZy4iSYIjZuvhQmLNhVB7599"
+            ],
+            "startedAt": "2026-10-09T16:49:57.383Z",
+            "endedAt": "2026-10-09T16:49:57.386Z",
+            "durationMs": 3.3965420000022277,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "call_00_XZy4iSYIjZuvhQmLNhVB7599",
+                "index": 0,
+                "startedAt": "2026-10-09T16:49:57.383Z",
+                "endedAt": "2026-10-09T16:49:57.386Z",
+                "durationMs": 3.379000000000815,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          },
+          {
+            "round": 4,
+            "wave": 1,
+            "width": 2,
+            "itemIds": [
+              "call_00_QlKgOLjtSGoHUQqWmkKc4309",
+              "call_01_EFuqWq2bfMCpak0W9RWN2183"
+            ],
+            "startedAt": "2026-10-09T16:50:00.337Z",
+            "endedAt": "2026-10-09T16:50:00.343Z",
+            "durationMs": 5.809124999999767,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "call_00_QlKgOLjtSGoHUQqWmkKc4309",
+                "index": 0,
+                "startedAt": "2026-10-09T16:50:00.337Z",
+                "endedAt": "2026-10-09T16:50:00.343Z",
+                "durationMs": 5.178583000000799,
+                "failed": false,
+                "status": "fulfilled"
+              },
+              {
+                "itemId": "call_01_EFuqWq2bfMCpak0W9RWN2183",
+                "index": 1,
+                "startedAt": "2026-10-09T16:50:00.338Z",
+                "endedAt": "2026-10-09T16:50:00.343Z",
+                "durationMs": 5.634416999993846,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          }
+        ],
+        "summaryRequests": [
+          {
+            "round": "context-summary",
+            "startedAt": "2026-10-09T16:50:20.922Z",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:20.922Z",
+                "status": 200,
+                "requestMs": 27014,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee2426b5761ec-HKG",
+                  "x-request-id": "e2df9568-80d1-4cf3-b3ca-3d05ae98284f"
+                }
+              }
+            ],
+            "totalMs": 27212
+          }
+        ],
+        "compactions": [
+          {
+            "phase": "completed",
+            "beforeTokens": 46629,
+            "afterTokens": 42000,
+            "chunks": 1,
+            "durationMs": 27213
+          }
+        ]
+      },
+      "error": ""
+    },
+    {
+      "taskId": "dlg",
+      "status": "completed",
+      "timing": {
+        "startedAt": "2026-10-09T16:48:30.600Z",
+        "requestMs": 79890,
+        "totalMs": 161354,
+        "provider": "deepseek",
+        "rounds": [
+          {
+            "round": 1,
+            "startedAt": "2026-10-09T16:49:27.354Z",
+            "requestMs": 23136,
+            "streamMs": 1210,
+            "totalMs": 24346,
+            "toolCalls": 2,
+            "requestBytes": 56937,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://api.yujianwudi.top/v1",
+                "startedAt": "2026-10-09T16:49:27.354Z",
+                "status": null,
+                "requestMs": 10354,
+                "responseHeaders": {},
+                "errorCode": "UND_ERR_CONNECT_TIMEOUT",
+                "totalMs": 10354,
+                "retryDelayMs": 386
+              },
+              {
+                "attempt": 2,
+                "endpoint": "https://yujianwudi.top/v1",
+                "startedAt": "2026-10-09T16:49:38.095Z",
+                "status": null,
+                "requestMs": 10110,
+                "responseHeaders": {},
+                "errorCode": "UND_ERR_CONNECT_TIMEOUT",
+                "totalMs": 10110,
+                "retryDelayMs": 658
+              },
+              {
+                "attempt": 3,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:49:48.863Z",
+                "status": 200,
+                "requestMs": 1627,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee17b1fd461ec-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 2,
+            "startedAt": "2026-10-09T16:49:51.735Z",
+            "requestMs": 1464,
+            "streamMs": 1854,
+            "totalMs": 3318,
+            "toolCalls": 2,
+            "requestBytes": 64001,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:49:51.735Z",
+                "status": 200,
+                "requestMs": 1464,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee18c0c0e61ec-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 3,
+            "startedAt": "2026-10-09T16:49:55.118Z",
+            "requestMs": 1768,
+            "streamMs": 5121,
+            "totalMs": 6889,
+            "toolCalls": 1,
+            "requestBytes": 71607,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:49:55.119Z",
+                "status": 200,
+                "requestMs": 1767,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee1a12cfd61ec-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 4,
+            "startedAt": "2026-10-09T16:50:02.458Z",
+            "requestMs": 2104,
+            "streamMs": 15649,
+            "totalMs": 17753,
+            "toolCalls": 1,
+            "requestBytes": 77235,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:02.458Z",
+                "status": 200,
+                "requestMs": 2104,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee1cf0c2761ec-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 5,
+            "startedAt": "2026-10-09T16:50:20.239Z",
+            "requestMs": 2139,
+            "streamMs": 943,
+            "totalMs": 3082,
+            "toolCalls": 1,
+            "requestBytes": 89265,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:20.239Z",
+                "status": 200,
+                "requestMs": 2139,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee23e2c7603d3-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 6,
+            "startedAt": "2026-10-09T16:50:29.883Z",
+            "requestMs": 1847,
+            "streamMs": 801,
+            "totalMs": 2648,
+            "toolCalls": 1,
+            "requestBytes": 79249,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:29.883Z",
+                "status": 200,
+                "requestMs": 1847,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee27a7bc003d3-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 7,
+            "startedAt": "2026-10-09T16:50:32.564Z",
+            "requestMs": 1393,
+            "streamMs": 943,
+            "totalMs": 2336,
+            "toolCalls": 1,
+            "requestBytes": 80042,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:32.564Z",
+                "status": 200,
+                "requestMs": 1393,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee28b5d8dd755-NRT"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 8,
+            "startedAt": "2026-10-09T16:50:34.989Z",
+            "requestMs": 1953,
+            "streamMs": 440,
+            "totalMs": 2393,
+            "toolCalls": 1,
+            "requestBytes": 81404,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:34.989Z",
+                "status": 200,
+                "requestMs": 1953,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee29a8a04d755-NRT"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 9,
+            "startedAt": "2026-10-09T16:51:01.950Z",
+            "requestMs": 1464,
+            "streamMs": 795,
+            "totalMs": 2259,
+            "toolCalls": 1,
+            "requestBytes": 74533,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:51:01.951Z",
+                "status": 200,
+                "requestMs": 1462,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee343080cd755-NRT"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 10,
+            "startedAt": "2026-10-09T16:51:04.246Z",
+            "requestMs": 1620,
+            "streamMs": 2386,
+            "totalMs": 4006,
+            "toolCalls": 1,
+            "requestBytes": 76329,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:51:04.247Z",
+                "status": 200,
+                "requestMs": 1619,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee3516b2bd755-NRT"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 11,
+            "startedAt": "2026-10-09T16:51:08.291Z",
+            "requestMs": 1526,
+            "streamMs": 2126,
+            "totalMs": 3652,
+            "toolCalls": 0,
+            "requestBytes": 79886,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:51:08.292Z",
+                "status": 200,
+                "requestMs": 1525,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee36aae27d755-NRT"
+                }
+              }
+            ],
+            "finishReason": "stop"
+          }
+        ],
+        "tools": [
+          {
+            "round": 0,
+            "toolCallId": "host-node-30d4c3fe-afc4-404f-a5bf-cfd286532382",
+            "toolName": "task_tree_node",
+            "startedAt": "2026-10-09T16:49:27.348Z",
+            "preHookMs": 1,
+            "executeMs": 3,
+            "postHookMs": 1,
+            "durationMs": 6,
+            "endedAt": "2026-10-09T16:49:27.354Z"
+          },
+          {
+            "round": 1,
+            "toolCallId": "call_00_y2E9DUPmfpAyR4sn6Sn76470",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:49:51.700Z",
+            "preHookMs": 2,
+            "executeMs": 16,
+            "postHookMs": 1,
+            "durationMs": 19,
+            "endedAt": "2026-10-09T16:49:51.719Z"
+          },
+          {
+            "round": 1,
+            "toolCallId": "call_01_H0EJ9ze6fQTiOM51kiSy4121",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:49:51.719Z",
+            "preHookMs": 1,
+            "executeMs": 13,
+            "postHookMs": 1,
+            "durationMs": 15,
+            "endedAt": "2026-10-09T16:49:51.734Z"
+          },
+          {
+            "round": 2,
+            "toolCallId": "call_00_CHoeDaKZAtMbuc4AmUol3666",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:49:55.053Z",
+            "preHookMs": 1,
+            "executeMs": 12,
+            "postHookMs": 2,
+            "durationMs": 15,
+            "endedAt": "2026-10-09T16:49:55.068Z"
+          },
+          {
+            "round": 2,
+            "toolCallId": "call_01_bUh4atquGQV0epNXeUMD3940",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:49:55.068Z",
+            "preHookMs": 1,
+            "executeMs": 47,
+            "postHookMs": 1,
+            "durationMs": 49,
+            "endedAt": "2026-10-09T16:49:55.117Z"
+          },
+          {
+            "round": 3,
+            "toolCallId": "call_00_H8cV1q5uV0S2s02WWnNp2168",
+            "toolName": "task_tree_subtree",
+            "startedAt": "2026-10-09T16:50:02.007Z",
+            "preHookMs": 1,
+            "executeMs": 448,
+            "postHookMs": 2,
+            "durationMs": 451,
+            "endedAt": "2026-10-09T16:50:02.458Z"
+          },
+          {
+            "round": 4,
+            "toolCallId": "call_00_Rg27f7BhLYYbq8UTKsOQ9492",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:50:20.211Z",
+            "preHookMs": 7,
+            "executeMs": 19,
+            "postHookMs": 2,
+            "durationMs": 28,
+            "endedAt": "2026-10-09T16:50:20.239Z"
+          },
+          {
+            "round": 5,
+            "toolCallId": "call_00_EZD5V3djpfTtv86DPMmr2200",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:50:23.321Z",
+            "preHookMs": 6,
+            "executeMs": 27,
+            "postHookMs": 2,
+            "durationMs": 35,
+            "endedAt": "2026-10-09T16:50:23.356Z"
+          },
+          {
+            "round": 6,
+            "toolCallId": "call_00_1OlogVSJJafyy951Vo2D0701",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:50:32.531Z",
+            "preHookMs": 9,
+            "executeMs": 22,
+            "postHookMs": 2,
+            "durationMs": 33,
+            "endedAt": "2026-10-09T16:50:32.564Z"
+          },
+          {
+            "round": 7,
+            "toolCallId": "call_00_X9SHM4VwQvMeySt3xlWA1583",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:50:34.900Z",
+            "preHookMs": 7,
+            "executeMs": 80,
+            "postHookMs": 1,
+            "durationMs": 88,
+            "endedAt": "2026-10-09T16:50:34.988Z"
+          },
+          {
+            "round": 8,
+            "toolCallId": "call_00_uXxV65tbiLqe1WbwR1295444",
+            "toolName": "read_file",
+            "startedAt": "2026-10-09T16:50:37.382Z",
+            "preHookMs": 8,
+            "executeMs": 5,
+            "postHookMs": 10,
+            "durationMs": 24,
+            "endedAt": "2026-10-09T16:50:37.406Z"
+          },
+          {
+            "round": 9,
+            "toolCallId": "call_00_PZf1Al7AhGw403jTn0Mf0941",
+            "toolName": "task_tree_subtree",
+            "startedAt": "2026-10-09T16:51:04.209Z",
+            "preHookMs": 6,
+            "executeMs": 29,
+            "postHookMs": 1,
+            "durationMs": 36,
+            "endedAt": "2026-10-09T16:51:04.245Z"
+          },
+          {
+            "round": 10,
+            "toolCallId": "call_00_3CCD0KoBuKM38oCe2KS82811",
+            "toolName": "task_tree_subtree",
+            "startedAt": "2026-10-09T16:51:08.252Z",
+            "preHookMs": 5,
+            "executeMs": 28,
+            "postHookMs": 1,
+            "durationMs": 35,
+            "endedAt": "2026-10-09T16:51:08.287Z"
+          }
+        ],
+        "runtimeMs": 80,
+        "workerPid": 12788,
+        "hooks": [
+          {
+            "event": "SessionStart",
+            "toolCallId": null,
+            "durationMs": 259
+          },
+          {
+            "event": "UserPromptSubmit",
+            "toolCallId": null,
+            "durationMs": 56401
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "host-node-30d4c3fe-afc4-404f-a5bf-cfd286532382",
+            "durationMs": 1
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "host-node-30d4c3fe-afc4-404f-a5bf-cfd286532382",
+            "durationMs": 1
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_y2E9DUPmfpAyR4sn6Sn76470",
+            "durationMs": 2
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_y2E9DUPmfpAyR4sn6Sn76470",
+            "durationMs": 1
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_01_H0EJ9ze6fQTiOM51kiSy4121",
+            "durationMs": 1
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_01_H0EJ9ze6fQTiOM51kiSy4121",
+            "durationMs": 1
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_CHoeDaKZAtMbuc4AmUol3666",
+            "durationMs": 1
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_CHoeDaKZAtMbuc4AmUol3666",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_01_bUh4atquGQV0epNXeUMD3940",
+            "durationMs": 1
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_01_bUh4atquGQV0epNXeUMD3940",
+            "durationMs": 1
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_H8cV1q5uV0S2s02WWnNp2168",
+            "durationMs": 1
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_H8cV1q5uV0S2s02WWnNp2168",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_Rg27f7BhLYYbq8UTKsOQ9492",
+            "durationMs": 7
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_Rg27f7BhLYYbq8UTKsOQ9492",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_EZD5V3djpfTtv86DPMmr2200",
+            "durationMs": 6
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_EZD5V3djpfTtv86DPMmr2200",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_1OlogVSJJafyy951Vo2D0701",
+            "durationMs": 9
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_1OlogVSJJafyy951Vo2D0701",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_X9SHM4VwQvMeySt3xlWA1583",
+            "durationMs": 7
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_X9SHM4VwQvMeySt3xlWA1583",
+            "durationMs": 1
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_uXxV65tbiLqe1WbwR1295444",
+            "durationMs": 8
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_uXxV65tbiLqe1WbwR1295444",
+            "durationMs": 10
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_PZf1Al7AhGw403jTn0Mf0941",
+            "durationMs": 6
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_PZf1Al7AhGw403jTn0Mf0941",
+            "durationMs": 1
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_3CCD0KoBuKM38oCe2KS82811",
+            "durationMs": 5
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_3CCD0KoBuKM38oCe2KS82811",
+            "durationMs": 1
+          },
+          {
+            "event": "Stop",
+            "toolCallId": null,
+            "durationMs": 8
+          }
+        ],
+        "readWaves": [
+          {
+            "round": 0,
+            "wave": 1,
+            "width": 1,
+            "itemIds": [
+              "host-node-30d4c3fe-afc4-404f-a5bf-cfd286532382"
+            ],
+            "startedAt": "2026-10-09T16:49:27.348Z",
+            "endedAt": "2026-10-09T16:49:27.354Z",
+            "durationMs": 5.664500000006228,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "host-node-30d4c3fe-afc4-404f-a5bf-cfd286532382",
+                "index": 0,
+                "startedAt": "2026-10-09T16:49:27.348Z",
+                "endedAt": "2026-10-09T16:49:27.354Z",
+                "durationMs": 5.64862500000163,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          },
+          {
+            "round": 3,
+            "wave": 1,
+            "width": 1,
+            "itemIds": [
+              "call_00_H8cV1q5uV0S2s02WWnNp2168"
+            ],
+            "startedAt": "2026-10-09T16:50:02.007Z",
+            "endedAt": "2026-10-09T16:50:02.458Z",
+            "durationMs": 450.79358300000604,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "call_00_H8cV1q5uV0S2s02WWnNp2168",
+                "index": 0,
+                "startedAt": "2026-10-09T16:50:02.007Z",
+                "endedAt": "2026-10-09T16:50:02.458Z",
+                "durationMs": 450.78312500000175,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          },
+          {
+            "round": 8,
+            "wave": 1,
+            "width": 1,
+            "itemIds": [
+              "call_00_uXxV65tbiLqe1WbwR1295444"
+            ],
+            "startedAt": "2026-10-09T16:50:37.382Z",
+            "endedAt": "2026-10-09T16:50:37.406Z",
+            "durationMs": 23.335416999994777,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "call_00_uXxV65tbiLqe1WbwR1295444",
+                "index": 0,
+                "startedAt": "2026-10-09T16:50:37.382Z",
+                "endedAt": "2026-10-09T16:50:37.406Z",
+                "durationMs": 23.298500000004424,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          },
+          {
+            "round": 9,
+            "wave": 1,
+            "width": 1,
+            "itemIds": [
+              "call_00_PZf1Al7AhGw403jTn0Mf0941"
+            ],
+            "startedAt": "2026-10-09T16:51:04.209Z",
+            "endedAt": "2026-10-09T16:51:04.245Z",
+            "durationMs": 36.459875000000466,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "call_00_PZf1Al7AhGw403jTn0Mf0941",
+                "index": 0,
+                "startedAt": "2026-10-09T16:51:04.209Z",
+                "endedAt": "2026-10-09T16:51:04.245Z",
+                "durationMs": 36.43362500000512,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          }
+        ],
+        "summaryRequests": [
+          {
+            "round": "context-summary",
+            "startedAt": "2026-10-09T16:50:23.360Z",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:23.360Z",
+                "status": 200,
+                "requestMs": 6522,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee251acd403d3-HKG",
+                  "x-request-id": "6b2d36b0-0d10-4ac2-a647-fb281f9527f1"
+                }
+              }
+            ],
+            "totalMs": 6523
+          },
+          {
+            "round": "context-summary",
+            "startedAt": "2026-10-09T16:50:37.410Z",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:37.410Z",
+                "status": 200,
+                "requestMs": 24382,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee2a9ae63d755-NRT",
+                  "x-request-id": "3626a078-6fb1-46cd-947c-933ab5f229dc"
+                }
+              }
+            ],
+            "totalMs": 24540
+          }
+        ],
+        "compactions": [
+          {
+            "phase": "completed",
+            "beforeTokens": 45190,
+            "afterTokens": 39541,
+            "chunks": 1,
+            "durationMs": 6525
+          },
+          {
+            "phase": "completed",
+            "beforeTokens": 46054,
+            "afterTokens": 37183,
+            "chunks": 1,
+            "durationMs": 24542
+          }
+        ]
+      },
+      "error": ""
+    },
+    {
+      "taskId": "nav",
+      "status": "completed",
+      "timing": {
+        "startedAt": "2026-10-09T16:48:30.604Z",
+        "requestMs": 73779,
+        "totalMs": 168885,
+        "provider": "deepseek",
+        "rounds": [
+          {
+            "round": 1,
+            "startedAt": "2026-10-09T16:49:20.159Z",
+            "requestMs": 24224,
+            "streamMs": 1512,
+            "totalMs": 25736,
+            "toolCalls": 2,
+            "requestBytes": 57160,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://api.yujianwudi.top/v1",
+                "startedAt": "2026-10-09T16:49:20.160Z",
+                "status": null,
+                "requestMs": 10537,
+                "responseHeaders": {},
+                "errorCode": "UND_ERR_CONNECT_TIMEOUT",
+                "totalMs": 10537,
+                "retryDelayMs": 312
+              },
+              {
+                "attempt": 2,
+                "endpoint": "https://yujianwudi.top/v1",
+                "startedAt": "2026-10-09T16:49:31.010Z",
+                "status": null,
+                "requestMs": 10194,
+                "responseHeaders": {},
+                "errorCode": "UND_ERR_CONNECT_TIMEOUT",
+                "totalMs": 10194,
+                "retryDelayMs": 722
+              },
+              {
+                "attempt": 3,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:49:41.926Z",
+                "status": 200,
+                "requestMs": 2457,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee1507d7ad755-NRT"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 2,
+            "startedAt": "2026-10-09T16:49:45.916Z",
+            "requestMs": 1388,
+            "streamMs": 5056,
+            "totalMs": 6444,
+            "toolCalls": 2,
+            "requestBytes": 63597,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:49:45.916Z",
+                "status": 200,
+                "requestMs": 1388,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee167db48d755-NRT"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 3,
+            "startedAt": "2026-10-09T16:49:52.828Z",
+            "requestMs": 1757,
+            "streamMs": 574,
+            "totalMs": 2331,
+            "toolCalls": 1,
+            "requestBytes": 69996,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:49:52.828Z",
+                "status": 200,
+                "requestMs": 1757,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee192daaea0b0-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 4,
+            "startedAt": "2026-10-09T16:50:06.425Z",
+            "requestMs": 1857,
+            "streamMs": 2174,
+            "totalMs": 4031,
+            "toolCalls": 1,
+            "requestBytes": 84253,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:06.426Z",
+                "status": 200,
+                "requestMs": 1856,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee1e7dd78a0b0-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 5,
+            "startedAt": "2026-10-09T16:50:10.496Z",
+            "requestMs": 1898,
+            "streamMs": 15239,
+            "totalMs": 17137,
+            "toolCalls": 1,
+            "requestBytes": 87552,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:10.496Z",
+                "status": 200,
+                "requestMs": 1898,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee2014e8ba0b0-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 6,
+            "startedAt": "2026-10-09T16:50:58.104Z",
+            "requestMs": 2107,
+            "streamMs": 725,
+            "totalMs": 2832,
+            "toolCalls": 1,
+            "requestBytes": 74923,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:58.104Z",
+                "status": 200,
+                "requestMs": 2107,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee32bd8250425-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 7,
+            "startedAt": "2026-10-09T16:51:00.988Z",
+            "requestMs": 1957,
+            "streamMs": 951,
+            "totalMs": 2908,
+            "toolCalls": 1,
+            "requestBytes": 76742,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:51:00.989Z",
+                "status": 200,
+                "requestMs": 1956,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee33cdfb60425-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 8,
+            "startedAt": "2026-10-09T16:51:03.942Z",
+            "requestMs": 1733,
+            "streamMs": 3966,
+            "totalMs": 5700,
+            "toolCalls": 1,
+            "requestBytes": 78446,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:51:03.943Z",
+                "status": 200,
+                "requestMs": 1732,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee34f5eb00425-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 9,
+            "startedAt": "2026-10-09T16:51:09.658Z",
+            "requestMs": 2172,
+            "streamMs": 3365,
+            "totalMs": 5537,
+            "toolCalls": 1,
+            "requestBytes": 81584,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:51:09.659Z",
+                "status": 200,
+                "requestMs": 2171,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee3730f400425-HKG"
+                }
+              }
+            ],
+            "finishReason": "tool_calls"
+          },
+          {
+            "round": 10,
+            "startedAt": "2026-10-09T16:51:15.228Z",
+            "requestMs": 2019,
+            "streamMs": 2234,
+            "totalMs": 4253,
+            "toolCalls": 0,
+            "requestBytes": 88090,
+            "model": "deepseek-v4.1-flash",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:51:15.229Z",
+                "status": 200,
+                "requestMs": 2018,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee3960cb7d755-NRT"
+                }
+              }
+            ],
+            "finishReason": "stop"
+          }
+        ],
+        "tools": [
+          {
+            "round": 0,
+            "toolCallId": "host-node-84865d47-2f22-41d9-8d80-9160c3b1ee02",
+            "toolName": "task_tree_node",
+            "startedAt": "2026-10-09T16:49:20.149Z",
+            "preHookMs": 1,
+            "executeMs": 4,
+            "postHookMs": 1,
+            "durationMs": 8,
+            "endedAt": "2026-10-09T16:49:20.157Z"
+          },
+          {
+            "round": 1,
+            "toolCallId": "call_00_gYQSFduAcE9wHxVQlRN23206",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:49:45.895Z",
+            "preHookMs": 2,
+            "executeMs": 14,
+            "postHookMs": 1,
+            "durationMs": 17,
+            "endedAt": "2026-10-09T16:49:45.912Z"
+          },
+          {
+            "round": 1,
+            "toolCallId": "call_01_vGmNtKbrGwRe1bAvIMDN5964",
+            "toolName": "read_file",
+            "startedAt": "2026-10-09T16:49:45.912Z",
+            "preHookMs": 0,
+            "executeMs": 2,
+            "postHookMs": 1,
+            "durationMs": 4,
+            "endedAt": "2026-10-09T16:49:45.916Z"
+          },
+          {
+            "round": 2,
+            "toolCallId": "call_00_M9RI4wCI2FfM0YNOqyoj4701",
+            "toolName": "task_tree_subtree",
+            "startedAt": "2026-10-09T16:49:52.360Z",
+            "preHookMs": 2,
+            "executeMs": 449,
+            "postHookMs": 1,
+            "durationMs": 452,
+            "endedAt": "2026-10-09T16:49:52.812Z"
+          },
+          {
+            "round": 2,
+            "toolCallId": "call_01_qROFsPLjB4aeZLw7epg80096",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:49:52.812Z",
+            "preHookMs": 1,
+            "executeMs": 13,
+            "postHookMs": 1,
+            "durationMs": 15,
+            "endedAt": "2026-10-09T16:49:52.827Z"
+          },
+          {
+            "round": 3,
+            "toolCallId": "call_00_0eaZTE2sPR6sv0FqINqq3636",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:49:55.161Z",
+            "preHookMs": 2,
+            "executeMs": 7,
+            "postHookMs": 2,
+            "durationMs": 11,
+            "endedAt": "2026-10-09T16:49:55.172Z"
+          },
+          {
+            "round": 4,
+            "toolCallId": "call_00_Fiy2W711TZrzMi2NoiN50055",
+            "toolName": "task_tree_subtree",
+            "startedAt": "2026-10-09T16:50:10.457Z",
+            "preHookMs": 6,
+            "executeMs": 28,
+            "postHookMs": 4,
+            "durationMs": 38,
+            "endedAt": "2026-10-09T16:50:10.495Z"
+          },
+          {
+            "round": 5,
+            "toolCallId": "call_00_ntVHgFnmwTN9mwYh8LDG9012",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:50:27.633Z",
+            "preHookMs": 6,
+            "executeMs": 32,
+            "postHookMs": 2,
+            "durationMs": 40,
+            "endedAt": "2026-10-09T16:50:27.673Z"
+          },
+          {
+            "round": 6,
+            "toolCallId": "call_00_8RS6SaEbQNX47EYENSTC3217",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-09T16:51:00.936Z",
+            "preHookMs": 6,
+            "executeMs": 43,
+            "postHookMs": 2,
+            "durationMs": 51,
+            "endedAt": "2026-10-09T16:51:00.987Z"
+          },
+          {
+            "round": 7,
+            "toolCallId": "call_00_iMwaH3QJgzwktvmhLTkJ7585",
+            "toolName": "task_tree_subtree",
+            "startedAt": "2026-10-09T16:51:03.897Z",
+            "preHookMs": 10,
+            "executeMs": 25,
+            "postHookMs": 9,
+            "durationMs": 44,
+            "endedAt": "2026-10-09T16:51:03.941Z"
+          },
+          {
+            "round": 8,
+            "toolCallId": "call_00_Llvqh4fvHqA06uT3dr4i2615",
+            "toolName": "task_tree_subtree",
+            "startedAt": "2026-10-09T16:51:09.642Z",
+            "preHookMs": 4,
+            "executeMs": 11,
+            "postHookMs": 0,
+            "durationMs": 15,
+            "endedAt": "2026-10-09T16:51:09.657Z"
+          },
+          {
+            "round": 9,
+            "toolCallId": "call_00_iwfnheWUg4hKrDIgf0BP0636",
+            "toolName": "task_tree_subtree",
+            "startedAt": "2026-10-09T16:51:15.195Z",
+            "preHookMs": 8,
+            "executeMs": 23,
+            "postHookMs": 2,
+            "durationMs": 33,
+            "endedAt": "2026-10-09T16:51:15.228Z"
+          }
+        ],
+        "runtimeMs": 86,
+        "workerPid": 12788,
+        "hooks": [
+          {
+            "event": "SessionStart",
+            "toolCallId": null,
+            "durationMs": 266
+          },
+          {
+            "event": "UserPromptSubmit",
+            "toolCallId": null,
+            "durationMs": 49181
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "host-node-84865d47-2f22-41d9-8d80-9160c3b1ee02",
+            "durationMs": 1
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "host-node-84865d47-2f22-41d9-8d80-9160c3b1ee02",
+            "durationMs": 1
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_gYQSFduAcE9wHxVQlRN23206",
+            "durationMs": 2
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_gYQSFduAcE9wHxVQlRN23206",
+            "durationMs": 1
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_01_vGmNtKbrGwRe1bAvIMDN5964",
+            "durationMs": 0
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_01_vGmNtKbrGwRe1bAvIMDN5964",
+            "durationMs": 1
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_M9RI4wCI2FfM0YNOqyoj4701",
+            "durationMs": 2
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_M9RI4wCI2FfM0YNOqyoj4701",
+            "durationMs": 1
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_01_qROFsPLjB4aeZLw7epg80096",
+            "durationMs": 1
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_01_qROFsPLjB4aeZLw7epg80096",
+            "durationMs": 1
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_0eaZTE2sPR6sv0FqINqq3636",
+            "durationMs": 2
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_0eaZTE2sPR6sv0FqINqq3636",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_Fiy2W711TZrzMi2NoiN50055",
+            "durationMs": 6
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_Fiy2W711TZrzMi2NoiN50055",
+            "durationMs": 4
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_ntVHgFnmwTN9mwYh8LDG9012",
+            "durationMs": 6
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_ntVHgFnmwTN9mwYh8LDG9012",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_8RS6SaEbQNX47EYENSTC3217",
+            "durationMs": 6
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_8RS6SaEbQNX47EYENSTC3217",
+            "durationMs": 2
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_iMwaH3QJgzwktvmhLTkJ7585",
+            "durationMs": 10
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_iMwaH3QJgzwktvmhLTkJ7585",
+            "durationMs": 9
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_Llvqh4fvHqA06uT3dr4i2615",
+            "durationMs": 4
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_00_iwfnheWUg4hKrDIgf0BP0636",
+            "durationMs": 8
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_00_iwfnheWUg4hKrDIgf0BP0636",
+            "durationMs": 2
+          },
+          {
+            "event": "Stop",
+            "toolCallId": null,
+            "durationMs": 7
+          }
+        ],
+        "readWaves": [
+          {
+            "round": 0,
+            "wave": 1,
+            "width": 1,
+            "itemIds": [
+              "host-node-84865d47-2f22-41d9-8d80-9160c3b1ee02"
+            ],
+            "startedAt": "2026-10-09T16:49:20.148Z",
+            "endedAt": "2026-10-09T16:49:20.157Z",
+            "durationMs": 9.060874999995576,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "host-node-84865d47-2f22-41d9-8d80-9160c3b1ee02",
+                "index": 0,
+                "startedAt": "2026-10-09T16:49:20.149Z",
+                "endedAt": "2026-10-09T16:49:20.157Z",
+                "durationMs": 8.730624999996508,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          },
+          {
+            "round": 1,
+            "wave": 1,
+            "width": 1,
+            "itemIds": [
+              "call_01_vGmNtKbrGwRe1bAvIMDN5964"
+            ],
+            "startedAt": "2026-10-09T16:49:45.912Z",
+            "endedAt": "2026-10-09T16:49:45.916Z",
+            "durationMs": 3.1332910000055563,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "call_01_vGmNtKbrGwRe1bAvIMDN5964",
+                "index": 0,
+                "startedAt": "2026-10-09T16:49:45.912Z",
+                "endedAt": "2026-10-09T16:49:45.916Z",
+                "durationMs": 3.118665999994846,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          },
+          {
+            "round": 2,
+            "wave": 1,
+            "width": 1,
+            "itemIds": [
+              "call_00_M9RI4wCI2FfM0YNOqyoj4701"
+            ],
+            "startedAt": "2026-10-09T16:49:52.360Z",
+            "endedAt": "2026-10-09T16:49:52.812Z",
+            "durationMs": 451.97741599999426,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "call_00_M9RI4wCI2FfM0YNOqyoj4701",
+                "index": 0,
+                "startedAt": "2026-10-09T16:49:52.360Z",
+                "endedAt": "2026-10-09T16:49:52.812Z",
+                "durationMs": 451.95016699998814,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          },
+          {
+            "round": 4,
+            "wave": 1,
+            "width": 1,
+            "itemIds": [
+              "call_00_Fiy2W711TZrzMi2NoiN50055"
+            ],
+            "startedAt": "2026-10-09T16:50:10.456Z",
+            "endedAt": "2026-10-09T16:50:10.495Z",
+            "durationMs": 38.840125000002445,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "call_00_Fiy2W711TZrzMi2NoiN50055",
+                "index": 0,
+                "startedAt": "2026-10-09T16:50:10.457Z",
+                "endedAt": "2026-10-09T16:50:10.495Z",
+                "durationMs": 38.81504100000893,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          },
+          {
+            "round": 7,
+            "wave": 1,
+            "width": 1,
+            "itemIds": [
+              "call_00_iMwaH3QJgzwktvmhLTkJ7585"
+            ],
+            "startedAt": "2026-10-09T16:51:03.897Z",
+            "endedAt": "2026-10-09T16:51:03.941Z",
+            "durationMs": 44.954624999983935,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "call_00_iMwaH3QJgzwktvmhLTkJ7585",
+                "index": 0,
+                "startedAt": "2026-10-09T16:51:03.897Z",
+                "endedAt": "2026-10-09T16:51:03.941Z",
+                "durationMs": 44.7175419999985,
+                "failed": false,
+                "status": "fulfilled"
+              }
+            ]
+          }
+        ],
+        "summaryRequests": [
+          {
+            "round": "context-summary",
+            "startedAt": "2026-10-09T16:49:55.176Z",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:49:55.176Z",
+                "status": 200,
+                "requestMs": 11248,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee1a189dca0b0-HKG",
+                  "x-request-id": "ef9b8ae4-4c2d-4de7-9209-7ac9d3b3efb7"
+                }
+              }
+            ],
+            "totalMs": 11249
+          },
+          {
+            "round": "context-summary",
+            "startedAt": "2026-10-09T16:50:27.676Z",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://yujianwudi.net/v1",
+                "startedAt": "2026-10-09T16:50:27.676Z",
+                "status": 200,
+                "requestMs": 30229,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a47ee26cadf8786c-HKG",
+                  "x-request-id": "2df3cc44-6122-4c16-bf69-303dd2754385"
+                }
+              }
+            ],
+            "totalMs": 30428
+          }
+        ],
+        "compactions": [
+          {
+            "phase": "completed",
+            "beforeTokens": 47017,
+            "afterTokens": 42043,
+            "chunks": 1,
+            "durationMs": 11251
+          },
+          {
+            "phase": "completed",
+            "beforeTokens": 49760,
+            "afterTokens": 37378,
+            "chunks": 1,
+            "durationMs": 30429
+          }
+        ]
+      },
+      "error": ""
+    }
+  ],
+  "workspaceTimings": {
+    "prepare": {
+      "calls": 2,
+      "totalMs": 356,
+      "maxMs": 234,
+      "lastMs": 122
+    },
+    "head": {
+      "calls": 6,
+      "totalMs": 84,
+      "maxMs": 15,
+      "lastMs": 14
+    },
+    "createWorker": {
+      "calls": 6,
+      "totalMs": 253,
+      "maxMs": 45,
+      "lastMs": 40
+    },
+    "inspectChanges": {
+      "calls": 12,
+      "totalMs": 367,
+      "maxMs": 34,
+      "lastMs": 31
+    },
+    "commit": {
+      "calls": 6,
+      "totalMs": 525,
+      "maxMs": 91,
+      "lastMs": 91
+    },
+    "integrate": {
+      "calls": 7,
+      "totalMs": 171,
+      "maxMs": 32,
+      "lastMs": 32
+    },
+    "removeWorker": {
+      "calls": 8,
+      "totalMs": 37,
+      "maxMs": 19,
+      "lastMs": 15
+    },
+    "summarize": {
+      "calls": 1,
+      "totalMs": 50,
+      "maxMs": 50,
+      "lastMs": 50
+    },
+    "cleanup": {
+      "calls": 2,
+      "totalMs": 61,
+      "maxMs": 32,
+      "lastMs": 29
+    },
+    "accept": {
+      "calls": 1,
+      "totalMs": 247,
+      "maxMs": 247,
+      "lastMs": 247
+    }
+  },
+  "gitCommandTimings": {
+    "calls": 100,
+    "totalMs": 1738,
+    "maxMs": 44,
+    "byCommand": {
+      "rev-parse": {
+        "calls": 17,
+        "totalMs": 223,
+        "maxMs": 15,
+        "lastMs": 13
+      },
+      "init": {
+        "calls": 1,
+        "totalMs": 20,
+        "maxMs": 20,
+        "lastMs": 20
+      },
+      "hash-object": {
+        "calls": 1,
+        "totalMs": 15,
+        "maxMs": 15,
+        "lastMs": 15
+      },
+      "commit-tree": {
+        "calls": 10,
+        "totalMs": 135,
+        "maxMs": 15,
+        "lastMs": 14
+      },
+      "update-ref": {
+        "calls": 1,
+        "totalMs": 17,
+        "maxMs": 17,
+        "lastMs": 17
+      },
+      "diff": {
+        "calls": 18,
+        "totalMs": 290,
+        "maxMs": 20,
+        "lastMs": 18
+      },
+      "ls-files": {
+        "calls": 14,
+        "totalMs": 193,
+        "maxMs": 17,
+        "lastMs": 11
+      },
+      "read-tree": {
+        "calls": 2,
+        "totalMs": 26,
+        "maxMs": 14,
+        "lastMs": 12
+      },
+      "add": {
+        "calls": 8,
+        "totalMs": 139,
+        "maxMs": 25,
+        "lastMs": 14
+      },
+      "write-tree": {
+        "calls": 8,
+        "totalMs": 129,
+        "maxMs": 19,
+        "lastMs": 12
+      },
+      "worktree": {
+        "calls": 12,
+        "totalMs": 365,
+        "maxMs": 44,
+        "lastMs": 13
+      },
+      "cherry-pick": {
+        "calls": 7,
+        "totalMs": 171,
+        "maxMs": 32,
+        "lastMs": 32
+      },
+      "apply": {
+        "calls": 1,
+        "totalMs": 15,
+        "maxMs": 15,
+        "lastMs": 15
+      }
+    }
+  },
+  "jobs": [
+    {
+      "taskId": "nav",
+      "status": "completed",
+      "error": "",
+      "changedFiles": [
+        "navigation.md",
+        "subtrees/P_d1a9e8d02c234637a3287f6c0fe72d78_nav_abca4de9.md",
+        "task-trees.json",
+        "versions/subtrees/P_d1a9e8d02c234637a3287f6c0fe72d78_nav_abca4de9/20261010-005115_记录nav分支已完成navigation.md及核验证据.md"
+      ],
+      "subtreeFile": "subtrees/P_d1a9e8d02c234637a3287f6c0fe72d78_nav_abca4de9.md"
+    },
+    {
+      "taskId": "dlg",
+      "status": "completed",
+      "error": "",
+      "changedFiles": [
+        "dialogue.md",
+        "subtrees/P_d1a9e8d02c234637a3287f6c0fe72d78_dlg_d0c01887.md",
+        "task-trees.json",
+        "versions/subtrees/P_d1a9e8d02c234637a3287f6c0fe72d78_dlg_d0c01887/20261010-005108_dlg分支完成dialogue.md，更新CurrentResult与Completion.md"
+      ],
+      "subtreeFile": "subtrees/P_d1a9e8d02c234637a3287f6c0fe72d78_dlg_d0c01887.md"
+    },
+    {
+      "taskId": "att",
+      "status": "completed",
+      "error": "",
+      "changedFiles": [
+        "attachments.md",
+        "subtrees/P_d1a9e8d02c234637a3287f6c0fe72d78_att_f745a151.md",
+        "task-trees.json",
+        "versions/subtrees/P_d1a9e8d02c234637a3287f6c0fe72d78_att_f745a151/20261010-005013_记录att分支已完成attachments.md的交付结果与核验证据.md"
+      ],
+      "subtreeFile": "subtrees/P_d1a9e8d02c234637a3287f6c0fe72d78_att_f745a151.md"
+    },
+    {
+      "taskId": "sub",
+      "status": "completed",
+      "error": "",
+      "changedFiles": [
+        "subtrees.md",
+        "subtrees/P_d1a9e8d02c234637a3287f6c0fe72d78_sub_ddc6e2b2.md",
+        "task-trees.json",
+        "versions/subtrees/P_d1a9e8d02c234637a3287f6c0fe72d78_sub_ddc6e2b2/20261010-005020_将子分支sub的CompletionCurrentResult更新为已完成并记录subtrees.md交付证据.md"
+      ],
+      "subtreeFile": "subtrees/P_d1a9e8d02c234637a3287f6c0fe72d78_sub_ddc6e2b2.md"
+    },
+    {
+      "taskId": "par",
+      "status": "completed",
+      "error": "",
+      "changedFiles": [
+        "parallel.md",
+        "subtrees/P_d1a9e8d02c234637a3287f6c0fe72d78_par_c9d9d2c4.md",
+        "task-trees.json",
+        "versions/subtrees/P_d1a9e8d02c234637a3287f6c0fe72d78_par_c9d9d2c4/20261010-005019_par分支完成parallel.md创建，回写Completion与CurrentResult.md"
+      ],
+      "subtreeFile": "subtrees/P_d1a9e8d02c234637a3287f6c0fe72d78_par_c9d9d2c4.md"
+    },
+    {
+      "taskId": "rec",
+      "status": "completed",
+      "error": "",
+      "changedFiles": [
+        "recovery.md",
+        "subtrees/P_d1a9e8d02c234637a3287f6c0fe72d78_rec_cb41b383.md",
+        "task-trees.json",
+        "versions/subtrees/P_d1a9e8d02c234637a3287f6c0fe72d78_rec_cb41b383/20261010-005021_记录rec分支已完成recovery.md交付及证据（缩短长行以过门禁）.md"
+      ],
+      "subtreeFile": "subtrees/P_d1a9e8d02c234637a3287f6c0fe72d78_rec_cb41b383.md"
+    }
+  ],
+  "limitation": "复用真实规划响应，真实 DeepSeek Worker、工具和 Git 在隔离工程执行；只验证链路与交付物，不证明这些示例文档的业务正确性或复杂代码任务的拆分最优性。"
+}

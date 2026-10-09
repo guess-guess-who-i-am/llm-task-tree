@@ -6,10 +6,11 @@ import { archiveCodexThread, startCodexTurn, threadDeepLink } from "./codex-run.
 import { CONTEXT_ROTATE_THRESHOLD, CONTEXT_SOFT_THRESHOLD } from "./context-policy.js";
 import { createGitWorkspaceManager } from "./parallel-worktree.js";
 import { parseTreeNodeFields } from "./tree-quality.js";
-import { startDeepSeekTurn } from './deepseek-run.js';
+import { startDeepSeekTurn, loadDeepSeekConfig } from './deepseek-run.js';
 import { nodeMaterialContext, branchMaterialNodeIds } from './node-materials.js';
 import { loadTreeRegistry } from './tree-registry.js';
 import { buildTreeSummary, readTreeSummary, TREE_CONTEXT_TOOLS, treeContextHandler, buildRunOutcomeSummary } from './tree-context.js';
+import { materializeParallelBranches, readParallelSource, recordParallelBranchResults } from './parallel-branch-tree.js';
 
 // Planner context is supplied explicitly in the prompt. Reusing an ever-growing
 // conversation made the first response increasingly slow. Keep the turn short
@@ -24,44 +25,38 @@ const ABANDONED_PLANNING_MS = PLANNER_TIMEOUT_MS + 5 * 1000;
 const WORKER_HANDOFF_PATH = ".task-tree-context/handoff.json";
 const CONTEXT_POLICIES = new Set(["reuse", "new", "selected"]);
 
-function parsePlannerEnv(text) {
-  const values = {};
-  for (const raw of String(text || "").split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const index = line.indexOf("=");
-    if (index <= 0) continue;
-    let value = line.slice(index + 1).trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
-    values[line.slice(0, index).trim()] = value;
+function assertTurnCompleted(result) {
+  if (result.status && result.status !== 'completed') {
+    const error = new Error(result.error?.message || `模型执行${result.status === 'stopped' ? '已停止' : '失败'}：${result.status}`);
+    error.threadId = result.threadId;
+    throw error;
   }
-  return values;
 }
 
 async function deepSeekPlannerConfig(projectRoot) {
-  let fileEnv = {};
-  try { fileEnv = parsePlannerEnv(await readFile(path.join(projectRoot, ".env"), "utf8")); } catch {}
-  const env = { ...fileEnv, ...process.env };
-  const baseUrl = String(env.TASK_TREE_PLANNER_BASE_URL || env.MODEL_AGENT_MAIN_BASE_URL || "").trim().replace(/\/+$/, "");
-  const apiKey = String(env.TASK_TREE_PLANNER_API_KEY || env.MODEL_AGENT_MAIN_API_KEY || "").trim();
-  const model = String(env.TASK_TREE_PLANNER_MODEL || env.MODEL_AGENT_MAIN_MODEL || PLANNER_MODEL).trim();
-  return baseUrl && apiKey && model ? { baseUrl, apiKey, model } : null;
+  try { return loadDeepSeekConfig(projectRoot, { role: 'planner' }); }
+  catch (error) {
+    if (error.message.startsWith('缺少 DeepSeek 配置')) return null;
+    throw error;
+  }
 }
 
-export async function requestDeepSeekPlanner({ projectRoot, prompt, outputSchema, onNotification, contextMessages = [] }) {
+export async function requestDeepSeekPlanner({ projectRoot, prompt, outputSchema, onNotification, contextMessages = [], sourceTree }) {
   const config = await deepSeekPlannerConfig(projectRoot);
   if (!config) return null;
   const startedAt = Date.now();
     const result = await startDeepSeekTurn({
       cwd: projectRoot, prompt, model: config.model, contextMessages,
-      environment: { MODEL_AGENT_MAIN_BASE_URL: config.baseUrl, MODEL_AGENT_MAIN_API_KEY: config.apiKey, MODEL_AGENT_MAIN_MODEL: config.model },
+      environment: { MODEL_AGENT_MAIN_BASE_URL: config.baseUrl, MODEL_AGENT_MAIN_API_KEY: config.apiKey, MODEL_AGENT_MAIN_MODEL: config.model,
+        MODEL_AGENT_MAIN_FALLBACK_BASE_URLS: config.baseUrls.slice(1).join(','),
+        ...(sourceTree ? { TASK_TREE_CONTEXT_TREE_FILE: sourceTree.path } : {}) },
       systemPrompt: '你是任务拆分器。遵守共享的全局规则、Hook 和适用技能。只规划，不执行工作或修改文件；最终只返回要求的 JSON。可读取必要的 Skill 和上下文。',
       runtimeToolNames: ['skills_list', 'skills_read', 'read_file', 'task_tree_focus', 'task_tree_node'],
-      tools: TREE_CONTEXT_TOOLS, toolHandler: treeContextHandler(projectRoot),
+      tools: TREE_CONTEXT_TOOLS, toolHandler: treeContextHandler(projectRoot, sourceTree),
       responseFormat: { type: 'json_object' }, temperature: 0.1,
       waitForCompletion: true, completionTimeoutMs: PLANNER_TIMEOUT_MS, onNotification
     });
-    if (result.status === 'failed') throw new Error(result.error?.message || 'DeepSeek Planner failed');
+    assertTurnCompleted(result);
     const output = String(result.messages?.at(-1)?.content || result.output || '').trim();
     if (!output) throw new Error("DeepSeek 返回空计划");
     return {
@@ -331,7 +326,7 @@ export function deriveParallelGoal(markdown, objective = "") {
     root: rootGoal,
     stageNodeId: stage.id || "ROOT",
     stage: stageGoal,
-    immediate: compactGoalText(objective, 320) || stageGoal || rootGoal,
+    immediate: compactGoalText(objective, 320) || compactGoalText(stage.fields.NextIdea) || stageGoal || rootGoal,
     success: compactGoalText(stage.fields.Metrics || root.fields.Metrics, 320)
   };
 }
@@ -764,6 +759,11 @@ export function buildWorkerPrompt(job, handoffPath = "", peerJobs = []) {
     "【Task Tree · Isolated Parallel Worker】",
     `Task id: ${job.taskId}`,
     `Source node: ${job.nodeId}${job.title ? ` - ${job.title}` : ""}`,
+    ...(job.subtreeFile ? [
+      `Execution node: ${job.executionNodeId}`,
+      `Branch subtree: ${job.subtreeFile}`,
+      '本轮执行目标是上述分支节点，不是全局 GraphState.Next。修改分支树时用 task_tree_subtree(action=write,path=上述路径,markdown=最新完整子树,reason=原因)，保留已有子节点。来源树仅作背景，不要把不同分支的结果都写到同一个来源节点。'
+    ] : []),
     `Task: ${job.instruction}`,
     `Advisory file context (overlap is allowed): ${job.writeSet.join(", ") || "not specified"}`,
     `Dependency note: ${job.dependencyPrompt || "none recorded; verify prerequisites before coding"}`,
@@ -920,6 +920,8 @@ function normalizePlan(output, markdown, objective = "", { minimum = 2 } = {}) {
   };
 }
 
+export { normalizePlan as normalizeParallelPlan };
+
 function publicRun(run) {
   return {
     id: run.id,
@@ -934,6 +936,8 @@ function publicRun(run) {
     completedAt: run.completedAt || "",
     totalDurationMs: Number.isFinite(run.totalDurationMs) ? run.totalDurationMs : null,
     error: run.error || "",
+    sourceTree: run.sourceTree || null,
+    branchTree: run.branchTree || null,
     planner: run.planner || null,
     jobs: (run.jobs || []).map(({ workerPath, commit, sourceCommit, ...job }) => ({
       ...job,
@@ -1051,7 +1055,7 @@ export function createParallelCodexCoordinator({
   async function materialContext(run, nodeIds) {
     if (!run.materialTreeId) {
       const registry = await loadTreeRegistry({ projectRoot, registryFile: path.join(projectRoot, 'task-trees.json'), create: false });
-      run.materialTreeId = registry.trees.find(tree => tree.path === 'task-tree.md')?.id || registry.activeMethod;
+      run.materialTreeId = run.sourceTree?.id || registry.trees.find(tree => tree.path === 'task-tree.md')?.id || registry.activeMethod;
     }
     return nodeMaterialContext({ projectRoot, treeId: run.materialTreeId, nodeIds });
   }
@@ -1062,6 +1066,16 @@ export function createParallelCodexCoordinator({
   let systemContextsPromise = null;
   let persistQueue = Promise.resolve();
   let plannerQueue = Promise.resolve();
+  let branchTreeQueue = Promise.resolve();
+
+  function stageBranches(run, appended) {
+    const next = branchTreeQueue.catch(() => {}).then(async () => {
+      await materializeParallelBranches(projectRoot, appended ? { ...run, jobs: [...run.jobs, ...appended] } : run, appended || run.jobs);
+      if (appended) run.jobs.push(...appended);
+    });
+    branchTreeQueue = next;
+    return next;
+  }
 
   async function readSystemContexts() {
     if (!systemContextsPromise) {
@@ -1206,6 +1220,16 @@ export function createParallelCodexCoordinator({
         contextKey: job.contextKey,
         persistentContext: true
       });
+      // Appended tasks may not exist in the original snapshot. Seed only their
+      // own branch file; never copy another worker's ongoing edits.
+      for (const relative of [job.subtreeFile, job.taskFile].filter(Boolean)) {
+        try { await readFile(path.join(job.workerPath, relative)); }
+        catch (error) {
+          if (error.code !== 'ENOENT') throw error;
+          await mkdir(path.dirname(path.join(job.workerPath, relative)), { recursive: true });
+          await writeFile(path.join(job.workerPath, relative), await readFile(path.join(projectRoot, relative)));
+        }
+      }
       job.contextPersistent = true;
       const rotateContext = shouldRotateContext(job);
       let handoffPath = "";
@@ -1241,8 +1265,9 @@ export function createParallelCodexCoordinator({
         prompt: buildWorkerPrompt(job, handoffPath, run.jobs),
         contextMessages: await materialContext(run, [run.goal?.stageNodeId, job.nodeId]),
         cwd: job.workerPath,
-        tools: TREE_CONTEXT_TOOLS, toolHandler: treeContextHandler(job.workerPath),
-        initialToolCalls: [{ id: `host-node-${randomUUID()}`, type: 'function', function: { name: 'task_tree_node', arguments: JSON.stringify({ nodeId: job.nodeId }) } }],
+        ...(job.subtreeFile ? { environment: { TASK_TREE_CONTEXT_TREE_FILE: job.subtreeFile } } : {}),
+        tools: TREE_CONTEXT_TOOLS, toolHandler: treeContextHandler(job.workerPath, run.sourceTree),
+        initialToolCalls: [{ id: `host-node-${randomUUID()}`, type: 'function', function: { name: 'task_tree_node', arguments: JSON.stringify({ nodeId: job.executionNodeId || job.nodeId }) } }],
         threadId: job.contextSource === "codex" ? "" : (job.contextThreadId || ""),
         forkThreadId: job.contextSource === "codex" ? (job.contextThreadId || "") : "",
         forceNewThread: rotateContext,
@@ -1264,6 +1289,11 @@ export function createParallelCodexCoordinator({
         }
       });
       if (result.timing) event(run, "worker_turn_timing", { taskId: job.taskId, nodeId: job.nodeId, timing: result.timing });
+      try { assertTurnCompleted(result); }
+      catch (error) {
+        job.output = String(result.output || '');
+        throw error;
+      }
       job.threadId = result.threadId;
       job.contextThreadId = result.threadId;
       job.contextSource = "parallel";
@@ -1412,6 +1442,7 @@ export function createParallelCodexCoordinator({
         waitForCompletion: true,
         completionTimeoutMs: PLANNER_TIMEOUT_MS
       });
+      assertTurnCompleted(result);
       conflict.resolverTiming = result.timing || null;
       if (result.timing) event(run, "merge_resolver_turn_timing", { taskId: sourceJob.taskId, timing: result.timing });
       conflict.messages.push({
@@ -1529,6 +1560,7 @@ export function createParallelCodexCoordinator({
               waitForCompletion: true,
               completionTimeoutMs: PLANNER_TIMEOUT_MS
             });
+            assertTurnCompleted(answer);
             target.threadId = answer.threadId;
             target.contextThreadId = answer.threadId;
             target.contextResumed = true;
@@ -1575,6 +1607,7 @@ export function createParallelCodexCoordinator({
                 waitForCompletion: true,
                 completionTimeoutMs: PLANNER_TIMEOUT_MS
               });
+              assertTurnCompleted(continuation);
               source.threadId = continuation.threadId;
               source.contextThreadId = continuation.threadId;
               source.contextResumed = true;
@@ -1699,7 +1732,8 @@ export function createParallelCodexCoordinator({
   async function refreshRunSummary(run) {
     // Derived from post-merge facts, not the planner's original promises.
     try {
-      const fresh = await readTreeSummary({ projectRoot, persist: true });
+      if (run.branchTree) await recordParallelBranchResults(projectRoot, run);
+      const fresh = await readTreeSummary({ projectRoot, tree: run.sourceTree, persist: true });
       run.treeSummary = { snapshotPath: fresh.snapshotPath, fingerprint: fresh.fingerprint, generatedAt: fresh.generatedAt };
       delete run.summaryWarning;
     } catch (error) { run.summaryWarning = error.message; }
@@ -1748,7 +1782,7 @@ export function createParallelCodexCoordinator({
       let result;
       try {
       const contextMessages = await plannerMaterialContext(run, nodeId);
-      result = await requestDeepSeekPlanner({ projectRoot, prompt: plannerPrompt, outputSchema, onNotification: markPlannerItem, contextMessages });
+      result = injectedStartTurn ? null : await requestDeepSeekPlanner({ projectRoot, prompt: plannerPrompt, outputSchema, onNotification: markPlannerItem, contextMessages, sourceTree: run.sourceTree });
       // Tests may inject a deterministic startTurn; production has no Codex fallback.
       if (!result && injectedStartTurn) result = await startTurn({
         prompt: plannerPrompt,
@@ -1781,6 +1815,7 @@ export function createParallelCodexCoordinator({
           onNotification: markPlannerItem
         });
       if (!result) throw new Error("缺少 DeepSeek Planner 配置：请在项目 .env 设置 MODEL_AGENT_MAIN_BASE_URL、MODEL_AGENT_MAIN_API_KEY、MODEL_AGENT_MAIN_MODEL");
+      assertTurnCompleted(result);
         if (result.timing) plannerTiming.codexTurn = result.timing;
       } catch (error) {
         plannerTiming.completedMs = Date.now() - plannerStartedAt;
@@ -1826,8 +1861,11 @@ export function createParallelCodexCoordinator({
 
   async function generatePlan(run, objective) {
     try {
-      const markdown = await readFile(path.join(projectRoot, "task-tree.md"), "utf8");
-      const treeSummary = await readTreeSummary({ projectRoot, markdown, persist: true });
+      const source = await readParallelSource(projectRoot, run.sourceSelection);
+      run.sourceTree = source.tree;
+      let markdown = source.markdown;
+      if (source.nodeId) markdown = markdown.replace(/(^- (?:Current|Next):)[^\r\n]*/gm, `$1 ${source.nodeId}`);
+      const treeSummary = await readTreeSummary({ projectRoot, tree: source.tree, markdown, persist: true });
       run.objective = cleanObjective(objective);
       run.goal = deriveParallelGoal(markdown, objective);
       [run.goal.history, run.contextOptions] = await Promise.all([
@@ -1852,6 +1890,8 @@ export function createParallelCodexCoordinator({
       run.planner = { status: "completed", threadId: result.threadId, turnId: result.turnId,
         contextResumed: Boolean(result.resumed), error: "", output: String(result.output || ""),
         timing: result.plannerTiming || run.planner?.timing || null };
+      await stageBranches(run);
+      event(run, 'branch_tree_created', { treeId: run.branchTree.id, path: run.branchTree.path });
       run.status = "queued";
       event(run, "plan_started", {
         jobs: run.jobs.map((job) => job.taskId),
@@ -1982,12 +2022,13 @@ export function createParallelCodexCoordinator({
   }
 
   return {
-    async plan({ objective = "" } = {}) {
+    async plan({ objective = "", treeId, subtree, nodeId } = {}) {
       const now = new Date().toISOString();
       const run = {
         id: randomUUID(),
         status: "planning",
         objective: cleanObjective(objective),
+        sourceSelection: { treeId, subtree, nodeId },
         summary: "",
         createdAt: now,
         updatedAt: now,
@@ -2016,8 +2057,8 @@ export function createParallelCodexCoordinator({
       if (!additions.has(run.id)) additions.set(run.id, new Set());
       additions.get(run.id).add(token);
       try {
-      const markdown = await readFile(path.join(projectRoot, "task-tree.md"), "utf8");
-      const treeSummary = await readTreeSummary({ projectRoot, markdown });
+      const { markdown } = await readParallelSource(projectRoot, run.sourceSelection);
+      const treeSummary = await readTreeSummary({ projectRoot, tree: run.sourceTree, markdown });
       const submittedJobs = run.jobs || [];
       const selectedNodeId = cleanId(nodeId || run.goal?.stageNodeId);
       const { plan, result } = await requestPlan(run,
@@ -2043,8 +2084,12 @@ export function createParallelCodexCoordinator({
       if (!["queued", "preparing", "running", "failed"].includes(run.status)) {
         throw new Error("本轮已在收尾，请在下一轮添加任务");
       }
-      const markdown = await readFile(path.join(projectRoot, "task-tree.md"), "utf8");
-      const treeSummary = await readTreeSummary({ projectRoot, markdown });
+      const token = randomUUID();
+      if (!additions.has(run.id)) additions.set(run.id, new Set());
+      additions.get(run.id).add(token);
+      try {
+      const { markdown } = await readParallelSource(projectRoot, run.sourceSelection);
+      const treeSummary = await readTreeSummary({ projectRoot, tree: run.sourceTree, markdown });
       const jobsInput = Array.isArray(changes.jobs) ? changes.jobs : [];
       run.contextOptions = mergeContextOptions(await readContextOptions(runsDir, run.id), run.contextOptions || []);
       const existingIds = new Set(run.jobs.map((job) => job.taskId.toLowerCase()));
@@ -2064,7 +2109,8 @@ export function createParallelCodexCoordinator({
       if (!["queued", "preparing", "running", "failed"].includes(run.status)) {
         throw new Error("本轮已在收尾，请在下一轮添加任务");
       }
-      run.jobs.push(...appended);
+      if (run.branchTree) await stageBranches(run, appended);
+      else run.jobs.push(...appended);
       wakeups.get(run.id)?.();
       event(run, "branches_appended", { taskIds: appended.map((job) => job.taskId) });
       await persist(run);
@@ -2073,6 +2119,10 @@ export function createParallelCodexCoordinator({
         pending.set(run.id, promise);
       }
       return publicRun(run);
+      } finally {
+        additions.get(run.id)?.delete(token);
+        wakeups.get(run.id)?.();
+      }
     },
 
     async start(input) {

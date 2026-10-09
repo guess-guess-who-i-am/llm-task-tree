@@ -103,10 +103,10 @@ export const TREE_CONTEXT_TOOLS = [
     parameters: { type: 'object', properties: {}, additionalProperties: false } } }
 ];
 
-export function treeContextHandler(projectRoot) {
+export function treeContextHandler(projectRoot, tree = { id: 'method', path: 'task-tree.md' }) {
   return async name => {
-    if (name === 'task_tree_summary') return readTreeSummary({ projectRoot });
-    if (name === 'task_tree_read') return { treePath: 'task-tree.md', markdown: await readFile(path.join(projectRoot, 'task-tree.md'), 'utf8') };
+    if (name === 'task_tree_summary') return readTreeSummary({ projectRoot, tree });
+    if (name === 'task_tree_read') return { treeId: tree.id, treePath: tree.path, markdown: await readFile(path.join(projectRoot, tree.path), 'utf8') };
     throw new Error(`未知上下文工具 ${name}`);
   };
 }

@@ -17,7 +17,7 @@ if (!existsSync(configFile)) {
 
 const config = JSON.parse((await readFile(configFile, "utf8")).replace(/^\uFEFF/, ""));
 const sharedKit = String(config.sharedKitDir || "");
-const entry = sharedKit ? path.join(sharedKit, "scripts", "mcp-server.mjs") : "";
+const entry = sharedKit ? path.join(path.resolve(stubDir, sharedKit), "scripts", "mcp-server.mjs") : "";
 if (!entry || !existsSync(entry)) {
   process.stderr.write(`shared kit MCP server missing: ${entry || "(no sharedKitDir)"}\n`);
   process.exit(1);

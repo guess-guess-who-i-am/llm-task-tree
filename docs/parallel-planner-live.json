@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "fixture": "/var/folders/q1/fjylgh7x6cx04ljtdp550ls40000gn/T/parallel-planner-live-vhhcCN",
+  "wallMs": 46052,
+  "jobCount": 6,
+  "readyCount": 6,
+  "reusedProbeThread": "deepseek-9d910241-18e4-4012-839c-56c15baebec3",
+  "parserCorrection": "测试复用生产计划解析器；原响应含说明及 JSON 代码块，生产解析器可正常提取。未重发模型请求。",
+  "limitation": "真实 API 只读规划探针，未执行真实模型 Worker；完整工具与合并链路另由本机模型替身验证。"
+}

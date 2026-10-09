@@ -8,7 +8,13 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const MAX_GIT_OUTPUT = 64 * 1024 * 1024;
-const RUNTIME_PATHS = [".task-tree-runs/", ".task-tree-scopes/", ".task-tree-thread", ".task-tree-threads.json"];
+const RUNTIME_PATHS = [".task-tree-runs/", ".task-tree-scopes/", ".task-tree-thread", ".task-tree-threads.json",
+  '.task-tree-server.pid', '.task-tree-server.log', '.task-tree-port', '.task-tree-ports'];
+const projectUntracked = files => files.filter(relative => {
+  const name = path.posix.basename(relative);
+  if (/^\.env(?:\..*)?$/.test(name) && name !== '.env.example') return false;
+  return !RUNTIME_PATHS.some(reserved => relative === reserved || (reserved.endsWith('/') && relative.startsWith(reserved)));
+});
 
 const slash = (value) => String(value || "").replace(/\\/g, "/").replace(/^\.\//, "");
 
@@ -17,13 +23,15 @@ async function gitCommand(cwd, args, options = {}) {
   const startedAt = observer ? Date.now() : 0;
   let failed = false;
   try {
-    const result = await execFileAsync("git", args, {
+    const operation = execFileAsync("git", args, {
       cwd,
       windowsHide: true,
       maxBuffer: MAX_GIT_OUTPUT,
       encoding: options.encoding || "utf8",
       env: { ...process.env, ...(options.env || {}) }
     });
+    operation.child.stdin.end();
+    const result = await operation;
     return result.stdout;
   } catch (error) {
     failed = true;
@@ -55,7 +63,7 @@ async function snapshotPaths(projectRoot, onTiming = null) {
   const untracked = splitZero(await gitCommand(projectRoot, ["ls-files", "--others", "--exclude-standard", "-z"], { onTiming }));
   return [...new Set([
     ...tracked,
-    ...untracked.filter((relative) => !RUNTIME_PATHS.some((reserved) => relative === reserved || relative.startsWith(reserved)))
+    ...projectUntracked(untracked)
   ])];
 }
 
@@ -67,7 +75,28 @@ export function createGitWorkspaceManager({ projectRoot, tempRoot = os.tmpdir() 
   const contextLockDir = path.join(baseDir, "context-locks");
   const activeContextLocks = new Map();
   let gitTimingObserver = null;
+  let bootstrap = null;
   const git = (cwd, args, options = {}) => gitCommand(cwd, args, { ...options, onTiming: gitTimingObserver });
+  const identity = {
+    GIT_AUTHOR_NAME: 'Task Tree', GIT_AUTHOR_EMAIL: 'task-tree@local',
+    GIT_COMMITTER_NAME: 'Task Tree', GIT_COMMITTER_EMAIL: 'task-tree@local'
+  };
+
+  function ensureRepository() {
+    if (!bootstrap) bootstrap = (async () => {
+      try { await git(projectRoot, ['rev-parse', '--git-dir']); }
+      catch { await git(projectRoot, ['init', '-q']); }
+      try { await git(projectRoot, ['rev-parse', '--verify', 'HEAD']); }
+      catch {
+        // Create only an empty anchor commit. Actual project content is captured
+        // by the separate snapshot index; never stage or commit the user's index.
+        const emptyTree = String(await git(projectRoot, ['hash-object', '-t', 'tree', '--stdin', '-w'])).trim();
+        const commit = String(await git(projectRoot, ['commit-tree', emptyTree, '-m', 'Initialize parallel workspace'], { env: identity })).trim();
+        await git(projectRoot, ['update-ref', 'HEAD', commit, '']);
+      }
+    })().catch(error => { bootstrap = null; throw error; });
+    return bootstrap;
+  }
 
   const runDir = (runId) => path.join(baseDir, safeSegment(runId));
   const contextPath = (contextKey) => path.join(contextDir, safeSegment(contextKey));
@@ -142,6 +171,7 @@ export function createGitWorkspaceManager({ projectRoot, tempRoot = os.tmpdir() 
     },
 
     async prepare(runId) {
+      await ensureRepository();
       const directory = runDir(runId);
       const integrationPath = path.join(directory, "integration");
       const indexPath = path.join(directory, "snapshot.index");
@@ -196,13 +226,14 @@ export function createGitWorkspaceManager({ projectRoot, tempRoot = os.tmpdir() 
     async inspectChanges(workerPath, baseCommit, writeSet) {
       const tracked = splitZero(await git(workerPath, ["diff", "--name-only", "-z", baseCommit, "--"]));
       const untracked = splitZero(await git(workerPath, ["ls-files", "--others", "--exclude-standard", "-z"]));
-      const changedFiles = [...new Set([...tracked, ...untracked])].sort();
+      const changedFiles = [...new Set([...tracked, ...projectUntracked(untracked)])].sort();
       return { changedFiles, violations: [] };
     },
 
     async commit(cwd, message, baseCommit = "") {
-      await git(cwd, ["add", "-A"]);
       const base = baseCommit || await this.head(cwd);
+      const { changedFiles } = await this.inspectChanges(cwd, base);
+      if (changedFiles.length) await git(cwd, ['add', '-A', '--', ...changedFiles]);
       const tree = String(await git(cwd, ["write-tree"])).trim();
       if (tree === String(await git(cwd, ["rev-parse", `${base}^{tree}`])).trim()) return base;
       const identity = {
@@ -218,7 +249,7 @@ export function createGitWorkspaceManager({ projectRoot, tempRoot = os.tmpdir() 
     async integrate(integrationPath, commit, sourceCommit = "") {
       if (!commit || commit === sourceCommit) return { conflicts: [] };
       try {
-        await git(integrationPath, ["cherry-pick", commit]);
+        await git(integrationPath, ["cherry-pick", commit], { env: identity });
         return { conflicts: [] };
       } catch (error) {
         const conflicts = splitZero(await git(integrationPath, ["diff", "--name-only", "--diff-filter=U", "-z"]).catch(() => ""));

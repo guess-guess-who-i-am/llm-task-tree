@@ -136,10 +136,10 @@
 - Metrics: 同文件和任务树保留双方结果；超过四个任务并发；追加即时执行；无需审批、测试或审核阶段。
 - Notes:
 - CodeLoc:
-- CurrentResult: 工具无轮数上限、摘要交接及全文恢复通过115项回归与端到端重启；真实摘要质量和提速未验证。
-- RootCauseAnalysis: 工具硬限40轮且未接摘要。
+- CurrentResult: 工程入口与DeepSeek六路子树、自动合入通过；复杂代码质量及稳定提速未验证。
+- RootCauseAnalysis: 入口错指；Git、分支落盘和失败状态未贯通。
 - CaseStudy:
-- NextIdea: 在真实业务任务中观察拆分质量与冲突协商耗时。
+- NextIdea: 用工程N3试跑代码改进，观察拆分质量与提交Hook耗时。
 - SelectedSkills:
 - Folded: true
 - SubtreeFile: subtrees/N3-subtree.md

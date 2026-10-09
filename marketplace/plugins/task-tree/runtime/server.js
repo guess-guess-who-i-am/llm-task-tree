@@ -5019,7 +5019,12 @@ const handleRequest = async (req, res) => {
     if (reqPath === "/api/codex/parallel/plan" && req.method === "POST") {
       try {
         const body = JSON.parse(await readBody(req));
-        const run = await parallelCodex.plan({ objective: typeof body.objective === "string" ? body.objective.trim() : "" });
+        const run = await parallelCodex.plan({
+          objective: typeof body.objective === "string" ? body.objective.trim() : "",
+          treeId: typeof body.treeId === 'string' ? body.treeId : undefined,
+          nodeId: typeof body.nodeId === 'string' ? body.nodeId : undefined,
+          subtree: typeof body.subtree === 'string' ? body.subtree : undefined
+        });
         jsonResponse(res, 201, { run });
       } catch (error) {
         jsonResponse(res, 400, { error: error.message });

@@ -57,16 +57,6 @@
         </div>
       </header>
 
-      <nav id="workspaceBanner" class="workspaceBanner hidden" aria-label="主树与子树切换" aria-busy="false">
-        <span id="workspaceBannerTitle">主树</span>
-        <span class="workspaceBannerControls">
-          <span id="workspaceSwitchStatus" role="status" hidden></span>
-          <button type="button" id="workspaceBannerEnterBtn" class="workspaceNavButton" hidden>去到子树 →</button>
-          <button type="button" id="workspaceBannerExitBtn" class="workspaceNavButton" hidden>← 返回主树</button>
-          <a id="workspaceBannerOpenBtn" target="_blank" rel="noopener" hidden>独立窗口</a>
-        </span>
-      </nav>
-
       <main class="layout">
         <aside class="knowledgePane" aria-label="Knowledge base" aria-hidden="true">
           <div class="paneHeader">
@@ -148,6 +138,11 @@
                 <button type="button" class="graphViewBtn is-active" data-graph-view="tree">关系图</button>
                 <button type="button" class="graphViewBtn" data-graph-view="flow">执行流程</button>
               </div>
+              <nav id="workspaceBanner" class="workspaceNavigation" aria-label="主树与子树切换" aria-busy="false">
+                <span id="workspaceSwitchStatus" role="status" hidden></span>
+                <button type="button" id="workspaceBannerEnterBtn" class="workspaceNavButton" hidden>去到子树 →</button>
+                <button type="button" id="workspaceBannerExitBtn" class="workspaceNavButton" hidden>← 返回主树</button>
+              </nav>
             </div>
             <span class="graphPaneStatusRow">
               <span class="workspaceSummaryBar" aria-label="辅助信息状态">
@@ -166,6 +161,7 @@
               <span id="linkState"></span>
               <span id="saveState">已加载</span>
               <span class="graphExportBtns">
+                <a id="workspaceBannerOpenBtn" class="graphExportBtn" target="_blank" rel="noopener" title="在独立窗口打开当前子树" aria-label="在独立窗口打开当前子树" hidden>↗</a>
                 <button type="button" id="exportTreeSvgBtn" class="graphExportBtn" title="导出关系图 SVG（自动撑高+树形排版，样式与界面一致）" aria-label="导出关系图 SVG">⤓</button>
                 <button type="button" id="exportFlowSvgBtn" class="graphExportBtn" title="导出执行流程脚本为 SVG 矢量图" aria-label="导出执行流程 SVG">⤓</button>
               </span>

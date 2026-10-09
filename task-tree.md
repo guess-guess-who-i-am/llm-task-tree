@@ -48,8 +48,8 @@
 - Metrics:
 - Notes:
 - CodeLoc:
-- CurrentResult: 编辑框拖粘资料、随Git恢复已验证。底部缩为复制按钮和可折叠链，21项浏览器回归及安装版测试通过；易读性待实际反馈。
-- RootCauseAnalysis: 旧底栏重复显示整段命令；窄屏网格溢出遮挡按钮，改为主区域内部滚动。
+- CurrentResult: 编辑框拖粘资料与Git恢复已验证；执行链可折叠复制，子树切换改为标题栏按钮，不占独立行。21项浏览器及安装版测试通过；易读性待反馈。
+- RootCauseAnalysis: 独立色条挤占树空间；导航收进标题栏，长状态不再挤压标题。
 - CaseStudy:
 - NextIdea:
 - SelectedSkills:

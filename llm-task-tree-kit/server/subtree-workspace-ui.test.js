@@ -448,17 +448,21 @@ test('folded-root lens can enter the independent subtree and navigate its childr
   assert.equal(await page.locator('.focusLensNodeId').innerText(), 'N1_A');
 });
 
-test('clear one-click subtree navigation works on desktop and mobile', async t => {
+test('compact subtree navigation stays in the existing header on desktop and mobile', async t => {
   for (const width of [1440, 390]) {
     const page = await pageFor(t, width);
     const enterButton = page.locator('[data-node-id="N1"] [data-action="edit-subtree"]');
     assert.match(await enterButton.innerText(), /去到子树/);
     assert.equal(await enterButton.isVisible(), true);
     const primary = page.locator('#workspaceBannerEnterBtn');
+    assert.equal(await primary.evaluate(el => Boolean(el.closest('.graphPane > .paneHeader'))), true, 'navigation must share the existing header, not consume a separate row');
+    assert.equal(await page.locator('#app > #workspaceBanner').count(), 0);
+    assert.ok((await page.locator('.layout').boundingBox()).y <= (await page.locator('.topbar').boundingBox()).height + 1);
     assert.equal(await primary.isVisible(), true);
     assert.match(await primary.innerText(), /去到子树/);
     const entryBounds = await primary.boundingBox();
-    assert.ok(entryBounds.height >= 40 && entryBounds.width >= 100, 'navigation must not be another tiny icon');
+    assert.ok(entryBounds.height >= 28 && entryBounds.height <= 34 && entryBounds.width <= 140, 'navigation must be a compact readable button');
+    assert.equal(await page.locator('#workspaceBanner button:visible').count(), 1);
     await primary.focus();
     await page.keyboard.press('Enter');
     await page.waitForSelector('[data-node-id="N1_A"]');
@@ -467,11 +471,14 @@ test('clear one-click subtree navigation works on desktop and mobile', async t =
     assert.equal(await back.isVisible(), true);
     assert.match(await back.innerText(), /返回主树/);
     const bounds = await back.boundingBox();
-    assert.ok(bounds.height >= 40 && bounds.width >= 100);
+    assert.ok(bounds.height >= 28 && bounds.height <= 34 && bounds.width <= 140);
+    assert.equal(await page.locator('#workspaceBanner button:visible').count(), 1);
     assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width, 'back button must remain on-screen');
     assert.equal(await back.evaluate(el => el === document.activeElement), true);
+    assert.ok((await page.locator('.graphPaneHeadRow > strong').boundingBox()).height <= 24, 'the title must not wrap into a vertical column');
+    assert.ok((await page.locator('.graphViewToggle').boundingBox()).height <= 34, 'view controls must remain one line');
     await mkdir(path.join(source, 'artifacts'), { recursive: true });
-    await page.screenshot({ path: path.join(source, `artifacts/subtree-navigation-${width}.png`) });
+    await page.screenshot({ path: path.join(source, `artifacts/compact-subtree-navigation-${width}.png`) });
     await back.click();
     await page.waitForSelector('[data-node-id="ROOT"]');
     await page.waitForFunction(() => document.querySelector('#workspaceBanner')?.getAttribute('aria-busy') === 'false');

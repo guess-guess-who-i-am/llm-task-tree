@@ -394,7 +394,6 @@ const els = {
   projectSwitchName: document.querySelector("#projectSwitchName"),
   projectMenu: document.querySelector("#projectMenu"),
   workspaceBanner: document.querySelector("#workspaceBanner"),
-  workspaceBannerTitle: document.querySelector("#workspaceBannerTitle"),
   workspaceBannerExitBtn: document.querySelector("#workspaceBannerExitBtn"),
   workspaceBannerEnterBtn: document.querySelector("#workspaceBannerEnterBtn"),
   workspaceSwitchStatus: document.querySelector("#workspaceSwitchStatus"),
@@ -2168,17 +2167,7 @@ function renderWorkspaceBanner() {
   if (!els.workspaceBanner) return;
   const inSubtree = workspaceMode === "subtree" && activeSubtreePath;
   const entry = inSubtree ? null : workspaceEntryNode();
-  els.workspaceBanner.classList.remove("hidden");
-  els.workspaceBanner.classList.toggle("is-subtree", Boolean(inSubtree));
   els.workspaceBanner.setAttribute('aria-busy', String(workspaceSwitchInFlight));
-  if (inSubtree && els.workspaceBannerTitle) {
-    const root = nodes.find(node => node.id === activeSubtreeFoldRoot);
-    els.workspaceBannerTitle.textContent = `子树 · ${root?.title || activeSubtreeFoldRoot}`;
-    els.workspaceBannerTitle.title = `${activeSubtreePath}（主树保持折叠）`;
-  } else if (els.workspaceBannerTitle) {
-    els.workspaceBannerTitle.textContent = entry ? `主树 · 可进入「${entry.title || entry.id}」` : '主树 · 点击折叠节点的「去到子树」进入分支';
-    els.workspaceBannerTitle.title = '';
-  }
   if (els.workspaceBannerEnterBtn) {
     els.workspaceBannerEnterBtn.hidden = Boolean(inSubtree);
     els.workspaceBannerEnterBtn.disabled = workspaceSwitchInFlight || !entry;
@@ -2187,6 +2176,7 @@ function renderWorkspaceBanner() {
   if (els.workspaceBannerExitBtn) {
     els.workspaceBannerExitBtn.hidden = !inSubtree;
     els.workspaceBannerExitBtn.disabled = workspaceSwitchInFlight;
+    els.workspaceBannerExitBtn.title = `返回主树（当前子树：${activeSubtreePath}）`;
   }
   if (els.subtitle) {
     els.subtitle.textContent = inSubtree
@@ -5727,6 +5717,7 @@ function scheduleSave(delay = 450) {
 
 function setSaveState(text) {
   els.saveState.textContent = text;
+  els.saveState.title = text;
 }
 
 function sanitizeId(value) {

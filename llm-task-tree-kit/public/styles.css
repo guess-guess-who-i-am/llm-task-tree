@@ -252,45 +252,32 @@ h1 {
   transition: grid-template-columns 0.18s ease;
 }
 
-.workspaceBanner {
+.workspaceNavigation {
   flex-shrink: 0;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 60px;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--line);
-  background: #f0f6f3;
-  font-size: 13px;
+  gap: 4px;
 }
 
-.workspaceBanner.is-subtree { background: #fff8e8; }
-
-.workspaceBanner.hidden {
-  display: none;
-}
-
-#workspaceBannerTitle { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
-.workspaceBannerControls { display: flex; flex-shrink: 0; align-items: center; gap: 8px; }
-#workspaceBannerOpenBtn { color: #24537d; font-size: 12px; white-space: nowrap; }
+#workspaceBannerOpenBtn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+#workspaceBannerOpenBtn[hidden] { display: none; }
 
 .workspaceNavButton {
   flex-shrink: 0;
-  min-height: 44px;
-  min-width: 128px;
-  padding: 10px 18px;
-  border: 1px solid var(--accent);
-  border-radius: 9px;
-  background: var(--accent);
-  color: #fff;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--accent);
   cursor: pointer;
-  font-size: 14px;
-  font-weight: 650;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
   transition: background 120ms ease, box-shadow 120ms ease;
 }
 
-.workspaceNavButton:hover:not(:disabled) { background: #105447; }
+.workspaceNavButton:hover:not(:disabled) { background: var(--focus); border-color: var(--accent); }
 .workspaceNavButton:disabled { opacity: .5; cursor: default; }
 .workspaceNavButton:focus-visible,
 .subtreeEnterButton:focus-visible,
@@ -298,7 +285,7 @@ h1 {
   outline: 3px solid #277965;
   outline-offset: 3px;
 }
-#workspaceSwitchStatus { color: var(--muted); font-size: 12px; }
+#workspaceSwitchStatus { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 
 .graphPane { view-transition-name: task-tree-workspace; }
 :root[data-workspace-direction="exit"] { --workspace-switch-offset: -18px; }
@@ -322,12 +309,6 @@ h1 {
   ::view-transition-group(task-tree-workspace),
   ::view-transition-old(task-tree-workspace),
   ::view-transition-new(task-tree-workspace) { animation: none; }
-}
-@media (max-width: 600px) {
-  .workspaceBanner { flex-wrap: wrap; padding: 10px 12px; gap: 8px; }
-  #workspaceBannerTitle { flex-basis: 100%; }
-  .workspaceBannerControls { width: 100%; flex-wrap: wrap; }
-  .workspaceNavButton { flex: 1; }
 }
 
 .chainRunBtn {
@@ -747,11 +728,16 @@ button.chainAddBtn.active {
 
 .graphPaneStatusRow {
   display: flex;
+  flex: 1;
   align-items: center;
   gap: 10px;
   min-width: 0;
   white-space: nowrap;
 }
+
+.graphPaneStatusRow > #saveState { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.graphPaneStatusRow > .workspaceSummaryBar,
+.graphPaneStatusRow > .graphExportBtns { flex-shrink: 0; }
 
 .workspaceSummaryBar {
   display: inline-flex;
@@ -1375,9 +1361,13 @@ button.chainAddBtn.active {
 
 .graphPaneHeadRow {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
+
+.graphPaneHeadRow > strong { white-space: nowrap; }
+.graphPaneHeadRow > .graphViewToggle { flex-shrink: 0; }
 
 .graphViewToggle {
   display: inline-flex;
@@ -6750,7 +6740,6 @@ body.snapshotMode .paneResizeHandle,
 body.snapshotMode .paneEdgeToggle,
 body.snapshotMode .graphPane > .paneHeader,
 body.snapshotMode .chainDock,
-body.snapshotMode .workspaceBanner,
 body.snapshotMode .floatingPanel {
   display: none !important;
 }

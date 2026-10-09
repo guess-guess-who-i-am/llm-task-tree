@@ -7,13 +7,58 @@ import path from "node:path";
 import { promisify } from "node:util";
 import {
   buildPlannerPrompt,
+  buildBranchInputContext,
   buildWorkerPrompt,
   createParallelCodexCoordinator,
   validateParallelJobs
 } from "./codex-coordinator.js";
 import { createGitWorkspaceManager } from "./parallel-worktree.js";
+import { saveAttachment } from './chat-attachments.js';
+import { updateNodeMaterial } from './node-materials.js';
 
 const exec = promisify(execFile);
+
+test('planner receives branch materials; concurrent workers receive shared-stage and own-node materials from the source project', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'parallel-node-materials-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(path.join(root, 'task-tree.md'), '# LLM Task Graph\n## ROOT - 项目\n## N1 - 阶段\n## A - 子任务\n## B - 子任务\n## OTHER - 无关\n# GraphState\n- Current: N1\n- Next: N1\n# Edges\n## E1 - 分支\n- Endpoints: N1, A\n## E2 - 分支\n- Endpoints: N1, B\n');
+  for (const [nodeId, content, enabled] of [['N1', 'SHARED_STAGE_MATERIAL', true], ['A', 'A_ONLY_MATERIAL', true], ['B', 'B_ONLY_MATERIAL', true], ['A', 'DISABLED_MATERIAL', false], ['OTHER', 'UNRELATED_MATERIAL', true]]) {
+    const scope = { projectRoot: root, treeId: 'method', nodeId };
+    const ref = await saveAttachment({ ...scope, name: '资料.txt', bytes: Buffer.from(content) });
+    await updateNodeMaterial(scope, { action: 'add', id: ref.id, enabled });
+  }
+  let active = 0, maximum = 0;
+  const jobs = ['A', 'B'].map(nodeId => ({ taskId: nodeId, nodeId, title: nodeId, instruction: '完成独立子任务', writeSet: [], dependsOn: [] }));
+  const startTurn = async options => {
+    const context = JSON.stringify(options.contextMessages);
+    assert.match(context, /SHARED_STAGE_MATERIAL/);
+    assert.doesNotMatch(context, /DISABLED_MATERIAL|UNRELATED_MATERIAL/);
+    if (options.prompt.includes('Automatic Parallel Planner')) {
+      assert.match(context, /A_ONLY_MATERIAL/); assert.match(context, /B_ONLY_MATERIAL/);
+      return { threadId: 'planner', output: JSON.stringify({ jobs }) };
+    }
+    const id = options.prompt.match(/^Task id: (.+)$/m)[1];
+    assert.match(context, new RegExp(`${id}_ONLY_MATERIAL`));
+    assert.doesNotMatch(context, new RegExp(`${id === 'A' ? 'B' : 'A'}_ONLY_MATERIAL`));
+    assert.ok(!options.cwd.startsWith(root), 'worker has no copied private attachment directory');
+    active++; maximum = Math.max(maximum, active);
+    await options.onAccepted?.({ threadId: `thread-${id}`, turnId: id });
+    await new Promise(resolve => setTimeout(resolve, 20)); active--;
+    return { threadId: `thread-${id}`, output: '完成' };
+  };
+  const workspace = {
+    async prepare() { return { integrationPath: 'integration', snapshotCommit: 'snapshot' }; },
+    async head() { return 'head'; }, async createWorker(_, id) { return `isolated/${id}`; },
+    async inspectChanges() { return { changedFiles: [], violations: [] }; }, async commit() { return null; },
+    async integrate() { return { conflicts: [] }; }, async removeWorker() {},
+    async summarize() { return { changedFiles: [], stat: '', patchPreview: '', patchTruncated: false }; },
+    async accept() { return { appliedFiles: [] }; }, async cleanup() {}
+  };
+  const coordinator = createParallelCodexCoordinator({ projectRoot: root, startTurn, workspace });
+  const planned = await coordinator.plan({ objective: '并行完成两项' });
+  const finished = await coordinator.wait(planned.id); await coordinator.drain();
+  assert.equal(finished.status, 'accepted', finished.error); assert.equal(maximum, 2);
+});
 
 const shared = {
   taskId: "A",
@@ -40,7 +85,7 @@ test("planner validation allows the requested parallel freedom but keeps a runna
   ]), /循环依赖/);
 });
 
-test("planner receives only decision-relevant context while workers keep the complete tree", () => {
+test("planner and workers receive tree maps and can choose full reads without raw histories", () => {
   const marker = "END-OF-COMPLETE-CONTEXT";
   const tree = [
     "# LLM Task Graph",
@@ -50,8 +95,8 @@ test("planner receives only decision-relevant context while workers keep the com
     "- Problem: 拆分当前工作",
     "- CurrentResult: 当前阶段事实",
     "## N2 - 无关历史",
-    `- Notes: ${"x".repeat(50000)}`,
-    `- CurrentResult: ${marker}`,
+    `- Notes: ${marker}${"x".repeat(50000)}`,
+    '- CurrentResult: 其它分支的最新事实',
     "# GraphState",
     "- Current: N1",
     "- Next: N1",
@@ -73,11 +118,13 @@ test("planner receives only decision-relevant context while workers keep the com
 
   const worker = buildWorkerPrompt(validateParallelJobs([{
     ...shared,
-    branchContext: tree,
+    branchContext: buildBranchInputContext(shared, { markdown: tree }),
     contextResult: `历史结果\n${marker}`,
     runtimeMetadataPath: "/tmp/parallel-run-metadata"
   }])[0]);
-  assert.match(worker, new RegExp(marker));
+  assert.doesNotMatch(worker, new RegExp(marker));
+  assert.match(worker, /其它分支的最新事实/);
+  assert.match(worker, /task_tree_read/);
   assert.match(worker, /task-tree\.md/);
   assert.match(worker, /Shared run metadata directory .*\/tmp\/parallel-run-metadata/);
   assert.match(worker, /shared run metadata (may be edited|edits are direct)/i);
@@ -270,7 +317,11 @@ test("invalid planning retries with structured failure context, then eight worke
     assert.match(plannerPrompts[1], /outputChars/);
     assert.equal(workerPrompts.length, 8);
     assert.equal(maximumActive, 8, "all ready workers should start without an application-level cap");
-    assert.ok(workerPrompts.every((prompt) => prompt.includes(marker)), "every worker receives the complete task tree");
+    assert.ok(workerPrompts.every((prompt) => prompt.includes('task-tree-summary/v1') && prompt.includes('task_tree_read')), "every worker receives the map and an optional full read");
+    assert.match(finished.summary, /8\/8/);
+    assert.ok(finished.treeSummary?.fingerprint);
+    const snapshot = JSON.parse(await readFile(path.join(root, finished.treeSummary.snapshotPath), 'utf8'));
+    assert.equal(snapshot.fingerprint, finished.treeSummary.fingerprint);
     assert.equal(accepted, 1, "successful execution applies automatically");
     assert.equal(testCalls, 0, "the product flow never invokes workspace test commands");
     assert.equal(finished.jobs.length, 8);

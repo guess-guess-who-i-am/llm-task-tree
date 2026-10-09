@@ -1,14 +1,64 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import {
   buildPlannerPrompt,
+  buildBranchInputContext,
   buildWorkerPrompt,
   createParallelCodexCoordinator,
   validateParallelJobs
 } from "./codex-coordinator.js";
+import { createGitWorkspaceManager } from "./parallel-worktree.js";
+import { saveAttachment } from './chat-attachments.js';
+import { updateNodeMaterial } from './node-materials.js';
+
+const exec = promisify(execFile);
+
+test('planner receives branch materials; concurrent workers receive shared-stage and own-node materials from the source project', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'parallel-node-materials-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(path.join(root, 'task-tree.md'), '# LLM Task Graph\n## ROOT - 项目\n## N1 - 阶段\n## A - 子任务\n## B - 子任务\n## OTHER - 无关\n# GraphState\n- Current: N1\n- Next: N1\n# Edges\n## E1 - 分支\n- Endpoints: N1, A\n## E2 - 分支\n- Endpoints: N1, B\n');
+  for (const [nodeId, content, enabled] of [['N1', 'SHARED_STAGE_MATERIAL', true], ['A', 'A_ONLY_MATERIAL', true], ['B', 'B_ONLY_MATERIAL', true], ['A', 'DISABLED_MATERIAL', false], ['OTHER', 'UNRELATED_MATERIAL', true]]) {
+    const scope = { projectRoot: root, treeId: 'method', nodeId };
+    const ref = await saveAttachment({ ...scope, name: '资料.txt', bytes: Buffer.from(content) });
+    await updateNodeMaterial(scope, { action: 'add', id: ref.id, enabled });
+  }
+  let active = 0, maximum = 0;
+  const jobs = ['A', 'B'].map(nodeId => ({ taskId: nodeId, nodeId, title: nodeId, instruction: '完成独立子任务', writeSet: [], dependsOn: [] }));
+  const startTurn = async options => {
+    const context = JSON.stringify(options.contextMessages);
+    assert.match(context, /SHARED_STAGE_MATERIAL/);
+    assert.doesNotMatch(context, /DISABLED_MATERIAL|UNRELATED_MATERIAL/);
+    if (options.prompt.includes('Automatic Parallel Planner')) {
+      assert.match(context, /A_ONLY_MATERIAL/); assert.match(context, /B_ONLY_MATERIAL/);
+      return { threadId: 'planner', output: JSON.stringify({ jobs }) };
+    }
+    const id = options.prompt.match(/^Task id: (.+)$/m)[1];
+    assert.match(context, new RegExp(`${id}_ONLY_MATERIAL`));
+    assert.doesNotMatch(context, new RegExp(`${id === 'A' ? 'B' : 'A'}_ONLY_MATERIAL`));
+    assert.ok(!options.cwd.startsWith(root), 'worker has no copied private attachment directory');
+    active++; maximum = Math.max(maximum, active);
+    await options.onAccepted?.({ threadId: `thread-${id}`, turnId: id });
+    await new Promise(resolve => setTimeout(resolve, 20)); active--;
+    return { threadId: `thread-${id}`, output: '完成' };
+  };
+  const workspace = {
+    async prepare() { return { integrationPath: 'integration', snapshotCommit: 'snapshot' }; },
+    async head() { return 'head'; }, async createWorker(_, id) { return `isolated/${id}`; },
+    async inspectChanges() { return { changedFiles: [], violations: [] }; }, async commit() { return null; },
+    async integrate() { return { conflicts: [] }; }, async removeWorker() {},
+    async summarize() { return { changedFiles: [], stat: '', patchPreview: '', patchTruncated: false }; },
+    async accept() { return { appliedFiles: [] }; }, async cleanup() {}
+  };
+  const coordinator = createParallelCodexCoordinator({ projectRoot: root, startTurn, workspace });
+  const planned = await coordinator.plan({ objective: '并行完成两项' });
+  const finished = await coordinator.wait(planned.id); await coordinator.drain();
+  assert.equal(finished.status, 'accepted', finished.error); assert.equal(maximum, 2);
+});
 
 const shared = {
   taskId: "A",
@@ -35,7 +85,7 @@ test("planner validation allows the requested parallel freedom but keeps a runna
   ]), /循环依赖/);
 });
 
-test("planner receives only decision-relevant context while workers keep the complete tree", () => {
+test("planner and workers receive tree maps and can choose full reads without raw histories", () => {
   const marker = "END-OF-COMPLETE-CONTEXT";
   const tree = [
     "# LLM Task Graph",
@@ -45,8 +95,8 @@ test("planner receives only decision-relevant context while workers keep the com
     "- Problem: 拆分当前工作",
     "- CurrentResult: 当前阶段事实",
     "## N2 - 无关历史",
-    `- Notes: ${"x".repeat(50000)}`,
-    `- CurrentResult: ${marker}`,
+    `- Notes: ${marker}${"x".repeat(50000)}`,
+    '- CurrentResult: 其它分支的最新事实',
     "# GraphState",
     "- Current: N1",
     "- Next: N1",
@@ -68,11 +118,13 @@ test("planner receives only decision-relevant context while workers keep the com
 
   const worker = buildWorkerPrompt(validateParallelJobs([{
     ...shared,
-    branchContext: tree,
+    branchContext: buildBranchInputContext(shared, { markdown: tree }),
     contextResult: `历史结果\n${marker}`,
     runtimeMetadataPath: "/tmp/parallel-run-metadata"
   }])[0]);
-  assert.match(worker, new RegExp(marker));
+  assert.doesNotMatch(worker, new RegExp(marker));
+  assert.match(worker, /其它分支的最新事实/);
+  assert.match(worker, /task_tree_read/);
   assert.match(worker, /task-tree\.md/);
   assert.match(worker, /Shared run metadata directory .*\/tmp\/parallel-run-metadata/);
   assert.match(worker, /shared run metadata (may be edited|edits are direct)/i);
@@ -265,7 +317,11 @@ test("invalid planning retries with structured failure context, then eight worke
     assert.match(plannerPrompts[1], /outputChars/);
     assert.equal(workerPrompts.length, 8);
     assert.equal(maximumActive, 8, "all ready workers should start without an application-level cap");
-    assert.ok(workerPrompts.every((prompt) => prompt.includes(marker)), "every worker receives the complete task tree");
+    assert.ok(workerPrompts.every((prompt) => prompt.includes('task-tree-summary/v1') && prompt.includes('task_tree_read')), "every worker receives the map and an optional full read");
+    assert.match(finished.summary, /8\/8/);
+    assert.ok(finished.treeSummary?.fingerprint);
+    const snapshot = JSON.parse(await readFile(path.join(root, finished.treeSummary.snapshotPath), 'utf8'));
+    assert.equal(snapshot.fingerprint, finished.treeSummary.fingerprint);
     assert.equal(accepted, 1, "successful execution applies automatically");
     assert.equal(testCalls, 0, "the product flow never invokes workspace test commands");
     assert.equal(finished.jobs.length, 8);
@@ -347,5 +403,83 @@ test("automatic planning preserves twelve and twenty useful workers and starts e
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  }
+});
+
+test("real Git-backed parallel run records workspace-function and Git-command timings", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "parallel-timing-project-"));
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "parallel-timing-state-"));
+  const git = (cwd, args) => exec("git", args, { cwd });
+  try {
+    await git(root, ["init"]);
+    await git(root, ["config", "user.name", "Timing Test"]);
+    await git(root, ["config", "user.email", "timing@test.local"]);
+    await writeFile(path.join(root, "task-tree.md"), [
+      "# LLM Task Graph",
+      "## ROOT - 计时验证",
+      "- Problem: 让每个执行阶段留下可定位的耗时证据",
+      "## N1 - 并行阶段",
+      "- Problem: 两个独立 Worker 并发交付",
+      "# GraphState",
+      "- Current: N1",
+      "- Next: N1",
+      "# Edges"
+    ].join("\n"));
+    await git(root, ["add", "task-tree.md"]);
+    await git(root, ["commit", "-m", "timing fixture"]);
+
+    const jobs = ["alpha", "beta"].map((taskId) => ({
+      taskId,
+      nodeId: "N1",
+      title: taskId,
+      instruction: `创建 ${taskId}.txt`,
+      writeSet: [`${taskId}.txt`],
+      dependsOn: []
+    }));
+    const plan = JSON.stringify({ summary: "两个独立任务并行运行", coverage: [], jobs });
+    const startTurn = async (options) => {
+      if (options.prompt.includes("Automatic Parallel Planner")) {
+        return { threadId: "timing-planner", turnId: "timing-plan", output: plan };
+      }
+      const taskId = options.prompt.match(/^Task id: (.+)$/m)?.[1];
+      assert.ok(taskId, "unexpected model turn");
+      await writeFile(path.join(options.cwd, `${taskId}.txt`), `${taskId}\n`);
+      await options.onAccepted?.({ threadId: `thread-${taskId}`, turnId: `turn-${taskId}` });
+      return {
+        threadId: `thread-${taskId}`,
+        turnId: `turn-${taskId}`,
+        output: JSON.stringify({ event: "completed", evidence: `${taskId}.txt`, peerRequests: [] })
+      };
+    };
+    const coordinator = createParallelCodexCoordinator({
+      projectRoot: root,
+      startTurn,
+      workspace: createGitWorkspaceManager({ projectRoot: root, tempRoot })
+    });
+    const planned = await coordinator.plan({ objective: "真实 Git 下验证全链路函数级计时" });
+    await coordinator.wait(planned.id);
+    await coordinator.drain();
+    const finished = await coordinator.get(planned.id);
+
+    assert.equal(finished.status, "accepted", finished.error);
+    assert.deepEqual(finished.result.appliedFiles.sort(), ["alpha.txt", "beta.txt"]);
+    assert.ok(finished.completedAt, "the full run records completion after cleanup");
+    assert.ok(finished.totalDurationMs > 0, "the full run duration includes finalization");
+    assert.equal(finished.result.cleanup.status, "completed");
+    assert.ok(finished.result.cleanup.durationMs >= 0, "final cleanup duration is recorded");
+    assert.deepEqual((await Promise.all(["alpha", "beta"].map((taskId) => readFile(path.join(root, `${taskId}.txt`), "utf8")))).sort(), ["alpha\n", "beta\n"]);
+    for (const operation of ["prepare", "head", "createWorker", "inspectChanges", "commit", "integrate", "summarize", "accept", "cleanup"]) {
+      assert.ok(finished.workspaceTimings[operation]?.calls > 0, `missing timing for ${operation}`);
+    }
+    assert.ok(finished.workspaceTimings.cleanup.calls >= 2, "accept and final run cleanup calls are counted separately");
+    assert.ok(finished.gitCommandTimings.calls > 0, "Git subprocess calls must be timed individually");
+    for (const command of ["worktree", "diff", "commit-tree", "cherry-pick", "apply"]) {
+      assert.ok(finished.gitCommandTimings.byCommand[command]?.calls > 0, `missing git ${command} timing`);
+    }
+    assert.ok(finished.events.some((event) => event.type === "workspace_timing" && event.operation === "accept"));
+    assert.ok(finished.events.some((event) => event.type === "git_command_timing" && event.command === "cherry-pick"));
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
   }
 });

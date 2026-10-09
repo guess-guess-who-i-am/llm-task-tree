@@ -19,6 +19,10 @@ import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/p
 import net from "node:net";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { localNetworkEnvironment } from '../server/network-environment.js';
+import { validateToolArguments } from '../server/tool-arguments.js';
+import { assertMainTreeWrite } from '../server/tree-write-safety.js';
+import { readTreeSummary } from '../server/tree-context.js';
 import { fileURLToPath } from "node:url";
 import { locateProjectRoot } from "../server/turn-tracker.js";
 import { findTree, loadTreeRegistry, resolveTreeFile } from "../server/tree-registry.js";
@@ -36,6 +40,7 @@ const NEXT_PLAN_WARNING = "GraphState.NextPlan 是用户备忘，可能过期，
 const HOST = "127.0.0.1";
 const START_TIMEOUT_MS = 40000;
 const DEFAULT_EXECUTION_SCOPE = String(process.env.TASK_TREE_EXECUTION_SCOPE || "").trim();
+const QUALITY_ADVISORY = process.env.TASK_TREE_QUALITY_MODE === 'advisory';
 
 function canonicalKey(value) {
   const resolved = path.resolve(value || "");
@@ -230,7 +235,7 @@ async function startServer() {
   const child = spawn(process.execPath, ["server.js"], {
     cwd: kit,
     env: {
-      ...process.env,
+      ...await localNetworkEnvironment(),
       HOST,
       PORT: String(port),
       TASK_TREE_STUB_DIR: existsSync(stubDir) ? stubDir : "",
@@ -428,6 +433,16 @@ function patchNodeFields(markdown, nodeId, fields) {
 
 // -------------------------------------------------------------------- tools
 
+async function toolTreeSummary() {
+  const tree = await activeTree();
+  return readTreeSummary({ projectRoot, tree: { id: tree.id, path: tree.relative } });
+}
+
+async function toolTreeRead() {
+  const tree = await activeTree();
+  return { treeId: tree.id, treePath: tree.relative, markdown: await readFile(tree.file, 'utf8') };
+}
+
 async function toolFocus(args) {
   const tree = await activeTree();
   if (!existsSync(tree.file)) {
@@ -470,18 +485,41 @@ async function toolFocus(args) {
 async function toolNode(args) {
   const nodeId = String(args?.nodeId || "").trim();
   if (!nodeId) return { error: "缺少 nodeId。" };
-  for (const rel of await treeMarkdownFiles()) {
-    const full = path.join(projectRoot, rel);
-    if (!existsSync(full)) continue;
-    const node = fieldsOf(parseTreeNodeFields(await readFile(full, "utf8")), nodeId);
-    if (!node) continue;
+  const describe = (node, file) => {
     const fields = {};
     for (const [key, value] of Object.entries(node.fields)) {
       if (key === "Position" || key === "Size" || key === "ReadFingerprint") continue;
       const text = String(value || "").trim();
       if (text) fields[key] = text;
     }
-    return { projectRoot, file: rel, id: node.id, title: node.title, fields };
+    return { projectRoot, file, id: node.id, title: node.title, fields };
+  };
+  for (const rel of await treeMarkdownFiles()) {
+    const full = path.join(projectRoot, rel);
+    if (!existsSync(full)) continue;
+    const node = fieldsOf(parseTreeNodeFields(await readFile(full, "utf8")), nodeId);
+    if (!node) continue;
+    const index = describe(node, rel);
+    const subtreeFile = String(node.fields.SubtreeFile || "").trim().replace(/\\/g, "/");
+    if (subtreeFile) {
+      const subtreePath = path.resolve(projectRoot, subtreeFile);
+      const relative = path.relative(projectRoot, subtreePath).replace(/\\/g, "/");
+      if (relative.startsWith('../') || path.isAbsolute(relative) || !isTreeMarkdownPath(relative)) {
+        return { error: `节点 ${nodeId} 的子树路径不属于工作区任务树：${subtreeFile}`, index };
+      }
+      if (!existsSync(subtreePath)) return { error: `节点 ${nodeId} 的子树不存在：${relative}`, index };
+      const root = fieldsOf(parseTreeNodeFields(await readFile(subtreePath, "utf8")), nodeId);
+      if (!root) return { error: `子树 ${relative} 缺少折叠根 ${nodeId}`, index };
+      const result = describe(root, relative);
+      // Main-tree details are intentionally moved into this root, not deleted.
+      // Preserve only index metadata; never replace actual subtree fields with
+      // stale summaries from the main-tree stub.
+      for (const key of ['Folded', 'SubtreeFile', 'SubtreeCount']) {
+        if (index.fields[key]) result.fields[key] = index.fields[key];
+      }
+      return { ...result, storage: 'folded-subtree', index };
+    }
+    return index;
   }
   return { error: `任务树里没有节点 ${nodeId}。`, searched: await treeMarkdownFiles() };
 }
@@ -505,7 +543,8 @@ async function toolCheckCompact(args) {
   const violations = reports.flatMap((report) => report.violations);
   const longLines = reports.flatMap((report) => report.longLines.map((item) => ({ ...item, file: report.file })));
   return {
-    ok: violations.length === 0 && longLines.length === 0,
+    ok: QUALITY_ADVISORY || (violations.length === 0 && longLines.length === 0),
+    ...(QUALITY_ADVISORY ? {advisory:true,guidance:'篇幅和格式仅供参考，不阻塞本次任务；不需要为这些提示重写其它分支。'} : {}),
     projectRoot,
     checked: reports.map((report) => ({
       file: report.file,
@@ -526,7 +565,7 @@ async function toolFlowStatus() {
   const tree = await activeTree();
   const scriptsDir = path.join(projectRoot, "scripts");
   if (!existsSync(path.join(scriptsDir, "project.json"))) {
-    return { error: "没有 scripts/project.json，本项目还没有执行流程脚本。", projectRoot };
+    return { ok: true, available: false, reason: "本项目没有执行流程脚本；此项不适用，无需创建流程。", projectRoot };
   }
   const catalog = await buildExecutionCatalog({
     projectRoot,
@@ -706,6 +745,7 @@ async function toolWrite(args) {
   let applied = [];
 
   if (typeof args?.markdown === "string" && args.markdown.trim()) {
+    assertMainTreeWrite(current,args.markdown);
     next = args.markdown;
     applied = ["<whole markdown>"];
   } else {
@@ -729,7 +769,7 @@ async function toolWrite(args) {
   }
 
   const gate = inspectTreeMarkdown(next, { file: tree.relative, maxBytes: ACTIVE_METHOD_TREE_MAX_BYTES });
-  if (gate.violations.length || gate.longLines.length) {
+  if (!QUALITY_ADVISORY && (gate.violations.length || gate.longLines.length)) {
     return {
       error: "精炼门禁不通过，已拒绝写入。请把字段改写成更短的当前状态后重试。",
       violations: gate.violations,
@@ -740,13 +780,14 @@ async function toolWrite(args) {
 
   const writeBody = typeof args?.markdown === "string" && args.markdown.trim()
     ? { markdown: next, reason }
-    : { nodeId: String(args.nodeId).trim(), fields: args.fields, reason, ...(scopeId ? { scopeId } : {}) };
+    : { nodeId: String(args.nodeId).trim(), fields: args.fields, reason, ...(scopeId ? { scopeId } : {}), ...(QUALITY_ADVISORY ? {qualityMode:'advisory'} : {}) };
   const endpoint = writeBody.markdown ? "/api/tree" : "/api/tree/node-patch";
   const { payload, startedServer } = await api(writeBody.markdown ? "PUT" : "POST", endpoint, writeBody);
   const persisted = existsSync(tree.file) ? await readFile(tree.file, "utf8") : next;
   const after = inspectTreeMarkdown(persisted, { file: tree.relative, maxBytes: ACTIVE_METHOD_TREE_MAX_BYTES });
   return {
     ok: true,
+    ...(QUALITY_ADVISORY ? {advisory:true,warnings:{violations:after.violations,longLines:after.longLines}} : {}),
     file: tree.relative,
     applied,
     changes: Array.isArray(payload.changes) ? payload.changes : [],
@@ -754,7 +795,7 @@ async function toolWrite(args) {
     executionScope: payload.executionScope || null,
     reason,
     flowSync: payload.flowSync,
-    compact: { nodes: after.nodes, bytes: after.bytes, overBudgetFields: after.budgetViolations, styleViolations: after.styleViolations, longLines: 0 },
+    compact: { nodes: after.nodes, bytes: after.bytes, overBudgetFields: after.budgetViolations, styleViolations: after.styleViolations, longLines: after.longLines.length },
     startedServer,
     note: "changes 是服务端按实际落盘前后状态生成的真实差异；用户回执必须据此列出节点、字段、旧值 → 新值。节点补丁在服务端串行并基于最新树应用，执行范围会拒绝越权节点。"
   };
@@ -830,7 +871,7 @@ async function toolSubtree(args) {
   if (action === "write") {
     if (!target || typeof args?.markdown !== "string") return { error: "write 需要 path 与 markdown。" };
     const gate = inspectTreeMarkdown(args.markdown, { file: target });
-    if (gate.violations.length || gate.longLines.length) {
+    if (!QUALITY_ADVISORY && (gate.violations.length || gate.longLines.length)) {
       return { error: "子树未过精炼门禁，已拒绝写入。", violations: gate.violations, longLines: gate.longLines };
     }
     const { payload } = await api("POST", "/api/subtree-file", {
@@ -838,7 +879,7 @@ async function toolSubtree(args) {
       markdown: args.markdown,
       reason: args?.reason || `将保存子树${target}`
     });
-    return payload;
+    return {...payload,...(QUALITY_ADVISORY ? {advisory:true,warnings:{violations:gate.violations,longLines:gate.longLines}} : {})};
   }
   if (action === "sync_stub") {
     if (!target) return { error: "sync_stub 需要 path。" };
@@ -1117,7 +1158,7 @@ const TOOLS = [
   },
   {
     name: "task_tree_node",
-    description: "按节点 ID 读取任务图节点的全部字段（Problem/Approach/Input/Output/Metrics/CurrentResult/RootCauseAnalysis/NextIdea 等）。会自动在主树、subtrees/ 和 trees/ 中查找。只读。",
+    description: "按节点 ID 读取任务图节点的全部字段（Problem/Approach/Input/Output/Metrics/CurrentResult/RootCauseAnalysis/NextIdea 等）。会自动在主树、subtrees/ 和 trees/ 中查找；折叠节点按 SubtreeFile 返回真实子树根字段及主树索引。只读。",
     inputSchema: {
       type: "object",
       properties: { nodeId: { type: "string", description: "节点 ID，例如 ROOT、N2、N11、ST-P1" } },
@@ -1127,8 +1168,20 @@ const TOOLS = [
     handler: toolNode
   },
   {
+    name: 'task_tree_summary',
+    description: '读取新鲜主树地图和折叠根当前状态，不展开折叠子树后代；需要更多内容再读完整主树或指定子树。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    handler: toolTreeSummary
+  },
+  {
+    name: 'task_tree_read',
+    description: '按需读取完整活动主树 Markdown，不自动展开折叠子树。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    handler: toolTreeRead
+  },
+  {
     name: "task_tree_check_compact",
-    description: "跑任务树精炼门禁：活动方法树须 <=12 KiB，并检查字段预算、长行、节点代码和英文长段。ok=false 表示本轮不能结束，要继续精炼、中文化或移动证据。只读。",
+    description: QUALITY_ADVISORY ? '只读检查任务树篇幅和格式，返回 advisory 提示；这些建议不阻塞执行，不必因此重写整树或其它分支。完整保留事实，不截断。' : "跑任务树精炼门禁：活动方法树须 <=12 KiB，并检查字段预算、长行、节点代码和英文长段。ok=false 表示本轮不能结束，要继续精炼、中文化或移动证据。只读。",
     inputSchema: {
       type: "object",
       properties: {
@@ -1150,7 +1203,7 @@ const TOOLS = [
   },
   {
     name: "task_tree_write",
-    description: "写任务树。传 {nodeId, fields:{CurrentResult, RootCauseAnalysis, ...}} 改指定节点字段，或传 {markdown} 覆盖整棵树。写前自动跑精炼门禁（不过就拒绝），写入走服务端 PUT /api/tree，因此自动备份到 versions/ 并同步 flow 状态；响应的 changes 是实际落盘差异，必须据此向用户报告节点、字段、旧值 → 新值；GraphState 的 Current/Next/NextPlan 受服务端保护，不会被改。reason 必填。",
+    description: QUALITY_ADVISORY ? '写任务树：{nodeId,fields} 修改节点字段，或 {markdown} 保存完整主树。reason 必填。篇幅格式只返回建议，不阻塞；保留误覆盖、范围授权、GraphState 保护。自动备份并同步 flow；changes 是实际落盘差异，据此报告旧值 → 新值。' : "写任务树。传 {nodeId, fields:{CurrentResult, RootCauseAnalysis, ...}} 改指定节点字段，或传 {markdown} 覆盖整棵树。写前自动跑精炼门禁（不过就拒绝），写入走服务端 PUT /api/tree，因此自动备份到 versions/ 并同步 flow 状态；响应的 changes 是实际落盘差异，必须据此向用户报告节点、字段、旧值 → 新值；GraphState 的 Current/Next/NextPlan 受服务端保护，不会被改。reason 必填。",
     inputSchema: {
       type: "object",
       properties: {
@@ -1183,7 +1236,7 @@ const TOOLS = [
   },
   {
     name: "task_tree_subtree",
-    description: "子树读写与折叠：read 读子树、context 取子树 Agent 上下文、write 写子树（同样过门禁）、sync_stub 把子树摘要同步回主树 stub（这是折叠的收尾）、unfold 删除子树文件。写入响应的 changes 是实际差异，必须据此向用户报告节点、字段、旧值 → 新值。折叠一个节点 = 先 write 子树文件，再 sync_stub。",
+    description: QUALITY_ADVISORY ? '子树读写：read 读取、context 取上下文、write 写入、sync_stub 同步主树索引、unfold 删除子树文件。篇幅格式只返回建议，不阻塞。changes 是实际落盘差异，据此报告旧值 → 新值；折叠先 write 再 sync_stub。' : "子树读写与折叠：read 读子树、context 取子树 Agent 上下文、write 写子树（同样过门禁）、sync_stub 把子树摘要同步回主树 stub（这是折叠的收尾）、unfold 删除子树文件。写入响应的 changes 是实际差异，必须据此向用户报告节点、字段、旧值 → 新值。折叠一个节点 = 先 write 子树文件，再 sync_stub。",
     inputSchema: {
       type: "object",
       properties: {
@@ -1379,7 +1432,7 @@ async function handleMessage(message) {
       // Resources exist for one reason: the widget bundle behind task_tree_open.
       capabilities: { tools: { listChanged: false }, resources: { listChanged: false } },
       serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
-      instructions: `任务图工具。先 task_tree_focus 取焦点；改树用 task_tree_write（自带备份和精炼门禁）；链式推进用 task_tree_chain。${NEXT_PLAN_WARNING}`
+      instructions: `任务图工具。先 task_tree_focus 取焦点；改树用 task_tree_write（${QUALITY_ADVISORY ? '自动备份；篇幅和格式仅作建议，不阻塞执行；保留结构与授权保护' : '自带备份和精炼门禁'}）；链式推进用 task_tree_chain。${NEXT_PLAN_WARNING}`
     });
     return;
   }
@@ -1446,6 +1499,7 @@ async function handleMessage(message) {
       return;
     }
     try {
+      validateToolArguments(tool.inputSchema,params?.arguments || {});
       const payload = await tool.handler(params?.arguments || {});
       // A handler that has something other than JSON to say (an image, say) builds its own blocks.
       // structuredContent is deliberately never sent: Codex drops content[] when it is present.

@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "dependencies": {
+    "mammoth": "1.13.0",
+    "pdfjs-dist": "5.6.205"
+  },
   "scripts": {
     "start": "node server.js"
   }

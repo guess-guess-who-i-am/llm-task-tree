@@ -20,3 +20,7 @@ subtrees/
 skill-routing-log.md
 scripts/versions/
 .task-tree-maintenance/
+
+# Node images/documents and their manifests travel with the project.
+!.task-tree-attachments/
+!.task-tree-attachments/**

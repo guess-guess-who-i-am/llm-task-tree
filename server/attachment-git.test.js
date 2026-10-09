@@ -1,0 +1,50 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { saveAttachment, loadAttachment } from './chat-attachments.js';
+import { updateNodeMaterial, listNodeMaterials } from './node-materials.js';
+
+const exec = promisify(execFile);
+test('Git tracks original files, full extracted content and node selections; clone restores them without copying secrets', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'attachment-git-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const projectRoot = path.join(root, 'project'), clone = path.join(root, 'clone');
+  await mkdir(projectRoot);
+  const git = (...args) => exec('git', args, { cwd: projectRoot });
+  await git('init');
+  const template = await readFile(new URL('../templates/gitignore.append', import.meta.url), 'utf8').catch(error => {
+    if (error.code !== 'ENOENT') throw error;
+    return readFile(new URL('../llm-task-tree-kit/templates/gitignore.append', import.meta.url), 'utf8');
+  });
+  await writeFile(path.join(projectRoot, '.gitignore'), template + '\n*.log\n');
+  await writeFile(path.join(projectRoot, '.env'), 'FAKE_TEST_VALUE=not-a-real-secret\n');
+  await mkdir(path.join(projectRoot, '.task-tree-attachments'));
+  await writeFile(path.join(projectRoot, '.task-tree-attachments/.gitignore'), '*\n');
+  const scope = { projectRoot, treeId: 'method', nodeId: 'N1' };
+  const document = await saveAttachment({ ...scope, name: '资料.log', bytes: Buffer.from('FULL_DOCUMENT_END') });
+  const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==', 'base64');
+  const image = await saveAttachment({ ...scope, name: '资料.png', bytes: imageBytes });
+  await updateNodeMaterial(scope, { action: 'add', id: document.id, enabled: false });
+  await updateNodeMaterial(scope, { action: 'add', id: image.id });
+  const files = (await git('ls-files', '--others', '--exclude-standard', '--', '.task-tree-attachments/')).stdout;
+  assert.ok(files.includes('original.log'), 'generic *.log and old local deny rule must not hide uploaded documents');
+  assert.ok(files.includes('original.png')); assert.ok(files.includes('metadata.json')); assert.ok(files.includes('/nodes/'));
+  await git('add', '-A');
+  assert.ok(!(await git('diff', '--cached', '--name-only')).stdout.split('\n').includes('.env'));
+  await git('-c', 'user.name=Attachment Test', '-c', 'user.email=attachment@test.local', 'commit', '-m', 'Track node materials');
+  await git('clone', '--no-hardlinks', projectRoot, clone);
+  const restoredScope = { ...scope, projectRoot: clone };
+  const restored = await listNodeMaterials(restoredScope);
+  assert.equal(restored.length, 2); assert.equal(restored.find(m => m.id === document.id).enabled, false);
+  const loaded = await loadAttachment({ ...restoredScope, id: document.id });
+  assert.equal(loaded.meta.text, 'FULL_DOCUMENT_END');
+  assert.deepEqual(await readFile((await loadAttachment({ ...restoredScope, id: image.id })).file), imageBytes);
+  // New attachments remain eligible after cloning, without changing the root ignore file.
+  const next = await saveAttachment({ ...restoredScope, name: '新的.log', bytes: Buffer.from('NEXT_DOCUMENT') });
+  const newFiles = (await exec('git', ['ls-files', '--others', '--exclude-standard'], { cwd: clone })).stdout;
+  assert.ok(newFiles.includes(next.id + '/original.log'));
+});

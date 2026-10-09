@@ -4,7 +4,6 @@ const KB_WEB_TOP_K = 8;
 const KB_PREVIEW_CHARS = 520;
 const KB_CONTEXT_SNIPPET_CHARS = 1600;
 const KB_CONTEXT_MAX_CHARS = 36000;
-const KB_HISTORY_MAX_TURNS = 12;
 const IO_FILE_PREVIEW_CHARS = 3600;
 const KB_HISTORY_STORAGE_KEY = "taskTree.knowledgeHistory";
 const LEFT_PANE_WIDTH_STORAGE_KEY = "taskTree.leftPaneWidth";
@@ -151,6 +150,7 @@ let dirty = false;
 let draftLink = null;
 let saveTimer = null;
 let saveInFlight = false;
+let saveInFlightPromise = null;
 let saveAgain = false;
 let editNodeId = null;
 let editEdgeId = null;
@@ -160,6 +160,7 @@ let lastSavedMarkdown = "";
 let reloadTimer = null;
 let versions = [];
 let pendingSaveReason = "";
+let pendingSaveBackup = false;
 let currentVersionTimer = null;
 let skillPanelNodeId = null;
 let skillRecommendations = [];
@@ -178,7 +179,6 @@ const ioFilePreviewRequests = new Set();
 let modelNodeConversationsSaveTimer = null;
 let modelNodeConversationsSaveInFlight = false;
 let modelNodeConversationsSaveAgain = false;
-const MODEL_NODE_TURNS_MAX = 24;
 const MODEL_NODE_CONVERSATIONS_STORAGE_KEY = "taskTree.modelNodeTurns";
 let knowledgeConfig = null;
 let knowledgeIndex = null;
@@ -206,6 +206,7 @@ let edgeDimOpacity = 0.35;
 const graphView = { x: 40, y: 34, scale: 0.88 };
 let shouldAutoFitView = true;
 let workspaceMode = "main";
+let workspaceSwitchInFlight = false;
 let activeSubtreePath = "";
 let activeSubtreeFoldRoot = "";
 let mainWorkspaceSnapshot = null;
@@ -225,6 +226,16 @@ let focusLensId = "";
 let focusLensOpen = false;
 const directRunPollers = new Map();
 const directRunStates = new Map();
+const deletedDirectRunIds = new Set();
+const directRunDeletingNodes = new Set();
+let activeDirectRunId = "";
+let directRunDialogExpanded = false;
+let directRunRenderPending = false;
+let directRunTranscriptRunId = "";
+let directRunTranscriptMessageSignature = "";
+let directRunTranscriptFollowOutput = true;
+let directRunTranscriptRendering = false;
+let directRunConversationListSignature = "";
 const card = {
   width: 520,
   height: 720,
@@ -253,6 +264,15 @@ let nodeCardCompact = (() => {
 })();
 
 const els = {
+  nodeMaterialsDialog: document.querySelector('#nodeMaterialsDialog'),
+  nodeMaterialsTitle: document.querySelector('#nodeMaterialsTitle'),
+  nodeMaterialsClose: document.querySelector('#nodeMaterialsClose'),
+  nodeMaterialsAdd: document.querySelector('#nodeMaterialsAdd'),
+  nodeMaterialsFileInput: document.querySelector('#nodeMaterialsFileInput'),
+  nodeMaterialsStatus: document.querySelector('#nodeMaterialsStatus'),
+  nodeMaterialsList: document.querySelector('#nodeMaterialsList'),
+  directRunMaterialsBtn: document.querySelector('#directRunMaterialsBtn'),
+  directRunUseMaterials: document.querySelector('#directRunUseMaterials'),
   graphPane: document.querySelector(".graphPane"),
   graphViewport: document.querySelector("#graphViewport"),
   graphCanvas: document.querySelector("#graphCanvas"),
@@ -263,9 +283,26 @@ const els = {
   focusLensClose: document.querySelector("#focusLensClose"),
   focusLensTrail: document.querySelector("#focusLensTrail"),
   focusLensBody: document.querySelector("#focusLensBody"),
-  directRunPanel: document.querySelector("#directRunPanel"),
-  directRunList: document.querySelector("#directRunList"),
-  directRunPanelClose: document.querySelector("#directRunPanelClose"),
+  directRunReopenBtn: document.querySelector("#directRunReopenBtn"),
+  directRunDialog: document.querySelector("#directRunDialog"),
+  directRunDialogTitle: document.querySelector("#directRunDialogTitle"),
+  directRunDialogStatus: document.querySelector("#directRunDialogStatus"),
+  directRunProgress: document.querySelector("#directRunProgress"),
+  directRunError: document.querySelector("#directRunError"),
+  directRunDialogClose: document.querySelector("#directRunDialogClose"),
+  directRunExpandBtn: document.querySelector("#directRunExpandBtn"),
+  directRunPrevBtn: document.querySelector("#directRunPrevBtn"),
+  directRunNextBtn: document.querySelector("#directRunNextBtn"),
+  directRunConversationSelect: document.querySelector("#directRunConversationSelect"),
+  directRunDeleteBtn: document.querySelector("#directRunDeleteBtn"),
+  directRunTranscript: document.querySelector("#directRunTranscript"),
+  directRunComposer: document.querySelector("#directRunComposer"),
+  directRunMessageInput: document.querySelector("#directRunMessageInput"),
+  directRunAttachBtn: document.querySelector("#directRunAttachBtn"),
+  directRunFileInput: document.querySelector("#directRunFileInput"),
+  directRunAttachments: document.querySelector("#directRunAttachments"),
+  directRunSendBtn: document.querySelector("#directRunSendBtn"),
+  directRunConversationMeta: document.querySelector("#directRunConversationMeta"),
   nodeCount: document.querySelector("#nodeCount"),
   linkState: document.querySelector("#linkState"),
   saveState: document.querySelector("#saveState"),
@@ -361,6 +398,9 @@ const els = {
   workspaceBanner: document.querySelector("#workspaceBanner"),
   workspaceBannerTitle: document.querySelector("#workspaceBannerTitle"),
   workspaceBannerExitBtn: document.querySelector("#workspaceBannerExitBtn"),
+  workspaceBannerEnterBtn: document.querySelector("#workspaceBannerEnterBtn"),
+  workspaceSwitchStatus: document.querySelector("#workspaceSwitchStatus"),
+  workspaceBannerOpenBtn: document.querySelector("#workspaceBannerOpenBtn"),
   subtitle: document.querySelector("#subtitle"),
   treeSelect: document.querySelector("#treeSelect"),
   activeMethodBadge: document.querySelector("#activeMethodBadge"),
@@ -867,8 +907,13 @@ function renderFocusLens() {
           <span class="focusLensNodeId">${escapeHtml(node.id)}</span>
           <h2>${escapeHtml(node.title || "未命名节点")}</h2>
         </div>
-        <span class="focusLensStatus">${escapeHtml(node.completion || "未开始")}</span>
+        <div class="focusLensHeaderActions">
+          <span class="focusLensStatus">${escapeHtml(node.completion || "未开始")}</span>
+          <button type="button" class="focusLensDirectRunButton" data-focus-lens-action="materials" aria-label="节点资料" title="添加、选择节点图片和文档">📎</button>
+          <button type="button" class="focusLensDirectRunButton" data-focus-lens-action="run-agent" aria-label="直接执行此节点" title="直接执行此节点，不调用并行 Planner">▶</button>
+        </div>
       </header>
+      ${isNodeFolded(node) && node.subtreeFile ? '<button type="button" class="subtreeEnterButton" data-focus-lens-action="open-subtree">去到子树 →</button>' : ''}
       <details class="focusLensActionsMenu"${actionsOpen ? " open" : ""}>
         <summary>节点操作</summary>
         <div class="focusLensActionBar" aria-label="当前节点操作">
@@ -884,9 +929,6 @@ function renderFocusLens() {
           <h3>下一步</h3>
         </header>
         <textarea class="focusLensNextIdeaInput" data-focus-lens-next-idea="${attr(node.id)}" placeholder="写一句可执行的话，并说明服务的方向和完成判据">${escapeHtml(node.nextIdea || "")}</textarea>
-        ${activeMethod ? `<div class="focusLensNextActions">
-          <button type="button" data-focus-lens-action="run-agent">保存并让 Codex 继续</button>
-        </div>` : ""}
       </section>
       <div class="focusLensFields">
         <section class="focusLensField focusLensField--problem">
@@ -1348,7 +1390,7 @@ function serializeModelNodeConversationsForStorage() {
   const nodes = {};
   for (const [nodeId, turns] of Object.entries(modelNodeTurns)) {
     if (!nodeId || !Array.isArray(turns) || !turns.length) continue;
-    nodes[nodeId] = turns.slice(-MODEL_NODE_TURNS_MAX).map((turn) => ({
+    nodes[nodeId] = turns.map((turn) => ({
       id: turn.id,
       createdAt: turn.createdAt,
       question: turn.question,
@@ -1356,13 +1398,11 @@ function serializeModelNodeConversationsForStorage() {
       includeWeb: turn.includeWeb === true,
       useKnowledgeSearch: turn.useKnowledgeSearch !== false,
       summary: turn.summary || buildModelTurnSummary(turn),
-      autoRetrieval: turn.autoRetrieval || null,
       models: Object.fromEntries(Object.entries(turn.models || {}).map(([modelId, entry]) => [modelId, {
-        answer: String(entry.answer || "").slice(0, 8000),
+        answer: String(entry.answer || ""),
         ok: entry.ok !== false,
         error: String(entry.error || ""),
-        elapsedMs: Number(entry.elapsedMs) || 0,
-        toolEvents: Array.isArray(entry.toolEvents) ? entry.toolEvents.slice(0, 6) : []
+        elapsedMs: Number(entry.elapsedMs) || 0
       }]))
     }));
   }
@@ -1372,8 +1412,8 @@ function serializeModelNodeConversationsForStorage() {
 function persistModelNodeConversationsToLocalStorage() {
   try {
     localStorage.setItem(MODEL_NODE_CONVERSATIONS_STORAGE_KEY, JSON.stringify(serializeModelNodeConversationsForStorage()));
-  } catch {
-    // ignore quota errors
+  } catch (error) {
+    console.warn("节点对话浏览器缓存保存失败；保留完整内存历史并继续保存到服务器。", error);
   }
 }
 
@@ -1419,7 +1459,7 @@ async function loadModelNodeConversations() {
       modelNodeTurns = {};
       for (const [nodeId, turns] of Object.entries(data.nodes)) {
         if (!Array.isArray(turns) || !turns.length) continue;
-        modelNodeTurns[nodeId] = turns.slice(-MODEL_NODE_TURNS_MAX).map((turn) => normalizeModelNodeTurn(turn));
+        modelNodeTurns[nodeId] = turns.map((turn) => normalizeModelNodeTurn(turn));
       }
       loadedFromServer = true;
     }
@@ -1435,7 +1475,7 @@ async function loadModelNodeConversations() {
           modelNodeTurns = {};
           for (const [nodeId, turns] of Object.entries(parsed)) {
             if (!Array.isArray(turns) || !turns.length) continue;
-            modelNodeTurns[nodeId] = turns.slice(-MODEL_NODE_TURNS_MAX).map((turn) => normalizeModelNodeTurn(turn));
+            modelNodeTurns[nodeId] = turns.map((turn) => normalizeModelNodeTurn(turn));
           }
           await flushModelNodeConversationsToServer();
         }
@@ -1450,9 +1490,6 @@ async function loadModelNodeConversations() {
 function appendModelNodeTurn(nodeId, turn) {
   modelNodeTurns[nodeId] = modelNodeTurns[nodeId] || [];
   modelNodeTurns[nodeId].push(normalizeModelNodeTurn(turn));
-  if (modelNodeTurns[nodeId].length > MODEL_NODE_TURNS_MAX) {
-    modelNodeTurns[nodeId] = modelNodeTurns[nodeId].slice(-MODEL_NODE_TURNS_MAX);
-  }
   persistModelNodeConversations();
 }
 
@@ -1467,7 +1504,7 @@ function buildModelConversationForApi(nodeId, modelId) {
       content: entry.ok ? entry.answer : `运行失败：${entry.error || "未知错误"}`
     });
   }
-  return messages.slice(-12);
+  return messages;
 }
 
 function renderModelToolSummary(toolEvents) {
@@ -1667,7 +1704,7 @@ async function runModelAgentsForNode(panel, node) {
     const sharedContext = buildSharedModelContext(node.id);
     for (const modelId of modelIds) {
       histories[modelId] = buildModelConversationForApi(node.id, modelId);
-      sharedHistories[modelId] = sharedContext.filter((item) => item.modelId !== modelId).slice(-24);
+      sharedHistories[modelId] = sharedContext.filter((item) => item.modelId !== modelId);
     }
     const response = await fetch("/api/model-agents/run", {
       method: "POST",
@@ -1966,7 +2003,7 @@ function toSubtreeMarkdown(subtreeNodes, subtreeEdges, foldRootId) {
     "# LLM Task Graph Subtree",
     "",
     `> Fold root: ${foldRootId}`,
-    "> 此文件由 task-tree.md 折叠生成；Codex/Agent 默认只读 task-tree.md，不要读取本文件。",
+    "> 此文件保存分支详情，主树只保留索引；模型可按当前任务需要读取本文件。",
     "",
     withoutHeader.trim()
   ].join("\n");
@@ -2119,96 +2156,202 @@ function buildSubtreeWorkerPrompt(node) {
   ].join("\n");
 }
 
+function workspaceEntryNode() {
+  const foldedNodes = nodes.filter(node => isNodeFolded(node) && node.subtreeFile);
+  return foldedNodes.find(node => node.id === selectedId)
+    || foldedNodes.find(node => node.id === nextFocusId)
+    || (foldedNodes.length === 1 ? foldedNodes[0] : null);
+}
+
 function renderWorkspaceBanner() {
   if (!els.workspaceBanner) return;
   const inSubtree = workspaceMode === "subtree" && activeSubtreePath;
-  els.workspaceBanner.classList.toggle("hidden", !inSubtree);
+  const entry = inSubtree ? null : workspaceEntryNode();
+  els.workspaceBanner.classList.remove("hidden");
+  els.workspaceBanner.classList.toggle("is-subtree", Boolean(inSubtree));
+  els.workspaceBanner.setAttribute('aria-busy', String(workspaceSwitchInFlight));
   if (inSubtree && els.workspaceBannerTitle) {
-    els.workspaceBannerTitle.textContent = `子树编辑：${activeSubtreeFoldRoot || activeSubtreePath} · ${activeSubtreePath}（版本/知识库/执行链均针对本子树；保存不写 task-tree 详文）`;
+    const root = nodes.find(node => node.id === activeSubtreeFoldRoot);
+    els.workspaceBannerTitle.textContent = `子树 · ${root?.title || activeSubtreeFoldRoot}`;
+    els.workspaceBannerTitle.title = `${activeSubtreePath}（主树保持折叠）`;
+  } else if (els.workspaceBannerTitle) {
+    els.workspaceBannerTitle.textContent = entry ? `主树 · 可进入「${entry.title || entry.id}」` : '主树 · 点击折叠节点的「去到子树」进入分支';
+    els.workspaceBannerTitle.title = '';
+  }
+  if (els.workspaceBannerEnterBtn) {
+    els.workspaceBannerEnterBtn.hidden = Boolean(inSubtree);
+    els.workspaceBannerEnterBtn.disabled = workspaceSwitchInFlight || !entry;
+    els.workspaceBannerEnterBtn.title = entry ? `去到子树：${entry.title || entry.id}` : '先选择一个有子树的折叠节点';
+  }
+  if (els.workspaceBannerExitBtn) {
+    els.workspaceBannerExitBtn.hidden = !inSubtree;
+    els.workspaceBannerExitBtn.disabled = workspaceSwitchInFlight;
   }
   if (els.subtitle) {
     els.subtitle.textContent = inSubtree
-      ? `Subtree workspace · ${activeSubtreePath}`
+      ? `子树工作区 · ${activeSubtreePath}`
       : "Markdown-backed shared task memory";
   }
   if (els.versionState && inSubtree) {
     els.versionState.textContent = `${versions.length} 个子树版本`;
   }
+  if (els.workspaceBannerOpenBtn) {
+    els.workspaceBannerOpenBtn.hidden = !inSubtree;
+    if (inSubtree) els.workspaceBannerOpenBtn.href = window.location.href;
+  }
+  if (els.activeMethodBadge && inSubtree) {
+    els.activeMethodBadge.textContent = '子树 · 独立编辑';
+    els.activeMethodBadge.title = '编辑、透镜、排版和节点执行使用当前子树；保存不展开主树';
+  }
+  if (els.saveBtn) els.saveBtn.title = inSubtree ? `保存到 ${activeSubtreePath}` : '保存当前任务树';
+}
+
+async function animateWorkspaceChange(direction, update) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    await update();
+    return;
+  }
+  document.documentElement.dataset.workspaceDirection = direction;
+  if (typeof document.startViewTransition === 'function') {
+    const transition = document.startViewTransition(update);
+    await transition.updateCallbackDone;
+    // A hidden/background window can skip animation; its state change still succeeds.
+    await transition.finished.catch(() => {});
+  } else {
+    await update();
+    const offset = direction === 'enter' ? 18 : -18;
+    const animation = els.graphPane.animate([
+      { opacity: 0, transform: `translateX(${offset}px)` },
+      { opacity: 1, transform: 'translateX(0)' }
+    ], { duration: 200, easing: 'cubic-bezier(.22,.68,0,1)' });
+    await animation.finished.catch(() => {});
+  }
+}
+
+async function switchWorkspace(direction, operation) {
+  if (workspaceSwitchInFlight) return false;
+  workspaceSwitchInFlight = true;
+  els.graphPane.inert = true;
+  els.graphPane.setAttribute('aria-busy', 'true');
+  els.workspaceSwitchStatus.hidden = false;
+  els.workspaceSwitchStatus.textContent = direction === 'enter' ? '正在进入子树…' : '正在返回主树…';
+  renderWorkspaceBanner();
+  try {
+    await operation();
+    return true;
+  } finally {
+    workspaceSwitchInFlight = false;
+    els.graphPane.inert = false;
+    els.graphPane.setAttribute('aria-busy', 'false');
+    els.workspaceSwitchStatus.hidden = true;
+    renderWorkspaceBanner();
+  }
 }
 
 async function enterSubtreeWorkspace(node) {
   if (!node?.subtreeFile || !isNodeFolded(node)) return;
-  if (dirty && !window.confirm("主树有未保存修改，进入子树前是否继续？（建议先保存主树）")) return;
-  if (workspaceMode === "main") {
-    mainWorkspaceSnapshot = {
-      markdown: toMarkdown(nodes, edges),
-      nodes: structuredClone(nodes),
-      edges: structuredClone(edges),
-      currentFocusId,
-      nextFocusId,
-      nextPlan,
-      chainText,
-      chainAutoAdvance,
-      chainForceNext,
-      chainRunStatus,
-      lastLoadedMarkdown,
-      lastSavedMarkdown
-    };
-  }
-  const response = await fetch(`/api/subtree-file?path=${encodeURIComponent(node.subtreeFile)}`);
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "读取子树失败");
-  workspaceMode = "subtree";
-  activeSubtreePath = node.subtreeFile;
-  activeSubtreeFoldRoot = node.id;
-  modelPanelNodeId = null;
-  skillPanelNodeId = null;
-  loadFromMarkdown(data.markdown, { skipUserGraphStateLock: true, skipRestoreSave: true, markSaved: true });
-  const url = new URL(window.location.href);
-  url.searchParams.set("subtree", activeSubtreePath);
-  window.history.replaceState({}, "", url);
-  renderWorkspaceBanner();
-  await loadVersions();
-  renderTree();
-  setSaveState(`已进入子树：${activeSubtreePath}`);
+  const switched = await switchWorkspace('enter', async () => {
+    if (dirty) await saveTree();
+    const lensWasOpen = focusLensOpen;
+    if (workspaceMode === "main") {
+      mainWorkspaceSnapshot = {
+        markdown: toMarkdown(nodes, edges),
+        nodes: structuredClone(nodes),
+        edges: structuredClone(edges),
+        currentFocusId,
+        nextFocusId,
+        nextPlan,
+        chainText,
+        chainAutoAdvance,
+        chainForceNext,
+        chainRunStatus,
+        lastLoadedMarkdown,
+        lastSavedMarkdown,
+        graphView: { ...graphView },
+        selectedId,
+        focusLensOpen,
+        focusLensId
+      };
+    }
+    const response = await fetch(`/api/subtree-file?path=${encodeURIComponent(node.subtreeFile)}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "读取子树失败");
+    await animateWorkspaceChange('enter', () => {
+      workspaceMode = "subtree";
+      activeSubtreePath = node.subtreeFile;
+      activeSubtreeFoldRoot = node.id;
+      modelPanelNodeId = null;
+      skillPanelNodeId = null;
+      editNodeId = null;
+      ioPreviewNodeId = null;
+      loadFromMarkdown(data.markdown, { skipUserGraphStateLock: true, skipRestoreSave: true, markSaved: true });
+      const url = new URL(window.location.href);
+      url.searchParams.set("subtree", activeSubtreePath);
+      window.history.replaceState({}, "", url);
+      renderWorkspaceBanner();
+      renderTreeSwitcher();
+      renderTree();
+      fitGraphToViewport();
+      if (lensWasOpen) openFocusLens(node.id);
+    });
+    await loadVersions();
+    setSaveState(`已进入子树：${activeSubtreePath}`);
+  });
+  // Focus the persistent return control, not a node removed by navigation.
+  if (switched) els.workspaceBannerExitBtn.focus({ preventScroll: true });
 }
 
 async function exitSubtreeWorkspace() {
   if (workspaceMode !== "subtree") return;
-  if (dirty && !window.confirm("子树有未保存修改，返回主树前是否继续？")) return;
-  const snapshot = mainWorkspaceSnapshot;
-  workspaceMode = "main";
-  activeSubtreePath = "";
-  activeSubtreeFoldRoot = "";
-  const url = new URL(window.location.href);
-  url.searchParams.delete("subtree");
-  window.history.replaceState({}, "", url);
-  if (snapshot) {
-    nodes = snapshot.nodes;
-    edges = snapshot.edges;
-    currentFocusId = snapshot.currentFocusId;
-    nextFocusId = snapshot.nextFocusId;
-    nextPlan = snapshot.nextPlan;
-    chainText = snapshot.chainText;
-    chainAutoAdvance = snapshot.chainAutoAdvance;
-    chainForceNext = snapshot.chainForceNext;
-    chainRunStatus = snapshot.chainRunStatus;
-    lastLoadedMarkdown = snapshot.lastLoadedMarkdown;
-    lastSavedMarkdown = snapshot.lastSavedMarkdown;
-    dirty = false;
-  } else {
-    await loadTree();
-    return;
+  const sourceNodeId = activeSubtreeFoldRoot;
+  const switched = await switchWorkspace('exit', async () => {
+    if (dirty) await saveTree();
+    const snapshot = mainWorkspaceSnapshot;
+    await animateWorkspaceChange('exit', async () => {
+      workspaceMode = "main";
+      activeSubtreePath = "";
+      activeSubtreeFoldRoot = "";
+      const url = new URL(window.location.href);
+      url.searchParams.delete("subtree");
+      window.history.replaceState({}, "", url);
+      if (snapshot) {
+        closeFocusLens({ locate: false });
+        editNodeId = null;
+        ioPreviewNodeId = null;
+        nodes = snapshot.nodes;
+        edges = snapshot.edges;
+        currentFocusId = snapshot.currentFocusId;
+        nextFocusId = snapshot.nextFocusId;
+        nextPlan = snapshot.nextPlan;
+        chainText = snapshot.chainText;
+        chainAutoAdvance = snapshot.chainAutoAdvance;
+        chainForceNext = snapshot.chainForceNext;
+        chainRunStatus = snapshot.chainRunStatus;
+        lastLoadedMarkdown = snapshot.lastLoadedMarkdown;
+        lastSavedMarkdown = snapshot.lastSavedMarkdown;
+        Object.assign(graphView, snapshot.graphView);
+        selectedId = snapshot.selectedId;
+        dirty = false;
+      } else {
+        await loadTree();
+      }
+      mainWorkspaceSnapshot = null;
+      renderWorkspaceBanner();
+      renderTreeSwitcher();
+      renderTree();
+      if (snapshot?.focusLensOpen) openFocusLens(snapshot.focusLensId);
+    });
+    await loadVersions();
+    setSaveState("已返回主树");
+  });
+  if (switched) {
+    const sourceCard = els.nodesLayer.querySelector(`[data-node-id="${CSS.escape(sourceNodeId)}"]`);
+    (sourceCard?.querySelector('[data-action="edit-subtree"]') || els.workspaceBannerEnterBtn).focus({ preventScroll: true });
   }
-  mainWorkspaceSnapshot = null;
-  renderWorkspaceBanner();
-  await loadVersions();
-  renderTree();
-  setSaveState("已返回主树");
 }
 
 async function persistSubtreeNow(reason, { backup = true } = {}) {
-  const markdown = toMarkdown(nodes, edges);
+  const markdown = workspaceMarkdown();
   const response = await fetch("/api/subtree-file", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -2229,6 +2372,18 @@ async function persistWorkspaceNow(reason, options) {
   return persistTreeNow(reason, options);
 }
 
+function workspaceMarkdown() {
+  return workspaceMode === 'subtree'
+    ? toSubtreeMarkdown(nodes, edges, activeSubtreeFoldRoot)
+    : toMarkdown(nodes, edges);
+}
+
+function workspaceSaveRequest(markdown, reason, backup = false) {
+  return workspaceMode === 'subtree'
+    ? { url: '/api/subtree-file', method: 'POST', body: { path: activeSubtreePath, markdown, reason, backup } }
+    : { url: treeApiUrl('/api/tree'), method: 'PUT', body: { markdown, reason, backup, source: 'ui', treeId: viewTreeId } };
+}
+
 function chainAddButton(node) {
   if (!isViewingActiveMethodTree()) return "";
   const inChain = parseChainIds(chainText).includes(node.id);
@@ -2237,7 +2392,7 @@ function chainAddButton(node) {
 
 function nodeRunButton(node) {
   const hasIdea = Boolean(String(node.nextIdea || "").trim());
-  return `<button type="button" data-action="run-direct" class="nodeRunBtn${hasIdea ? "" : " is-disabled"}" title="${hasIdea ? "直接执行这个节点；多个节点可同时执行" : "先填写下一步思路（NextIdea）再执行"}" aria-label="直接执行 ${attr(node.title || node.id)}">▶</button>`;
+  return `<button type="button" data-action="materials" class="nodeRunBtn" aria-label="${attr(node.title || node.id)}的资料" title="添加、选择节点图片和文档">📎</button><button type="button" data-action="run-direct" class="nodeRunBtn${hasIdea ? "" : " is-disabled"}" title="${hasIdea ? "直接执行这个节点；多个节点可同时执行" : "先填写下一步思路（NextIdea）再执行"}" aria-label="直接执行 ${attr(node.title || node.id)}">▶</button>`;
 }
 
 function coreNodeSummary(node, { compact = true } = {}) {
@@ -2284,7 +2439,6 @@ function renderNodeCard(node) {
         </span>
         <span class="nodeActions">
           ${foldBtn}
-          <button type="button" data-action="edit-subtree" class="subtreeEditBtn" title="在子树工作区编辑（不展开）">✎</button>
           ${readDoneButton(node)}
           ${nodeRunButton(node)}
           <button type="button" data-action="toggle-complete" class="completeBtn" title="完成 / 取消完成">✓</button>
@@ -2295,6 +2449,9 @@ function renderNodeCard(node) {
           <button type="button" data-action="delete" title="删除节点">×</button>
         </span>
       </span>
+      <div class="subtreeNavigation">
+        <button type="button" data-action="edit-subtree" class="subtreeEnterButton" title="直接切换到这棵子树，不展开主树">去到子树 →</button>
+      </div>
       ${coreNodeSummary(node, { compact: nodeCardCompact })}
       ${nodeCardCompact ? "" : readRow("说明", node.notes)}
       ${nodeCardCompact ? "" : codeLocBlock(node)}
@@ -2455,12 +2612,11 @@ async function runFocusLensNode(nodeId) {
     els.focusLensBody?.querySelector(".focusLensNextIdeaInput")?.focus();
     return;
   }
-  if (nextFocusId !== nodeId) setNextNode(nodeId);
-  if (dirty) await saveTree();
-  await runCodex({ preset: "next" });
+  await runDirectNode(nodeId);
 }
 
 async function runDirectNode(nodeId) {
+  if (nodeMaterialPending.has(JSON.stringify([viewTreeId, nodeId]))) { setSaveState('节点资料正在保存，请稍后执行。'); return; }
   const node = nodes.find((item) => item.id === nodeId);
   const nextIdea = String(node?.nextIdea || "").trim();
   if (!node || !nextIdea) {
@@ -2473,13 +2629,15 @@ async function runDirectNode(nodeId) {
     `问题：${node.problem || ""}`,
     `当前思路：${node.approach || ""}`,
     `下一步：${nextIdea}`,
-    "请直接完成这个节点的下一步工作。该请求使用独立会话；不要等待或修改其它节点的执行状态。完成后简要说明改动和结果。"
+    "请直接完成这个节点的下一步工作，续接该节点的已有对话；不要等待或修改其它节点的执行状态。完成后简要说明改动和结果。"
   ].filter(Boolean).join("\n");
-  const payload = await runCodex({ prompt, fresh: true, open: false, progress: true, nodeId });
+  if (dirty) await saveTree();
+  const payload = await runCodex({ prompt, fresh: false, open: false, progress: true, nodeId, treeId: viewTreeId });
   if (payload?.id || payload?.runId) beginDirectRunProgress(payload);
 }
 
 function handleFocusLensAction(action, nodeId) {
+  if (action === 'materials') void openNodeMaterials(nodeId);
   if (action === "set-current") setCurrentNode(nodeId);
   if (action === "set-next") setNextNode(nodeId);
   if (action === "toggle-complete") toggleNodeComplete(nodeId);
@@ -2489,7 +2647,10 @@ function handleFocusLensAction(action, nodeId) {
     else addNodeToChain(nodeId);
   }
   if (action === "run-agent") {
-    runFocusLensNode(nodeId).catch((error) => setSaveState(`Codex 没能启动: ${error.message}`));
+    runFocusLensNode(nodeId).catch((error) => setSaveState(`DeepSeek 没能启动：${error.message}`));
+  }
+  if (action === 'open-subtree') {
+    enterSubtreeWorkspace(nodes.find(node => node.id === nodeId)).catch(error => setSaveState(error.message));
   }
 }
 
@@ -3182,6 +3343,9 @@ function startEdgeLabelDrag(event, edgeId, label) {
 }
 
 function wireNodeCard(nodeCard, nodeId) {
+  nodeCard.querySelector('[data-action="materials"]')?.addEventListener('click', event => {
+    event.stopPropagation(); void openNodeMaterials(nodeId);
+  });
   nodeCard.addEventListener("pointerdown", (event) => {
     if (isInteractive(event.target)) return;
     const prevSelectedId = selectedId;
@@ -3279,7 +3443,7 @@ function wireNodeCard(nodeCard, nodeId) {
 
   nodeCard.querySelector("[data-action='run-direct']")?.addEventListener("click", (event) => {
     event.stopPropagation();
-    runDirectNode(nodeId).catch((error) => setSaveState(`Codex 没能启动: ${error.message}`));
+    runDirectNode(nodeId).catch((error) => setSaveState(`DeepSeek 没能启动：${error.message}`));
   });
 
   nodeCard.querySelector("[data-action='toggle-complete']").addEventListener("click", (event) => {
@@ -3623,10 +3787,14 @@ function prioritizeFocusSpine(adjacency) {
   }
 }
 
+function workspaceFocusStorageKey() {
+  return `${USER_GRAPH_STATE_STORAGE_KEY}.${viewTreeId}${workspaceMode === 'subtree' ? `.subtree.${activeSubtreePath}` : ''}`;
+}
+
 function saveUserGraphStateFocus() {
   try {
     if (!viewTreeId) return;
-    localStorage.setItem(`${USER_GRAPH_STATE_STORAGE_KEY}.${viewTreeId}`, JSON.stringify({
+    localStorage.setItem(workspaceFocusStorageKey(), JSON.stringify({
       current: currentFocusId || "",
       next: nextFocusId || "",
       chainForceNext: chainForceNext || ""
@@ -3639,9 +3807,9 @@ function saveUserGraphStateFocus() {
 function readUserGraphStateFocus() {
   try {
     if (!viewTreeId) return null;
-    const key = `${USER_GRAPH_STATE_STORAGE_KEY}.${viewTreeId}`;
+    const key = workspaceFocusStorageKey();
     let raw = localStorage.getItem(key);
-    if (!raw && viewTreeId === activeMethodTreeId) {
+    if (!raw && workspaceMode === 'main' && viewTreeId === activeMethodTreeId) {
       raw = localStorage.getItem(USER_GRAPH_STATE_STORAGE_KEY);
       if (raw) localStorage.setItem(key, raw);
     }
@@ -3722,6 +3890,7 @@ function renderTreeSwitcher() {
   els.chainAutoAdvanceBtn?.classList.toggle("hidden", !isViewingActiveMethodTree());
   document.querySelector(".chainDock")?.classList.toggle("hidden", !isViewingActiveMethodTree());
   if (els.subtitle && current) els.subtitle.textContent = `${current.title} · ${current.path}`;
+  if (workspaceMode === 'subtree') renderWorkspaceBanner();
 }
 
 async function loadTreeRegistryState() {
@@ -3751,6 +3920,8 @@ async function switchViewedTree(treeId) {
   shouldAutoFitView = true;
   renderTreeSwitcher();
   await loadTree({ fitView: true, registryLoaded: true });
+  await restoreDirectRunConversations();
+  renderDirectRunDialog();
 }
 
 async function createIndependentTree() {
@@ -4018,6 +4189,9 @@ function wireChainLoopHelp() {
   els.workspaceBannerExitBtn?.addEventListener("click", () => {
     exitSubtreeWorkspace().catch((error) => setSaveState(error.message));
   });
+  els.workspaceBannerEnterBtn?.addEventListener('click', () => {
+    enterSubtreeWorkspace(workspaceEntryNode()).catch(error => setSaveState(error.message));
+  });
   els.chainLoopHelpDialog?.addEventListener("click", (event) => {
     if (event.target === els.chainLoopHelpDialog) els.chainLoopHelpDialog.close();
   });
@@ -4247,6 +4421,17 @@ function loadFromMarkdown(markdown, options = {}) {
 }
 
 async function loadTree(options = {}) {
+  if (workspaceMode === 'subtree' && activeSubtreePath) {
+    if (dirty) await saveTree();
+    const response = await fetch(`/api/subtree-file?path=${encodeURIComponent(activeSubtreePath)}`, { cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '加载子树失败');
+    loadFromMarkdown(data.markdown, { fitView: options.fitView, markSaved: true, skipUserGraphStateLock: true, preserveLens: true });
+    renderWorkspaceBanner();
+    await loadVersions();
+    setSaveState('已加载');
+    return data.markdown;
+  }
   if (!options.registryLoaded) await loadTreeRegistryState();
   const treeId = viewTreeId;
   const sequence = ++treeLoadSequence;
@@ -4533,40 +4718,24 @@ function normalizeKnowledgeTurn(turn) {
 }
 
 function serializeKnowledgeHistoryForStorage() {
-  return knowledgeHistory.slice(-KB_HISTORY_MAX_TURNS).map((turn) => ({
+  return knowledgeHistory.map((turn) => ({
     id: turn.id,
     createdAt: turn.createdAt,
     kind: turn.kind,
     query: turn.query,
-    executedQuery: turn.executedQuery || "",
-    rewriteSource: turn.rewriteSource || "",
     answer: turn.answer || "",
     summary: turn.summary || buildTurnSummary(turn),
     collapsed: turn.collapsed === true,
     referencesOpen: turn.referencesOpen === true,
-    includeWeb: turn.includeWeb === true,
-    results: (turn.results || []).map((item) => ({
-      id: item.id,
-      path: item.path,
-      title: item.title,
-      url: item.url,
-      source: item.source,
-      score: item.score,
-      content: String(item.content || "").slice(0, KB_CONTEXT_SNIPPET_CHARS)
-    }))
+    includeWeb: turn.includeWeb === true
   }));
 }
 
 function persistKnowledgeHistoryToLocalStorage() {
   try {
     localStorage.setItem(KB_HISTORY_STORAGE_KEY, JSON.stringify(serializeKnowledgeHistoryForStorage()));
-  } catch {
-    knowledgeHistory = knowledgeHistory.slice(-Math.max(4, Math.floor(KB_HISTORY_MAX_TURNS / 2)));
-    try {
-      localStorage.setItem(KB_HISTORY_STORAGE_KEY, JSON.stringify(serializeKnowledgeHistoryForStorage()));
-    } catch {
-      // ignore quota errors
-    }
+  } catch (error) {
+    console.warn("知识库对话浏览器缓存保存失败；保留完整内存历史并继续保存到服务器。", error);
   }
 }
 
@@ -4609,7 +4778,7 @@ async function loadKnowledgeHistory() {
     const response = await fetch(`/api/knowledge/history?t=${Date.now()}`);
     const data = await response.json();
     if (response.ok && Array.isArray(data.history) && data.history.length) {
-      knowledgeHistory = data.history.slice(-KB_HISTORY_MAX_TURNS).map((turn) => normalizeKnowledgeTurn(turn));
+      knowledgeHistory = data.history.map((turn) => normalizeKnowledgeTurn(turn));
       loadedFromServer = true;
     }
   } catch {
@@ -4621,7 +4790,7 @@ async function loadKnowledgeHistory() {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length) {
-          knowledgeHistory = parsed.slice(-KB_HISTORY_MAX_TURNS).map((turn) => normalizeKnowledgeTurn(turn));
+          knowledgeHistory = parsed.map((turn) => normalizeKnowledgeTurn(turn));
           await flushKnowledgeHistoryToServer();
         }
       }
@@ -4647,9 +4816,6 @@ function appendKnowledgeTurn(turn) {
     includeWeb: turn.includeWeb === true,
     results
   }));
-  if (knowledgeHistory.length > KB_HISTORY_MAX_TURNS) {
-    knowledgeHistory = knowledgeHistory.slice(-KB_HISTORY_MAX_TURNS);
-  }
   knowledgeHistoryShouldStickToBottom = true;
   persistKnowledgeHistory();
 }
@@ -5033,7 +5199,6 @@ async function askKnowledgeFromPanel() {
   const priorRetrievalContext = buildKnowledgeContextFromHistory();
   const priorAskHistory = knowledgeHistory
     .filter((turn) => turn.kind === "ask" && turn.query)
-    .slice(-8)
     .map((turn) => ({ question: turn.query, answer: turn.answer || "" }));
   try {
     const retrievalHint = buildKnowledgeRetrievalHint(question);
@@ -5100,50 +5265,43 @@ async function pollTreeChanges() {
 }
 
 async function saveTree() {
-  clearTimeout(saveTimer);
-  saveTimer = null;
-  if (saveInFlight) {
-    saveAgain = true;
+  if (saveInFlightPromise) {
+    await saveInFlightPromise;
+    if (dirty || pendingSaveBackup) return saveTree();
     return;
   }
+  saveInFlightPromise = saveTreeOnce();
+  try {
+    await saveInFlightPromise;
+  } finally {
+    saveInFlightPromise = null;
+  }
+  if (dirty || pendingSaveBackup) return saveTree();
+}
+
+async function saveTreeOnce() {
+  clearTimeout(saveTimer);
+  saveTimer = null;
   saveInFlight = true;
   setSaveState("保存中...");
   try {
-    const markdown = toMarkdown(nodes, edges);
+    const markdown = workspaceMarkdown();
     const reason = pendingSaveReason || (workspaceMode === "subtree" ? "将自动保存子树修改" : "将自动保存图谱修改");
     pendingSaveReason = "";
+    const backup = pendingSaveBackup;
+    pendingSaveBackup = false;
     let data = {};
-    if (workspaceMode === "subtree" && activeSubtreePath) {
-      const response = await fetch("/api/subtree-file", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ path: activeSubtreePath, markdown, reason, backup: false })
-      });
-      try {
-        data = await response.json();
-      } catch {
-        data = {};
-      }
-      if (!response.ok) throw new Error(data.error || `保存失败 (HTTP ${response.status})`);
-    } else {
-      const response = await fetch(treeApiUrl("/api/tree"), {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ markdown, reason, backup: false, source: "ui", treeId: viewTreeId })
-      });
-      try {
-        data = await response.json();
-      } catch {
-        data = {};
-      }
-      if (!response.ok) throw new Error(data.error || `保存失败 (HTTP ${response.status})`);
-    }
+    const target = workspaceSaveRequest(markdown, reason, backup);
+    const response = await fetch(target.url, { method: target.method,
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify(target.body) });
+    try { data = await response.json(); } catch { data = {}; }
+    if (!response.ok) throw new Error(data.error || `保存失败 (HTTP ${response.status})`);
     lastSavedMarkdown = markdown;
     lastLoadedMarkdown = markdown;
     if (workspaceMode === "main" && viewTreeId) {
       treeMarkdownCache.set(viewTreeId, { markdown, loadedAt: Date.now() });
     }
-    dirty = false;
+    dirty = workspaceMarkdown() !== markdown;
     setSaveState(data.flowSync?.changed ? `已保存 · 自动同步 ${data.flowSync.changed} 个 flow 状态` : "已保存");
     await loadVersions();
     if (isViewingActiveMethodTree()) loadMaintenanceStatus().catch(() => {});
@@ -5540,14 +5698,16 @@ function parseEndpointList(value) {
 
 function nextNodeId() {
   let index = nodes.length + 1;
-  while (nodes.some((node) => node.id === `N${index}`)) index += 1;
-  return `N${index}`;
+  const prefix = workspaceMode === 'subtree' ? `${activeSubtreeFoldRoot}_` : '';
+  while (nodes.some((node) => node.id === `${prefix}N${index}`)) index += 1;
+  return `${prefix}N${index}`;
 }
 
 function nextEdgeId(nextEdges = edges) {
   let index = nextEdges.length + 1;
-  while (nextEdges.some((edge) => edge.id === `E${index}`)) index += 1;
-  return `E${index}`;
+  const prefix = workspaceMode === 'subtree' ? `E${activeSubtreeFoldRoot}_` : 'E';
+  while (nextEdges.some((edge) => edge.id === `${prefix}${index}`)) index += 1;
+  return `${prefix}${index}`;
 }
 
 function markDirty(reason = "将自动保存图谱修改") {
@@ -5712,7 +5872,7 @@ function compactNodeHeightBounds(node) {
     const titleSize = clamp(16 / graphView.scale, 27, 88);
     return {
       min: Math.max(112, Math.ceil(titleSize * 1.2 + 38)),
-      max: 420
+      max: isNodeFolded(node) ? 560 : 420
     };
   }
   const focus = node.id === currentFocusId || node.id === nextFocusId;
@@ -6305,6 +6465,7 @@ els.fitViewBtn?.addEventListener("click", () => scheduleFitGraphToViewport());
 els.embedExpandBtn?.addEventListener("click", () => { toggleChatDisplayMode().catch(() => {}); });
 els.saveBtn.addEventListener("click", () => {
   pendingSaveReason = pendingSaveReason || "将手动保存图谱修改";
+  pendingSaveBackup = workspaceMode === 'subtree';
   saveTree().catch((error) => setSaveState(error.message));
 });
 els.reloadBtn.addEventListener("click", () => loadTree({ fitView: true }).catch((error) => setSaveState(error.message)));
@@ -6320,8 +6481,217 @@ els.filePreviewClose?.addEventListener("click", () => els.filePreviewDialog?.clo
 els.filePreviewDialog?.addEventListener("click", (event) => {
   if (event.target === els.filePreviewDialog) els.filePreviewDialog.close();
 });
-els.directRunPanelClose?.addEventListener("click", () => {
-  els.directRunPanel.hidden = true;
+els.directRunDialogClose?.addEventListener("click", () => {
+  els.directRunDialog?.close();
+  if (els.directRunReopenBtn) els.directRunReopenBtn.hidden = false;
+});
+els.directRunReopenBtn?.addEventListener("click", () => {
+  renderDirectRunDialog();
+  els.directRunDialog?.showModal();
+  els.directRunReopenBtn.hidden = true;
+});
+els.directRunExpandBtn?.addEventListener("click", () => {
+  directRunDialogExpanded = !directRunDialogExpanded;
+  els.directRunDialog?.classList.toggle("is-expanded", directRunDialogExpanded);
+  els.directRunExpandBtn.textContent = directRunDialogExpanded ? "⛶" : "⛶";
+});
+els.directRunConversationSelect?.addEventListener("change", () => {
+  activeDirectRunId = els.directRunConversationSelect.value;
+  renderDirectRunDialog();
+});
+els.directRunPrevBtn?.addEventListener("click", () => selectAdjacentDirectRun(-1));
+els.directRunNextBtn?.addEventListener("click", () => selectAdjacentDirectRun(1));
+els.directRunDeleteBtn?.addEventListener("click", () => {
+  deleteDirectRunConversation().catch((error) => setSaveState(`删除节点对话失败：${error.message}`));
+});
+els.directRunTranscript?.addEventListener("scroll", () => {
+  if (directRunTranscriptRendering) return;
+  const transcript = els.directRunTranscript;
+  directRunTranscriptFollowOutput = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 32;
+});
+document.addEventListener("keydown", (event) => {
+  if (!els.directRunDialog?.open || !["ArrowLeft", "ArrowRight"].includes(event.key) || event.isComposing) return;
+  const target = event.target;
+  if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable='true']")) return;
+  event.preventDefault();
+  selectAdjacentDirectRun(event.key === "ArrowLeft" ? -1 : 1);
+});
+els.directRunComposer?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  continueDirectRun().catch((error) => setSaveState(`继续对话失败：${error.message}`));
+});
+const directRunAttachmentDrafts = new Map();
+const directRunSubmittingNodes = new Set();
+const directRunMaterialSelection = new Map();
+const nodeMaterialPending = new Set();
+let materialView = null;
+function materialQuery(scope) { return new URLSearchParams({ treeId: scope.treeId, nodeId: scope.nodeId }); }
+async function materialRequest(scope, method = 'GET', body) {
+  const response = await fetch(`/api/node/materials?${materialQuery(scope)}`, { method,
+    ...(body ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+  return payload.materials;
+}
+async function uploadNodeAttachment(scope, file) {
+  if (file.size > 20 * 1024 * 1024) throw new Error('超过 20 MiB，不会截断文件');
+  const query = materialQuery(scope); query.set('name', file.name);
+  const response = await fetch(`/api/chat/attachments?${query}`, { method: 'POST', body: file });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+  return payload.attachment;
+}
+function renderNodeMaterials(view) {
+  if (materialView !== view) return;
+  els.nodeMaterialsStatus.textContent = view.status || '';
+  els.nodeMaterialsAdd.disabled = view.busy;
+  els.nodeMaterialsList.innerHTML = (view.materials || []).map(item => `<article class="nodeMaterial" data-material-id="${attr(item.id)}">
+    <a href="${attr(item.url)}" target="_blank" rel="noopener">${item.kind === 'image' ? `<img src="${attr(item.url)}" alt="${attr(item.name)}">` : '<span aria-hidden="true">▤</span>'}<span>${escapeHtml(item.name)}</span></a>
+    <label><input type="checkbox" data-material-select="${attr(item.id)}" ${item.enabled ? 'checked' : ''} ${view.busy ? 'disabled' : ''}>执行时使用</label>
+    ${item.warning ? `<small>${escapeHtml(item.warning)}</small>` : ''}
+    <div><button type="button" data-material-chat="${attr(item.id)}" ${view.busy ? 'disabled' : ''}>加入本次对话</button><button type="button" data-material-remove="${attr(item.id)}" ${view.busy ? 'disabled' : ''}>移除</button></div>
+  </article>`).join('') || '<p>此节点还没有资料。添加后可预览、选择或加入对话。</p>';
+}
+async function openNodeMaterials(nodeId, treeId = viewTreeId) {
+  if (materialView?.busy && materialView.nodeId === nodeId && materialView.treeId === treeId) {
+    if (!els.nodeMaterialsDialog.open) els.nodeMaterialsDialog.showModal();
+    return;
+  }
+  const view = { nodeId, treeId, materials: [], busy: true, status: '正在读取…' };
+  materialView = view;
+  els.nodeMaterialsTitle.textContent = `${nodes.find(n => n.id === nodeId)?.title || nodeId} · 资料`;
+  if (!els.nodeMaterialsDialog.open) els.nodeMaterialsDialog.showModal();
+  renderNodeMaterials(view);
+  try { view.materials = await materialRequest(view); view.status = ''; }
+  catch (error) { view.status = error.message; }
+  finally { view.busy = false; renderNodeMaterials(view); }
+}
+async function mutateNodeMaterials(view, action) {
+  if (view.busy) return;
+  view.busy = true; view.status = '正在保存…';
+  const key = directRunNodeKey(view); nodeMaterialPending.add(key); renderNodeMaterials(view);
+  try { await action(); }
+  catch (error) { view.status = error.message; }
+  finally { view.busy = false; nodeMaterialPending.delete(key); renderNodeMaterials(view); renderDirectRunDialog(); }
+}
+async function addNodeMaterials(files) {
+  const view = materialView;
+  if (!view || !files.length) return;
+  await mutateNodeMaterials(view, async () => {
+    const errors = [];
+    await Promise.all(Array.from(files).map(async file => {
+      try { const ref = await uploadNodeAttachment(view, file); await materialRequest(view, 'POST', { id: ref.id }); }
+      catch (error) { errors.push(`${file.name}：${error.message}`); }
+    }));
+    view.materials = await materialRequest(view);
+    view.status = errors.join('\n') || '资料已保存，默认勾选用于执行。';
+  });
+}
+function openNodeMaterialChat(view, ref) {
+  let run = orderedDirectRuns().find(r => r.treeId === view.treeId && r.nodeId === view.nodeId);
+  if (!run) {
+    run = { id: `draft-${crypto.randomUUID()}`, treeId: view.treeId, nodeId: view.nodeId, status: 'draft', messages: [], createdAt: new Date().toISOString() };
+    directRunStates.set(run.id, run); // Local composer only: no model request or polling.
+  }
+  const drafts = attachmentDrafts(run);
+  if (!drafts.some(d => d.attachment?.id === ref.id)) drafts.push({ id: crypto.randomUUID(), name: ref.name, status: 'ready', attachment: ref });
+  activeDirectRunId = run.id;
+  els.nodeMaterialsDialog.close();
+  if (!els.directRunDialog.open) els.directRunDialog.showModal();
+  renderDirectRunDialog(); els.directRunMessageInput.focus();
+}
+els.nodeMaterialsClose?.addEventListener('click', () => els.nodeMaterialsDialog.close());
+els.nodeMaterialsAdd?.addEventListener('click', () => els.nodeMaterialsFileInput.click());
+els.nodeMaterialsFileInput?.addEventListener('change', () => {
+  const files = [...els.nodeMaterialsFileInput.files]; els.nodeMaterialsFileInput.value = ''; void addNodeMaterials(files);
+});
+els.nodeMaterialsList?.addEventListener('change', event => {
+  const input = event.target.closest('[data-material-select]'), view = materialView;
+  if (input && view) void mutateNodeMaterials(view, async () => {
+    view.materials = await materialRequest(view, 'PATCH', { id: input.dataset.materialSelect, enabled: input.checked }); view.status = '选择已保存。';
+  });
+});
+els.nodeMaterialsList?.addEventListener('click', event => {
+  const view = materialView, chat = event.target.closest('[data-material-chat]'), remove = event.target.closest('[data-material-remove]');
+  if (!view || view.busy) return;
+  if (chat) openNodeMaterialChat(view, view.materials.find(m => m.id === chat.dataset.materialChat));
+  if (remove) void mutateNodeMaterials(view, async () => {
+    view.materials = await materialRequest(view, 'DELETE', { id: remove.dataset.materialRemove }); view.status = '已解除节点关联，原文件保留供历史对话使用。';
+  });
+});
+els.nodeMaterialsDialog?.addEventListener('dragover', event => {
+  if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }
+});
+els.nodeMaterialsDialog?.addEventListener('drop', event => {
+  if (event.dataTransfer.files.length) { event.preventDefault(); void addNodeMaterials(event.dataTransfer.files); }
+});
+els.nodeMaterialsDialog?.addEventListener('paste', event => {
+  const files = [...(event.clipboardData?.items || [])].filter(i => i.kind === 'file').map(i => i.getAsFile()).filter(Boolean);
+  if (files.length) { event.preventDefault(); void addNodeMaterials(files); }
+});
+els.directRunMaterialsBtn?.addEventListener('click', () => {
+  const run = directRunStates.get(activeDirectRunId); if (run) void openNodeMaterials(run.nodeId, run.treeId);
+});
+els.directRunUseMaterials?.addEventListener('change', () => {
+  const run = directRunStates.get(activeDirectRunId); if (run) directRunMaterialSelection.set(directRunNodeKey(run), els.directRunUseMaterials.checked);
+});
+let attachmentRenderSignature = '';
+function attachmentDrafts(run) {
+  if (!run) return [];
+  const key = directRunNodeKey(run);
+  if (!directRunAttachmentDrafts.has(key)) directRunAttachmentDrafts.set(key, []);
+  return directRunAttachmentDrafts.get(key);
+}
+function renderAttachmentDrafts() {
+  const run = directRunStates.get(activeDirectRunId);
+  const drafts = attachmentDrafts(run);
+  const signature = JSON.stringify([run && directRunNodeKey(run), drafts]);
+  if (signature !== attachmentRenderSignature) {
+    els.directRunAttachments.innerHTML = drafts.map(item => `<div class="directRunAttachmentDraft">
+      ${item.attachment?.kind === 'image' ? `<img src="${attr(item.attachment.url)}" alt="${attr(item.name)}">` : '<span aria-hidden="true">▤</span>'}
+      <span>${escapeHtml(item.name)}<small>${escapeHtml(item.status === 'uploading' ? '上传并解析中…' : item.error || item.attachment?.warning || '已就绪')}</small></span>
+      <button type="button" data-remove-attachment="${attr(item.id)}" aria-label="移除 ${attr(item.name)}">×</button></div>`).join('');
+    attachmentRenderSignature = signature;
+  }
+  els.directRunAttachBtn.disabled = !run;
+  els.directRunSendBtn.disabled ||= drafts.some(item => item.status !== 'ready');
+}
+async function addDirectRunAttachments(files) {
+  const run = directRunStates.get(activeDirectRunId);
+  if (!run) { setSaveState('请先从节点右上角打开该节点对话。'); return; }
+  const drafts = attachmentDrafts(run);
+  await Promise.all(Array.from(files).map(async file => {
+    const item = { id: crypto.randomUUID(), name: file.name, status: 'uploading' };
+    drafts.push(item); renderDirectRunDialog();
+    try {
+      item.attachment = await uploadNodeAttachment(run, file); item.status = 'ready';
+    } catch (error) { item.status = 'failed'; item.error = error.message; }
+    renderDirectRunDialog();
+  }));
+}
+els.directRunAttachBtn?.addEventListener('click', () => els.directRunFileInput.click());
+els.directRunFileInput?.addEventListener('change', () => {
+  const files = [...els.directRunFileInput.files]; els.directRunFileInput.value = '';
+  void addDirectRunAttachments(files);
+});
+els.directRunAttachments?.addEventListener('click', event => {
+  const button = event.target.closest('[data-remove-attachment]');
+  if (!button) return;
+  const drafts = attachmentDrafts(directRunStates.get(activeDirectRunId));
+  const index = drafts.findIndex(item => item.id === button.dataset.removeAttachment);
+  if (index >= 0) drafts.splice(index, 1);
+  renderDirectRunDialog();
+});
+els.directRunComposer?.addEventListener('dragover', event => {
+  if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }
+});
+els.directRunComposer?.addEventListener('drop', event => {
+  if (!event.dataTransfer.files.length) return;
+  event.preventDefault(); void addDirectRunAttachments(event.dataTransfer.files);
+});
+els.directRunComposer?.addEventListener('paste', event => {
+  const files = [...(event.clipboardData?.items || [])].filter(item => item.kind === 'file').map(item => item.getAsFile()).filter(Boolean);
+  if (files.length) { event.preventDefault(); void addDirectRunAttachments(files); }
 });
 let codexThreadRefreshTimer = null;
 
@@ -6341,7 +6711,7 @@ async function runCodex(body = {}) {
     els.focusLensBody?.querySelector("[data-focus-lens-action='run-agent']")
   ].filter(Boolean);
   for (const button of buttons) button.disabled = true;
-  setSaveState("正在发给 Codex...");
+  setSaveState("正在发给 DeepSeek...");
   try {
     const res = await fetch("/api/codex/run", {
       method: "POST",
@@ -6353,24 +6723,275 @@ async function runCodex(body = {}) {
     setSaveState(payload.status === "running" ? "节点已开始执行，可在输出面板查看中间过程" : (payload.resumed ? "已发到原来那条会话，切过去接着做" : "已新开一条会话，切过去就能看到"));
     return payload;
   } catch (error) {
-    setSaveState(`Codex 没能启动: ${error.message}`);
+    setSaveState(`DeepSeek 没能启动：${error.message}`);
     return false;
   } finally {
     for (const button of buttons) button.disabled = false;
   }
 }
 
-function renderDirectRunPanel() {
-  if (!els.directRunPanel || !els.directRunList) return;
-  const runs = [...directRunStates.values()].slice(-8).reverse();
-  els.directRunPanel.hidden = runs.length === 0;
-  els.directRunList.innerHTML = runs.map((run) => {
-    const node = nodes.find((item) => item.id === run.nodeId);
-    const title = node?.title || run.nodeId || "节点";
-    const status = run.status === "running" ? "执行中" : run.status === "completed" ? "已完成" : run.status === "failed" ? "失败" : "启动中";
-    const events = (run.events || []).slice(-80).map((event) => `<div class="directRunEvent"><span class="directRunEventType">${escapeHtml(event.type || "事件")}</span><span>${escapeHtml(event.text || "")}</span></div>`).join("");
-    return `<section class="directRunCard ${run.status}"><header><strong>${escapeHtml(title)}</strong><span>${status}</span></header><div class="directRunEvents">${events || "等待模型事件…"}</div></section>`;
+function directRunStatusLabel(status) {
+  if (status === 'draft') return '待发送 · 尚未调用模型';
+  return status === "running" ? "执行中 · 尚未结束" : status === "completed" ? "本轮已结束 · 执行完成" : status === "failed" ? "本轮已结束 · 执行失败" : "启动中 · 尚未结束";
+}
+
+function directRunDurationLabel(milliseconds) {
+  const seconds = Math.max(0, Math.ceil(Number(milliseconds || 0) / 1000));
+  const minutes = Math.floor(seconds / 60);
+  return minutes ? `${minutes} 分${seconds % 60 ? ` ${seconds % 60} 秒` : ""}` : `${seconds} 秒`;
+}
+
+function directRunProgressText(run) {
+  if (!run) return "等待执行";
+  if (run.status === 'draft') return '填写要求后发送；加入资料不会自动执行。';
+  const progress = run.progress || {};
+  const terminal = ["completed", "failed"].includes(run.status);
+  const start = Date.parse(run.createdAt || "");
+  const end = terminal ? Date.parse(run.updatedAt || "") : Date.now();
+  const elapsed = Number.isFinite(progress.elapsedMs) ? progress.elapsedMs : (Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, end - start) : 0);
+  if (terminal) return `${directRunStatusLabel(run.status)} · 本轮用时 ${directRunDurationLabel(elapsed)}${run.status === "completed" ? " · 单轮执行结束不代表整个目标已完成，可继续发送消息" : " · 请查看下方失败原因，可继续发送消息"}`;
+  const samples = Number(progress.sampleCount || 0);
+  const remaining = progress.estimatedRemainingMs;
+  const estimate = samples > 0 && Number.isFinite(remaining) && remaining >= 0
+    ? remaining === 0 ? "已超过历史参考时长，仍在执行，结束时间暂不确定" : `预计还需约 ${directRunDurationLabel(remaining)}（参考 ${samples} 次历史执行，非承诺）`
+    : progress.overEstimate ? "已超过历史参考时长，仍在执行，结束时间暂不确定" : "暂无法可靠预估结束时间（历史样本不足）";
+  return `${progress.label || (run.status === "starting" ? "正在准备执行" : "正在执行任务")} · 已用时 ${directRunDurationLabel(elapsed)} · ${estimate}`;
+}
+
+function directRunVisibleError(run) {
+  if (run?.progressReadError) return `暂时无法读取执行进度：${run.progressReadError}。这不代表任务已结束，正在重新连接。`;
+  if (run?.status !== "failed") return "";
+  if (run.errorSummary) return run.errorSummary;
+  const error = String(run.error || [...(run.events || [])].reverse().find((event) => event.type === "failed")?.text || "后端未提供详细原因");
+  if (/gate|budget|KiB|compact/i.test(error)) return `任务树写入被容量或格式检查阻止，本轮未成功完成。具体原因：${error}`;
+  return `本轮执行失败：${error}`;
+}
+
+function directRunEventsHtml(run) {
+  const events = (run?.events || []).filter((event) => ["queued", "turn/accepted", "model/request-retrying", "tool/started", "tool/completed", "completed", "failed"].includes(event.type));
+  return events.map((event) => {
+    const labels = { queued: "已收到节点执行请求", "turn/accepted": "模型已接受请求", completed: "本轮执行完成", failed: "本轮执行失败" };
+    const tool = event.toolName || event.tool || "";
+    const label = event.type === "tool/started" && tool ? `调用 ${tool}` : event.type === "tool/completed" && tool ? `${event.result?.ok === false ? "工具执行失败" : "工具执行完成"}：${tool}` : labels[event.type] || event.text || "工具执行事件";
+    return `<div class="directRunSystemEvent"><span>${escapeHtml(label)}</span></div>`;
   }).join("");
+}
+
+function directRunTypingLabel(run) {
+  if (run?.status === "completed") return "本轮已结束，模型没有返回文字回复。";
+  if (run?.status === "failed") return "本轮已结束，执行失败；请查看上方失败原因。";
+  return run?.status === "running" ? "正在执行，等待下一段输出…" : "正在准备执行…";
+}
+
+function directRunNodeKey(run) {
+  return JSON.stringify([run.treeId, run.nodeId]);
+}
+
+function orderedDirectRuns() {
+  const latest = new Map();
+  const runs = [...directRunStates.values()]
+    .filter((run) => run.nodeId && run.treeId === viewTreeId)
+    .sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
+  for (const run of runs) latest.set(directRunNodeKey(run), run);
+  return [...latest.values()].sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
+}
+
+function isDirectRunBusy(run) {
+  return Boolean(run && [...directRunStates.values()].some((item) =>
+    directRunNodeKey(item) === directRunNodeKey(run) && ["starting", "running"].includes(item.status)));
+}
+
+function directRunTranscriptHtml(run) {
+  if (run?.status === 'draft') return '<div class="directRunEmpty">资料已加入输入区，填写要求后发送。尚未调用模型。</div>';
+  if (!run) return `<div class="directRunEmpty">从节点右上角启动一次执行，或选择一条已有会话。</div>`;
+  const reasoning = String(run.reasoning || run.streams?.reasoning?.text || "").trim();
+  const output = String(run.output || run.streams?.agentMessage?.text || "").trim();
+  const streaming = !["completed", "failed"].includes(run.status);
+  const streamMarkup = (value) => streaming
+    ? escapeHtml(value).replace(/\n/g, "<br>")
+    : renderMarkdownLite(value);
+  const streamClass = streaming ? " is-streaming" : "";
+  const statusLine = directRunEventsHtml(run);
+  const prior = (run.messages || []).map((message) => `<article class="directRunMessage directRunMessage--${message.role === "user" ? "user" : "assistant"}"><div class="directRunMessageRole">${message.role === "user" ? "你" : "DeepSeek"}</div><div class="directRunMarkdown">${renderMarkdownLite(message.content || "")}</div>${(message.attachments || []).map(a => `<a class="directRunSavedAttachment" href="${attr(a.url)}" target="_blank" rel="noopener">${a.kind === 'image' ? `<img src="${attr(a.url)}" alt="${attr(a.name)}">` : '▤'} ${escapeHtml(a.name)}</a>`).join('')}</article>`).join("");
+  return `<details class="directRunToolLog"><summary>工具执行记录（可展开）</summary><div data-direct-run-events>${statusLine}</div></details>${prior}${reasoning ? `<details class="directRunReasoning"><summary>思考过程</summary><div class="directRunMarkdown${streamClass}" data-direct-run-reasoning>${streamMarkup(reasoning)}</div></details>` : ""}${output ? `<article class="directRunMessage directRunMessage--assistant" data-direct-run-output><div class="directRunMessageRole">DeepSeek</div><div class="directRunMarkdown${streamClass}">${streamMarkup(output)}</div></article>` : `<div class="directRunTyping" data-direct-run-typing>${directRunTypingLabel(run)}</div>`}`;
+}
+
+function directRunMessageSignature(run) {
+  return (run?.messages || []).map((message) => `${message.role || ""}:${message.content || ""}:${(message.attachments || []).map(a => a.id).join(',')}`).join("\u0001");
+}
+
+function directRunStreamValue(run, type) {
+  return String(run?.[type] || run?.streams?.[type === "output" ? "agentMessage" : "reasoning"]?.text || "").trim();
+}
+
+function updateDirectRunStreamElement(element, value, streaming) {
+  if (!element) return;
+  element.classList.toggle("is-streaming", streaming);
+  if (streaming) {
+    element.textContent = value;
+    return;
+  }
+  element.innerHTML = renderMarkdownLite(value);
+}
+
+function renderDirectRunDialog() {
+  if (!els.directRunDialog || !els.directRunTranscript) return;
+  const runs = orderedDirectRuns();
+  if (!runs.some((item) => item.id === activeDirectRunId)) {
+    const previous = directRunStates.get(activeDirectRunId);
+    activeDirectRunId = runs.find((item) => previous && directRunNodeKey(item) === directRunNodeKey(previous))?.id || runs.at(-1)?.id || "";
+  }
+  const run = directRunStates.get(activeDirectRunId);
+  const node = nodes.find((item) => item.id === run?.nodeId);
+  els.directRunDialogTitle.textContent = node?.title || run?.nodeId || "节点执行";
+  els.directRunDialogStatus.textContent = run ? directRunStatusLabel(run.status) : "等待执行";
+  els.directRunDialogStatus.dataset.status = run?.status || "idle";
+  if (els.directRunProgress) els.directRunProgress.textContent = directRunProgressText(run);
+  if (els.directRunError) {
+    els.directRunError.textContent = directRunVisibleError(run);
+    els.directRunError.hidden = !els.directRunError.textContent;
+  }
+  els.directRunConversationMeta.textContent = run
+    ? `每个节点保留一个持续对话 · ${run.nodeId} · ${runs.length === 1 ? "当前只有 1 个节点对话" : `共 ${runs.length} 个节点对话`} · 独立话题请新建节点、子节点或树`
+    : "当前树暂无节点对话，从节点右上角执行即可开始";
+  const conversationListSignature = runs.map((item) => `${item.id}:${item.nodeId}:${item.status}:${nodes.find((nodeItem) => nodeItem.id === item.nodeId)?.title || ""}`).join("\u0001");
+  if (conversationListSignature !== directRunConversationListSignature) {
+    els.directRunConversationSelect.innerHTML = runs.map((item) => {
+      const itemNode = nodes.find((nodeItem) => nodeItem.id === item.nodeId);
+      return `<option value="${attr(item.id)}" ${item.id === activeDirectRunId ? "selected" : ""}>${escapeHtml(itemNode?.title || "节点")}（${escapeHtml(item.nodeId)}） · ${directRunStatusLabel(item.status)}</option>`;
+    }).join("");
+    directRunConversationListSignature = conversationListSignature;
+  }
+  if (els.directRunConversationSelect.value !== activeDirectRunId) els.directRunConversationSelect.value = activeDirectRunId;
+  els.directRunConversationSelect.disabled = !runs.length;
+  els.directRunPrevBtn.disabled = runs.findIndex((item) => item.id === activeDirectRunId) <= 0;
+  els.directRunNextBtn.disabled = runs.findIndex((item) => item.id === activeDirectRunId) >= runs.length - 1;
+  const busy = isDirectRunBusy(run);
+  const deleting = Boolean(run && directRunDeletingNodes.has(directRunNodeKey(run)));
+  els.directRunSendBtn.disabled = !run || busy || deleting || directRunSubmittingNodes.has(directRunNodeKey(run));
+  els.directRunSendBtn.disabled ||= Boolean(run && nodeMaterialPending.has(directRunNodeKey(run)));
+  els.directRunMaterialsBtn.disabled = !run;
+  els.directRunUseMaterials.checked = !run || directRunMaterialSelection.get(directRunNodeKey(run)) !== false;
+  renderAttachmentDrafts();
+  els.directRunDeleteBtn.disabled = !run || busy || deleting;
+  els.directRunDeleteBtn.textContent = deleting ? "删除中…" : "删除";
+  els.directRunDeleteBtn.title = busy ? "节点正在执行，完成后可删除对话" : "删除当前节点的全部对话记录，不删除节点";
+
+  const transcript = els.directRunTranscript;
+  const output = directRunStreamValue(run, "output");
+  const reasoning = directRunStreamValue(run, "reasoning");
+  const streaming = !["completed", "failed"].includes(run?.status);
+  const outputElement = transcript.querySelector("[data-direct-run-output] .directRunMarkdown");
+  const reasoningElement = transcript.querySelector("[data-direct-run-reasoning]");
+  const typingElement = transcript.querySelector("[data-direct-run-typing]");
+  const runChanged = (run?.id || "") !== directRunTranscriptRunId;
+  const messagesChanged = directRunMessageSignature(run) !== directRunTranscriptMessageSignature;
+  const outputShapeChanged = Boolean(output) !== Boolean(outputElement);
+  const reasoningShapeChanged = Boolean(reasoning) !== Boolean(reasoningElement);
+  const needsFullTranscript = runChanged || messagesChanged || outputShapeChanged || reasoningShapeChanged || (!run && Boolean(directRunTranscriptRunId));
+  const wasNearBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 32;
+  const previousScrollTop = transcript.scrollTop;
+
+  if (needsFullTranscript) {
+    directRunTranscriptRendering = true;
+    transcript.innerHTML = directRunTranscriptHtml(run);
+    directRunTranscriptRendering = false;
+    directRunTranscriptRunId = run?.id || "";
+    directRunTranscriptMessageSignature = directRunMessageSignature(run);
+    if (runChanged && run) {
+      directRunTranscriptFollowOutput = true;
+      transcript.scrollTop = transcript.scrollHeight;
+    } else if (directRunTranscriptFollowOutput && wasNearBottom) {
+      transcript.scrollTop = transcript.scrollHeight;
+    } else {
+      transcript.scrollTop = previousScrollTop;
+    }
+  } else if (run) {
+    const eventsElement = transcript.querySelector("[data-direct-run-events]");
+    if (eventsElement) eventsElement.innerHTML = directRunEventsHtml(run);
+    updateDirectRunStreamElement(reasoningElement, reasoning, streaming);
+    updateDirectRunStreamElement(outputElement, output, streaming);
+    if (typingElement) typingElement.textContent = directRunTypingLabel(run);
+    if (directRunTranscriptFollowOutput && wasNearBottom) transcript.scrollTop = transcript.scrollHeight;
+  }
+}
+
+function scheduleDirectRunDialogRender() {
+  if (directRunRenderPending) return;
+  directRunRenderPending = true;
+  const flush = () => {
+    directRunRenderPending = false;
+    renderDirectRunDialog();
+  };
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(flush);
+  else setTimeout(flush, 50);
+}
+
+function selectAdjacentDirectRun(direction) {
+  const runs = orderedDirectRuns();
+  const index = runs.findIndex((item) => item.id === activeDirectRunId);
+  const next = runs[index + direction];
+  if (next) { activeDirectRunId = next.id; renderDirectRunDialog(); }
+}
+
+async function continueDirectRun() {
+  const run = directRunStates.get(activeDirectRunId);
+  const message = String(els.directRunMessageInput?.value || "").trim();
+  const drafts = attachmentDrafts(run);
+  if (!run || (!message && !drafts.length) || drafts.some(d => d.status !== 'ready') || isDirectRunBusy(run) || directRunDeletingNodes.has(directRunNodeKey(run)) || directRunSubmittingNodes.has(directRunNodeKey(run))) return;
+  const sent = [...drafts];
+  directRunSubmittingNodes.add(directRunNodeKey(run));
+  renderDirectRunDialog();
+  try {
+  const node = nodes.find((item) => item.id === run.nodeId);
+  const payload = await runCodex({
+    prompt: message || '请分析本次提供的资料。',
+    useNodeMaterials: directRunMaterialSelection.get(directRunNodeKey(run)) !== false,
+    attachments: sent.map(item => item.attachment.id),
+    treeId: run.treeId || viewTreeId,
+    fresh: false,
+    open: false,
+    progress: true,
+    nodeId: run.nodeId
+  });
+  if (payload?.id || payload?.runId) {
+    if (run.status === 'draft') directRunStates.delete(run.id);
+    if (els.directRunMessageInput.value === message) els.directRunMessageInput.value = "";
+    for (const item of sent) { const index = drafts.indexOf(item); if (index >= 0) drafts.splice(index, 1); }
+    beginDirectRunProgress(payload, { openDialog: true });
+    if (node) setSaveState(`已继续${node.title || node.id}的对话`);
+  }
+  } finally { directRunSubmittingNodes.delete(directRunNodeKey(run)); renderDirectRunDialog(); }
+}
+
+async function deleteDirectRunConversation() {
+  const run = directRunStates.get(activeDirectRunId);
+  if (!run || isDirectRunBusy(run)) return;
+  const key = directRunNodeKey(run);
+  if (run.status === 'draft') {
+    directRunStates.delete(run.id); directRunAttachmentDrafts.delete(key); renderDirectRunDialog(); return;
+  }
+  if (directRunDeletingNodes.has(key)) return;
+  directRunDeletingNodes.add(key);
+  renderDirectRunDialog();
+  try {
+    const response = await fetch(`/api/codex/conversation?treeId=${encodeURIComponent(run.treeId || viewTreeId)}&nodeId=${encodeURIComponent(run.nodeId)}`, { method: "DELETE" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    const ids = new Set(payload.deletedRunIds || []);
+    for (const item of directRunStates.values()) if (directRunNodeKey(item) === key) ids.add(item.id);
+    for (const id of ids) {
+      deletedDirectRunIds.add(id);
+      stopDirectRunPolling(id);
+      directRunStates.delete(id);
+    }
+    directRunAttachmentDrafts.delete(key);
+    setSaveState(`已删除${run.nodeId}的对话；节点仍然保留，下次执行重新开始`);
+  } finally {
+    directRunDeletingNodes.delete(key);
+    renderDirectRunDialog();
+    if (els.directRunReopenBtn) els.directRunReopenBtn.hidden = !orderedDirectRuns().length;
+  }
 }
 
 function stopDirectRunPolling(runId) {
@@ -6380,31 +7001,49 @@ function stopDirectRunPolling(runId) {
 }
 
 async function pollDirectRun(runId) {
+  if (deletedDirectRunIds.has(runId)) return;
   try {
     const response = await fetch(`/api/codex/run/${encodeURIComponent(runId)}`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const run = (await response.json()).run;
+    if (deletedDirectRunIds.has(runId)) return;
     directRunStates.set(runId, run);
-    renderDirectRunPanel();
+    scheduleDirectRunDialogRender();
     if (["completed", "failed"].includes(run.status)) { stopDirectRunPolling(runId); return; }
   } catch (error) {
     const current = directRunStates.get(runId);
     if (current) {
-      current.status = "failed";
-      current.events = [...(current.events || []), { type: "client", text: `读取执行进度失败：${error.message}` }];
-      renderDirectRunPanel();
+      current.progressReadError = error.message;
+      scheduleDirectRunDialogRender();
     }
     stopDirectRunPolling(runId);
+    if (current && ["starting", "running"].includes(current.status)) directRunPollers.set(runId, setTimeout(() => pollDirectRun(runId), 1000));
     return;
   }
-  directRunPollers.set(runId, setTimeout(() => pollDirectRun(runId), 500));
+  directRunPollers.set(runId, setTimeout(() => pollDirectRun(runId), 200));
 }
 
-function beginDirectRunProgress(payload) {
+async function restoreDirectRunConversations() {
+  const response = await fetch('/api/codex/runs');
+  if (!response.ok) return;
+  const payload = await response.json();
+  for (const run of payload.runs || []) {
+    if (deletedDirectRunIds.has(run.id)) continue;
+    directRunStates.set(run.id, run);
+    if (['starting','running'].includes(run.status) && !directRunPollers.has(run.id)) pollDirectRun(run.id);
+  }
+  renderDirectRunDialog();
+  if (els.directRunReopenBtn) els.directRunReopenBtn.hidden = !orderedDirectRuns().length;
+}
+
+function beginDirectRunProgress(payload, { openDialog = true } = {}) {
   const runId = payload?.runId || payload?.id;
   if (!runId) return;
   directRunStates.set(runId, payload);
-  renderDirectRunPanel();
+  activeDirectRunId = runId;
+  if (openDialog && !els.directRunDialog.open) els.directRunDialog.showModal();
+  if (els.directRunReopenBtn) els.directRunReopenBtn.hidden = true;
+  renderDirectRunDialog();
   stopDirectRunPolling(runId);
   pollDirectRun(runId);
 }
@@ -7043,7 +7682,10 @@ async function openCodexThreadMenu() {
 // The plain click runs the tree's own next step. Embedding the graph into a chat used to be the
 // default, which only made sense while the chat was where the graph lived; from the full page it
 // would spend a turn to show what is already on screen. It stays in the menu.
-els.openInCodexBtn?.addEventListener("click", () => runCodex({ preset: "next" }));
+els.openInCodexBtn?.addEventListener("click", () => {
+  if (workspaceMode === 'subtree') runDirectNode(nextFocusId).catch(error => setSaveState(error.message));
+  else runCodex({ preset: 'next' });
+});
 els.codexParallelBtn?.addEventListener("click", () => openCodexParallelDialog());
 
 // The loop used to mean "copy this command, switch to Codex, paste, press enter". Now that the
@@ -7234,7 +7876,7 @@ els.focusLensBody?.addEventListener("input", (event) => {
 els.focusLensBody?.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || (!event.ctrlKey && !event.metaKey) || !event.target.closest("[data-focus-lens-next-idea]")) return;
   event.preventDefault();
-  runFocusLensNode(focusLensId).catch((error) => setSaveState(`Codex 没能启动: ${error.message}`));
+  runFocusLensNode(focusLensId).catch((error) => setSaveState(`DeepSeek 没能启动：${error.message}`));
 });
 els.focusLensTrail?.addEventListener("click", (event) => {
   const target = event.target.closest("[data-focus-lens-node]");
@@ -7273,18 +7915,11 @@ window.addEventListener("beforeunload", () => {
     clearTimeout(saveTimer);
     saveTimer = null;
   }
-  const markdown = toMarkdown(nodes, edges);
-  const payload = JSON.stringify({
-    markdown,
-    reason: pendingSaveReason || "将自动保存图谱修改",
-    backup: false,
-    source: "ui",
-    treeId: viewTreeId
-  });
-  fetch(treeApiUrl("/api/tree"), {
-    method: "PUT",
+  const target = workspaceSaveRequest(workspaceMarkdown(), pendingSaveReason || '将保存关闭前的工作区修改');
+  fetch(target.url, {
+    method: target.method,
     headers: { "content-type": "application/json" },
-    body: payload,
+    body: JSON.stringify(target.body),
     keepalive: true
   }).catch(() => {});
 });
@@ -7477,6 +8112,7 @@ async function exportFlowSvgFile() {
 
 loadTreeRegistryState()
   .then(() => loadTree({ registryLoaded: true, fitView: snapshotMode || embedMode }))
+  .then(() => snapshotMode ? null : restoreDirectRunConversations())
   .then(() => (snapshotMode ? enterSnapshotMode() : signalEmbedHost("rendered")))
   .then(() => (embedMode && !snapshotMode ? enterEmbedLayout() : null))
   .catch((error) => setSaveState(formatApiFetchError(error, null, "加载任务图")));

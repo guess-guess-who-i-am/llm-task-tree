@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { localNetworkEnvironment } from './network-environment.js';
 
 const HOST = "127.0.0.1";
 const START_TIMEOUT_MS = 20000;
@@ -169,7 +170,7 @@ export async function ensureProjectServer(root, {
   const child = spawnImpl(process.execPath, ["server.js"], {
     cwd: runtime.kitDir,
     env: {
-      ...process.env,
+      ...await localNetworkEnvironment(),
       HOST,
       PORT: String(port),
       TASK_TREE_STUB_DIR: runtime.stubDir,

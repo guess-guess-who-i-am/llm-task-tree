@@ -2,6 +2,11 @@
 .task-tree-ports
 .task-tree-thread
 .task-tree-threads.json
+.task-tree-direct-state.json
+.task-tree-direct-state.json.*.tmp
+.task-tree-dialogue-backups/
+.task-tree-direct-timing.json
+.task-tree-direct-timing.json.*.tmp
 .task-tree-runs/
 .task-tree-scopes/
 .task-tree-context/
@@ -52,3 +57,7 @@ copilot/
 gill_with_doc/
 handoff/
 open-webSearch/
+
+# Node images/documents and their manifests travel with the project.
+!.task-tree-attachments/
+!.task-tree-attachments/**

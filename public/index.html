@@ -57,10 +57,15 @@
         </div>
       </header>
 
-      <div id="workspaceBanner" class="workspaceBanner hidden" role="status">
-        <span id="workspaceBannerTitle">子树编辑</span>
-        <button type="button" id="workspaceBannerExitBtn">返回主树</button>
-      </div>
+      <nav id="workspaceBanner" class="workspaceBanner hidden" aria-label="主树与子树切换" aria-busy="false">
+        <span id="workspaceBannerTitle">主树</span>
+        <span class="workspaceBannerControls">
+          <span id="workspaceSwitchStatus" role="status" hidden></span>
+          <button type="button" id="workspaceBannerEnterBtn" class="workspaceNavButton" hidden>去到子树 →</button>
+          <button type="button" id="workspaceBannerExitBtn" class="workspaceNavButton" hidden>← 返回主树</button>
+          <a id="workspaceBannerOpenBtn" target="_blank" rel="noopener" hidden>独立窗口</a>
+        </span>
+      </nav>
 
       <main class="layout">
         <aside class="knowledgePane" aria-label="Knowledge base" aria-hidden="true">
@@ -184,13 +189,53 @@
             <div id="focusLensBody" class="focusLensBody"></div>
           </section>
           <div id="flowViewHost" class="flowViewHost" hidden></div>
-          <aside id="directRunPanel" class="directRunPanel" aria-label="节点执行输出" hidden>
-            <header class="directRunPanelHeader">
-              <strong>节点执行输出</strong>
-              <button id="directRunPanelClose" type="button" title="关闭执行输出">×</button>
-            </header>
-            <div id="directRunList" class="directRunList"></div>
-          </aside>
+          <button id="directRunReopenBtn" class="directRunReopenBtn" type="button" hidden>打开执行会话</button>
+          <dialog id="nodeMaterialsDialog" class="nodeMaterialsDialog" aria-labelledby="nodeMaterialsTitle">
+            <header><strong id="nodeMaterialsTitle">节点资料</strong><button id="nodeMaterialsClose" type="button" aria-label="关闭节点资料">×</button></header>
+            <p>资料保存在当前节点。勾选后，直接执行和并行执行会使用；也可单次加入对话。</p>
+            <button id="nodeMaterialsAdd" type="button">＋ 添加图片或文档</button>
+            <input id="nodeMaterialsFileInput" type="file" hidden multiple accept=".png,.jpg,.jpeg,.webp,.pdf,.docx,.doc,.rtf,.txt,.md,.csv,.json,.yaml,.yml,.log,.js,.ts,.py,.go,.html,.css,.xml">
+            <p id="nodeMaterialsStatus" role="status" aria-live="polite"></p>
+            <div id="nodeMaterialsList"></div>
+            <small>可拖入文件或粘贴图片 · 每个文件最多 20 MiB · 不截断文档。移除仅解除关联，不影响已保存对话。</small>
+          </dialog>
+          <dialog id="directRunDialog" class="directRunDialog" aria-label="节点执行对话">
+            <div class="directRunDialogShell">
+              <header class="directRunDialogHeader">
+                <div class="directRunDialogTitleGroup">
+                  <span class="directRunDialogEyebrow">DeepSeek · 节点会话</span>
+                  <strong id="directRunDialogTitle" class="directRunDialogTitle">节点执行</strong>
+                  <span id="directRunDialogStatus" class="directRunDialogStatus">等待执行</span>
+                </div>
+                <div class="directRunDialogTools">
+                  <button id="directRunPrevBtn" type="button" title="上一个节点对话" aria-label="上一个节点对话">←</button>
+                  <select id="directRunConversationSelect" aria-label="切换节点对话"></select>
+                  <button id="directRunNextBtn" type="button" title="下一个节点对话" aria-label="下一个节点对话">→</button>
+                  <button id="directRunDeleteBtn" class="directRunDeleteBtn" type="button" title="删除当前节点对话，不删除节点" disabled>删除</button>
+                  <button id="directRunExpandBtn" type="button" title="放大对话框">⛶</button>
+                  <button id="directRunDialogClose" type="button" title="关闭对话框">×</button>
+                </div>
+              </header>
+              <section class="directRunProgressPanel" aria-label="本轮执行状态">
+                <div id="directRunProgress" class="directRunProgress" role="status" aria-live="polite">等待执行</div>
+                <div id="directRunError" class="directRunError" role="alert" hidden></div>
+              </section>
+              <div id="directRunTranscript" class="directRunTranscript" aria-live="polite"></div>
+              <form id="directRunComposer" class="directRunComposer">
+                <div id="directRunAttachments" class="directRunAttachments" aria-live="polite"></div>
+                <textarea id="directRunMessageInput" rows="3" placeholder="继续和当前节点对话，补充信息或要求下一步…"></textarea>
+                <div class="directRunComposerFooter">
+                  <button id="directRunAttachBtn" type="button" title="添加图片或文档；也可拖入或粘贴图片">＋ 附件</button>
+                  <button id="directRunMaterialsBtn" type="button">节点资料</button>
+                  <label><input id="directRunUseMaterials" type="checkbox" checked>使用节点勾选资料</label>
+                  <input id="directRunFileInput" type="file" hidden multiple accept=".png,.jpg,.jpeg,.webp,.pdf,.docx,.doc,.rtf,.txt,.md,.csv,.json,.yaml,.yml,.log,.js,.ts,.py,.go,.html,.css,.xml">
+                  <span id="directRunConversationMeta">同一节点会话会保留上下文</span>
+                  <button id="directRunSendBtn" type="submit">发送</button>
+                </div>
+                <small class="directRunAttachmentHelp">可拖入图片、PDF、Word 或文本，也可粘贴图片 · 单个文件最多 20 MiB · 文档全文送入上下文，不截断</small>
+              </form>
+            </div>
+          </dialog>
         </section>
         <aside class="versionPane" aria-label="Version history" aria-hidden="true">
           <div class="paneHeader">

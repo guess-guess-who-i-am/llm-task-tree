@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
  * Everything `scripts/mcp-server.mjs` and the local server it starts need, and nothing else:
  * installers, templates, tests and docs stay out so the package carries only what runs.
  */
-export const RUNTIME_SOURCES = ["package.json", "server.js", "scripts/mcp-server.mjs", "server", "public"];
+export const RUNTIME_SOURCES = ["package.json", "package-lock.json", "server.js", "scripts/mcp-server.mjs", "scripts/ocr-image.swift", "scripts/prewarm-chat-attachments.mjs", "server", "public"];
 
 /** The entry the plugin's mcp.json names, relative to the plugin root. */
 export const RUNTIME_ENTRY = "./runtime/scripts/mcp-server.mjs";

@@ -6,6 +6,59 @@
   "updatedAt": "2026-08-17T14:26:39.4107495+08:00",
   "substeps": [
     {
+      "title": "节点资料纳入Git及克隆恢复验证",
+      "functions": [
+        { "path": "server/chat-attachments.js", "name": "saveAttachment" }
+      ],
+      "outputs": [
+        { "path": "server/attachment-git.test.js" },
+        { "path": "llm-task-tree-kit/templates/gitignore.append" },
+        { "path": "docs/node-materials.zh.md" }
+      ]
+    },
+    {
+      "title": "节点持久资料、选择与直接及并行执行接入",
+      "functions": [
+        { "path": "server/node-materials.js", "name": "nodeMaterialContext" },
+        { "path": "public/app.js", "name": "openNodeMaterials" },
+        { "path": "server/codex-coordinator.js", "name": "plannerMaterialContext" }
+      ],
+      "outputs": [
+        { "path": "docs/node-materials.zh.md" },
+        { "path": "server/node-materials.test.js" },
+        { "path": "server/subtree-workspace-ui.test.js" },
+        { "path": "artifacts/node-materials.png" }
+      ]
+    },
+    {
+      "title": "修复本地JPEG原图通道、首轮路径附件与宏观编辑态",
+      "functions": [
+        { "path": "server/image-input.js", "name": "imageResult" },
+        { "path": "server/chat-attachments.js", "name": "attachPromptImages" },
+        { "path": "server/deepseek-run.js", "name": "executeCalls" }
+      ],
+      "outputs": [
+        { "path": "docs/local-image-input.zh.md" },
+        { "path": "docs/local-image-live.json" },
+        { "path": "docs/local-image-live-path-final.json" },
+        { "path": "server/image-input.test.js" }
+      ]
+    },
+    {
+      "title": "节点图片文档附件与鱼眼右上角执行小图标",
+      "functions": [
+        { "path": "public/app.js", "name": "addDirectRunAttachments" },
+        { "path": "server/chat-attachments.js", "name": "materializeAttachments" },
+        { "path": "public/app.js", "name": "renderFocusLens" }
+      ],
+      "outputs": [
+        { "path": "docs/chat-attachments.zh.md" },
+        { "path": "docs/chat-attachments-live.json" },
+        { "path": "server/chat-attachments.test.js" },
+        { "path": "artifacts/chat-attachments.png" }
+      ]
+    },
+    {
       "title": "紧凑自动整理",
       "functions": [
         { "path": "public/app.js", "name": "buildContourSubtreeLayout" },
@@ -87,6 +140,49 @@
         { "path": "artifacts/content-sized-nodes-macro.png" },
         { "path": "artifacts/content-sized-nodes-detail.png" },
         { "path": "artifacts/content-sized-nodes-mobile.png" }
+      ]
+    },
+    {
+      "title": "鱼眼显式单节点执行按钮",
+      "functions": [
+        { "path": "public/app.js", "name": "renderFocusLens" },
+        { "path": "public/app.js", "name": "runFocusLensNode" },
+        { "path": "public/app.js", "name": "runDirectNode" }
+      ],
+      "outputs": [
+        { "path": "server/subtree-workspace-ui.test.js" },
+        { "path": "artifacts/focus-lens-direct-main.png" },
+        { "path": "artifacts/focus-lens-direct-subtree.png" },
+        { "path": "artifacts/focus-lens-direct-reference.png" }
+      ]
+    },
+    {
+      "title": "明显的主子树导航与短过渡",
+      "functions": [
+        { "path": "public/app.js", "name": "workspaceEntryNode" },
+        { "path": "public/app.js", "name": "switchWorkspace" },
+        { "path": "public/app.js", "name": "animateWorkspaceChange" }
+      ],
+      "outputs": [
+        { "path": "server/subtree-workspace-ui.test.js" },
+        { "path": "docs/subtree-workspace.zh.md" },
+        { "path": "artifacts/subtree-navigation-1440.png" },
+        { "path": "artifacts/subtree-navigation-390.png" }
+      ]
+    },
+    {
+      "title": "子树独立画布与主树读写隔离",
+      "functions": [
+        { "path": "public/app.js", "name": "enterSubtreeWorkspace" },
+        { "path": "public/app.js", "name": "workspaceSaveRequest" },
+        { "path": "public/app.js", "name": "workspaceFocusStorageKey" },
+        { "path": "public/app.js", "name": "runFocusLensNode" }
+      ],
+      "outputs": [
+        { "path": "server/subtree-workspace-ui.test.js" },
+        { "path": "docs/subtree-workspace.zh.md" },
+        { "path": "artifacts/subtree-independent-desktop.png" },
+        { "path": "artifacts/subtree-independent-mobile.png" }
       ]
     },
     {

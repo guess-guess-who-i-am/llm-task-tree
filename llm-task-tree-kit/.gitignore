@@ -1,5 +1,10 @@
 node_modules/
 .env
+.task-tree-direct-state.json
+.task-tree-direct-state.json.*.tmp
+.task-tree-dialogue-backups/
+.task-tree-direct-timing.json
+.task-tree-direct-timing.json.*.tmp
 *.log
 open-websearch-launcher.log
 open-websearch-launcher.err.log
@@ -20,3 +25,7 @@ setup-task-tree.kitpath
 # Machine-local project lists (each PC keeps its own; see *.example.txt)
 update-projects.txt
 update-search-roots.txt
+
+# Node images/documents and their manifests travel with the project.
+!.task-tree-attachments/
+!.task-tree-attachments/**

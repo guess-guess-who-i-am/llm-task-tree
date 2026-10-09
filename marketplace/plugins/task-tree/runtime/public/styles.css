@@ -9,6 +9,8 @@
   --accent-2: #b8472f;
   --focus: #e8f3ef;
   --shadow: 0 12px 30px rgba(31, 41, 55, 0.08);
+  --workspace-switch-duration: 200ms;
+  --workspace-switch-offset: 18px;
 }
 
 * {
@@ -256,28 +258,76 @@ h1 {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-height: 60px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--line);
-  background: #fff8e8;
+  background: #f0f6f3;
   font-size: 13px;
 }
+
+.workspaceBanner.is-subtree { background: #fff8e8; }
 
 .workspaceBanner.hidden {
   display: none;
 }
 
-#workspaceBannerExitBtn {
+#workspaceBannerTitle { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.workspaceBannerControls { display: flex; flex-shrink: 0; align-items: center; gap: 8px; }
+#workspaceBannerOpenBtn { color: #24537d; font-size: 12px; white-space: nowrap; }
+
+.workspaceNavButton {
   flex-shrink: 0;
-  padding: 4px 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: #fff;
+  min-height: 44px;
+  min-width: 128px;
+  padding: 10px 18px;
+  border: 1px solid var(--accent);
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 650;
+  transition: background 120ms ease, box-shadow 120ms ease;
 }
 
-#workspaceBannerExitBtn:hover {
-  background: #f5f5f0;
+.workspaceNavButton:hover:not(:disabled) { background: #105447; }
+.workspaceNavButton:disabled { opacity: .5; cursor: default; }
+.workspaceNavButton:focus-visible,
+.subtreeEnterButton:focus-visible,
+#workspaceBannerOpenBtn:focus-visible {
+  outline: 3px solid #277965;
+  outline-offset: 3px;
+}
+#workspaceSwitchStatus { color: var(--muted); font-size: 12px; }
+
+.graphPane { view-transition-name: task-tree-workspace; }
+:root[data-workspace-direction="exit"] { --workspace-switch-offset: -18px; }
+::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+::view-transition-group(task-tree-workspace) { animation-duration: var(--workspace-switch-duration); }
+::view-transition-old(task-tree-workspace) {
+  animation: workspace-leave 100ms ease-out both;
+}
+::view-transition-new(task-tree-workspace) {
+  animation: workspace-enter var(--workspace-switch-duration) cubic-bezier(.22,.68,0,1) both;
+}
+@keyframes workspace-leave {
+  to { opacity: 0; transform: translateX(calc(var(--workspace-switch-offset) * -1)); }
+}
+@keyframes workspace-enter {
+  from { opacity: 0; transform: translateX(var(--workspace-switch-offset)); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .workspaceNavButton { transition: none; }
+  ::view-transition-group(task-tree-workspace),
+  ::view-transition-old(task-tree-workspace),
+  ::view-transition-new(task-tree-workspace) { animation: none; }
+}
+@media (max-width: 600px) {
+  .workspaceBanner { flex-wrap: wrap; padding: 10px 12px; gap: 8px; }
+  #workspaceBannerTitle { flex-basis: 100%; }
+  .workspaceBannerControls { width: 100%; flex-wrap: wrap; }
+  .workspaceNavButton { flex: 1; }
 }
 
 .chainLoopCmdBar {
@@ -353,17 +403,24 @@ h1 {
   background: #eef3f8;
 }
 
-.subtreeEditBtn {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  border: 1px solid var(--line);
-  background: #eef8ff;
+.subtreeNavigation { margin: 10px 12px 0; }
+.subtreeEnterButton {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: var(--focus);
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 650;
   cursor: pointer;
 }
 
-.subtreeEditBtn:hover {
-  background: #dceeff;
+.subtreeEnterButton:hover { background: #d5ebe2; }
+.focusLensCenter > .subtreeEnterButton {
+  margin: 12px;
+  width: calc(100% - 24px);
 }
 
 .subtreeWorkerPromptBox {
@@ -1717,6 +1774,33 @@ button.chainAddBtn.active {
   font-weight: 750;
 }
 
+.focusLensHeaderActions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.focusLensDirectRunButton {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.focusLensDirectRunButton:hover:not(:disabled) { background: #105447; }
+.focusLensDirectRunButton:focus-visible { outline: 3px solid #277965; outline-offset: 3px; }
+.focusLensDirectRunButton:disabled { cursor: wait; opacity: .62; }
+
+.directRunAttachments { display: flex; flex-wrap: wrap; gap: 8px; }
+.directRunAttachmentDraft { display: flex; align-items: center; gap: 8px; padding: 6px 8px; max-width: 100%; border: 1px solid #cbd8d1; border-radius: 7px; background: #f5faf7; }
+.directRunAttachmentDraft > span { overflow-wrap: anywhere; min-width: 0; font-size: 12px; }
+.directRunAttachmentDraft small { display: block; color: #596b62; }
+.directRunAttachmentDraft img, .directRunSavedAttachment img { width: 64px; height: 48px; object-fit: contain; border-radius: 4px; }
+.directRunAttachmentDraft button { flex: 0 0 auto; }
+.directRunSavedAttachment { display: inline-flex; align-items: center; gap: 7px; margin: 8px 8px 0 0; overflow-wrap: anywhere; }
+.directRunAttachmentHelp { color: #596b62; font-size: 11px; line-height: 1.5; }
+.directRunComposerFooter { flex-wrap: wrap; }
+
 .focusLensActionsMenu {
   border-bottom: 1px solid #d8e0dc;
   background: #f8faf9;
@@ -1830,8 +1914,7 @@ button.chainAddBtn.active {
   background: #fffcf2;
 }
 
-.focusLensNextWork header,
-.focusLensNextActions {
+.focusLensNextWork header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -1883,37 +1966,6 @@ button.chainAddBtn.active {
 .focusLensNextIdeaInput:focus {
   border-color: #8b7432;
   box-shadow: 0 0 0 3px rgba(150, 122, 48, 0.13);
-}
-
-.focusLensNextActions {
-  align-items: center;
-  justify-content: flex-end;
-}
-
-.focusLensNextActions > span {
-  color: #80765d;
-  font-size: 10px;
-}
-
-.focusLensNextActions button {
-  min-height: 34px;
-  padding: 7px 13px;
-  border: 1px solid #765f25;
-  border-radius: 6px;
-  background: #806a2d;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.focusLensNextActions button:hover {
-  background: #68541f;
-}
-
-.focusLensNextActions button:disabled {
-  cursor: wait;
-  opacity: 0.62;
 }
 
 .focusLensDetails {
@@ -2042,15 +2094,11 @@ button.chainAddBtn.active {
     padding-inline: 14px;
   }
 
-  .focusLensNextWork header,
-  .focusLensNextActions {
+  .focusLensNextWork header {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .focusLensNextActions button {
-    width: 100%;
-  }
 }
 
 .graphCanvas {
@@ -2336,15 +2384,22 @@ button.chainAddBtn.active {
   align-content: center;
 }
 
-.semanticZoomMacro .graphNode > :not(.nodeMacroSummary) {
+.semanticZoomMacro .graphNode:not(.editing) > :not(.nodeMacroSummary):not(.subtreeNavigation) {
   display: none !important;
+}
+
+.semanticZoomMacro .subtreeNavigation { margin: 8px 0 0; }
+.semanticZoomMacro .subtreeEnterButton {
+  font-size: calc(var(--semantic-title-size, 36px) * .82);
+  min-height: calc(var(--semantic-title-size, 36px) * 2.4);
+  line-height: 1.2;
 }
 
 .semanticZoomMacro .graphNode.completed::after {
   display: none;
 }
 
-.semanticZoomMacro .nodeMacroSummary {
+.semanticZoomMacro .graphNode:not(.editing) .nodeMacroSummary {
   min-width: 0;
   display: grid;
   height: auto;
@@ -6239,13 +6294,6 @@ div.codexParallelWriteSet {
   line-height: 1;
 }
 
-.nodeActions .subtreeEditBtn {
-  width: 23px;
-  height: 23px;
-  padding: 0;
-  font-size: 14px;
-}
-
 @container graph-card (max-width: 390px) {
   .nodeCardHeader {
     grid-template-columns: minmax(0, 1fr);
@@ -6287,62 +6335,88 @@ div.codexParallelWriteSet {
   opacity: .55;
 }
 
-.directRunPanel {
+.directRunReopenBtn {
   position: absolute;
-  right: 14px;
-  bottom: 14px;
-  z-index: 20;
-  width: min(520px, calc(100% - 28px));
-  max-height: min(52vh, 520px);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  right: 18px;
+  bottom: 18px;
+  z-index: 25;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, .97);
-  box-shadow: 0 12px 32px rgba(20, 45, 35, .16);
-}
-
-.directRunPanelHeader,
-.directRunCard header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.directRunPanelHeader {
-  padding: 9px 11px;
-  border-bottom: 1px solid var(--line);
-}
-
-.directRunPanelHeader button {
-  border: 0;
-  background: transparent;
-  color: var(--muted);
+  border-radius: 7px;
+  padding: 9px 13px;
+  background: var(--surface, #fff);
+  color: var(--ink, #21352b);
+  box-shadow: 0 8px 24px rgba(20, 45, 35, .16);
   cursor: pointer;
-  font-size: 18px;
 }
 
-.directRunList {
-  overflow: auto;
-  padding: 8px;
-}
-
-.directRunCard {
-  margin: 0 0 8px;
+.directRunDialog {
+  width: min(900px, calc(100vw - 44px));
+  height: min(760px, calc(100vh - 48px));
+  max-width: none;
+  max-height: none;
+  padding: 0;
   border: 1px solid var(--line);
-  border-radius: 6px;
-  overflow: hidden;
+  border-radius: 10px;
+  background: #f7faf8;
+  color: var(--ink, #21352b);
+  box-shadow: 0 24px 90px rgba(20, 45, 35, .28);
 }
 
-.directRunCard:last-child { margin-bottom: 0; }
-.directRunCard header { padding: 7px 9px; background: #f5f8f6; font-size: 12px; }
-.directRunCard.running header { color: var(--accent); }
-.directRunCard.failed header { color: #a33a32; }
-.directRunEvents { max-height: 180px; overflow: auto; padding: 6px 9px; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
-.directRunEvent { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 7px; padding: 2px 0; }
-.directRunEventType { color: var(--muted); word-break: break-all; }
+.directRunDialog.is-expanded {
+  width: min(1280px, calc(100vw - 28px));
+  height: min(900px, calc(100vh - 28px));
+}
+
+.directRunDialog::backdrop { background: rgba(18, 31, 25, .46); backdrop-filter: blur(3px); }
+.directRunDialogShell { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; height: 100%; }
+.directRunDialogHeader { display: flex; justify-content: space-between; gap: 18px; padding: 18px 22px 15px; border-bottom: 1px solid var(--line); background: #fff; }
+.directRunDialogTitleGroup { display: grid; gap: 4px; min-width: 0; }
+.directRunDialogEyebrow { color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.directRunDialogTitle { overflow: hidden; font-size: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.directRunDialogStatus { color: var(--muted); font-size: 12px; }
+.directRunDialogStatus[data-status="running"] { color: var(--accent); }
+.directRunDialogStatus[data-status="failed"] { color: #a33a32; }
+.directRunDialogStatus[data-status="completed"] { color: #276b45; font-weight: 600; }
+.directRunProgressPanel { padding: 11px 22px; background: #f1f6f2; border-bottom: 1px solid var(--line); font-size: 13px; line-height: 1.6; }
+.directRunProgress { color: #435d4e; }
+.directRunError { margin-top: 5px; color: #a33a32; white-space: pre-wrap; overflow-wrap: anywhere; }
+.directRunToolLog { max-width: 780px; margin: 0 auto 16px; color: var(--muted); font-size: 12px; }
+.directRunToolLog summary { cursor: pointer; padding: 6px 0; }
+.directRunDialogTools { display: flex; align-items: center; gap: 6px; }
+.directRunDialogTools button, .directRunDialogTools select { min-height: 32px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: inherit; cursor: pointer; }
+.directRunDialogTools button { width: 32px; font-size: 17px; }
+.directRunDialogTools button:hover { border-color: var(--accent); color: var(--accent); }
+.directRunDialogTools button:disabled { opacity: .45; cursor: not-allowed; }
+.directRunDialogTools .directRunDeleteBtn { width: auto; padding: 0 9px; font-size: 12px; color: #a33a32; }
+.directRunDialogTools select { max-width: 220px; padding: 0 7px; }
+.directRunTranscript { overflow: auto; padding: 24px clamp(16px, 5vw, 72px); scroll-behavior: auto; }
+.directRunSystemEvent { margin: 0 auto 10px; color: var(--muted); font-size: 12px; text-align: center; }
+.directRunSystemEvent span { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #e9efeb; }
+.directRunReasoning { margin: 0 auto 16px; max-width: 760px; border: 1px solid #dce7df; border-radius: 8px; background: #f1f6f2; color: #617067; }
+.directRunReasoning summary { padding: 9px 12px; cursor: pointer; font-size: 12px; }
+.directRunReasoning .directRunMarkdown { padding: 0 14px 13px; font-size: 13px; }
+.directRunMessage { max-width: 780px; margin: 0 auto 18px; border: 1px solid #d9e3dc; border-radius: 10px; background: #fff; box-shadow: 0 4px 14px rgba(20, 45, 35, .06); }
+.directRunMessage--user { margin-left: auto; max-width: 680px; background: #e8f1eb; border-color: #cfe0d4; }
+.directRunMessage--user .directRunMessageRole { color: #50645a; }
+.directRunMessageRole { padding: 10px 14px 0; color: var(--accent, #2f6fed); font-size: 12px; font-weight: 700; }
+.directRunMarkdown { padding: 7px 14px 15px; line-height: 1.65; overflow-wrap: anywhere; }
+.directRunMarkdown.is-streaming { white-space: pre-wrap; }
+.directRunMarkdown pre { overflow: auto; padding: 12px; border-radius: 6px; background: #17221c; color: #e9f4eb; }
+.directRunTyping, .directRunEmpty { max-width: 780px; margin: 26px auto; color: var(--muted); text-align: center; }
+.directRunComposer { padding: 14px clamp(16px, 5vw, 72px) 16px; border-top: 1px solid var(--line); background: #fff; }
+.directRunMessageInput { display: block; width: min(780px, 100%); margin: 0 auto; resize: vertical; border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; font: inherit; line-height: 1.5; }
+.directRunMessageInput:focus { outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); border-color: var(--accent); }
+.directRunComposerFooter { display: flex; justify-content: space-between; align-items: center; width: min(780px, 100%); margin: 8px auto 0; gap: 10px; color: var(--muted); font-size: 12px; }
+.directRunComposerFooter button { border: 0; border-radius: 7px; padding: 9px 18px; background: var(--accent, #2f6fed); color: #fff; cursor: pointer; font-weight: 700; }
+.directRunComposerFooter button:disabled { opacity: .5; cursor: not-allowed; }
+
+@media (max-width: 700px) {
+  .directRunDialog { width: calc(100vw - 16px); height: calc(100vh - 16px); border-radius: 8px; }
+  .directRunDialogHeader { padding: 13px 14px; }
+  .directRunDialogTools select { max-width: 120px; }
+  .directRunTranscript { padding: 18px 12px; }
+  .directRunComposer { padding: 10px 12px 12px; }
+}
 
 .nodeActions [data-action="toggle-neighbor-guides"] {
   color: #9a7200;
@@ -6868,3 +6942,21 @@ body.embedMode .chainLoopCmdBar {
 body.embedMode .chainDock {
   max-height: 32vh;
 }
+:root .nodeMaterialsDialog {
+  width: min(760px, calc(100vw - 32px)); max-height: 85vh; overflow: auto;
+  border: 1px solid #ccd6d2; border-radius: 16px; padding: 24px; color: #243d34; background: #fbfdfb;
+}
+.nodeMaterialsDialog::backdrop { background: #152d2466; }
+.nodeMaterialsDialog header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.nodeMaterialsDialog p, .nodeMaterialsDialog small { line-height: 1.6; }
+#nodeMaterialsStatus { white-space: pre-wrap; }
+#nodeMaterialsList { display: grid; gap: 12px; margin: 16px 0; }
+.nodeMaterial { border: 1px solid #dce4df; border-radius: 12px; padding: 14px; display: grid; gap: 12px; }
+.nodeMaterial a { display: flex; gap: 12px; align-items: center; overflow-wrap: anywhere; }
+.nodeMaterial img { width: 100px; height: 80px; object-fit: contain; border-radius: 8px; background: #eff3f0; }
+.nodeMaterial label { display: flex; gap: 6px; align-items: center; justify-content: flex-start; width: fit-content; }
+.nodeMaterial input[type="checkbox"], .directRunComposerFooter input[type="checkbox"] { width: auto; flex: none; margin: 0; }
+.nodeMaterial div { display: flex; gap: 8px; flex-wrap: wrap; }
+.nodeMaterialsDialog button { cursor: pointer; padding: 7px 10px; border: 1px solid #ccd6d2; border-radius: 8px; background: white; color: inherit; }
+.nodeMaterialsDialog button:disabled { cursor: wait; opacity: .6; }
+.directRunComposerFooter label { display: flex; align-items: center; gap: 4px; font-size: 12px; }

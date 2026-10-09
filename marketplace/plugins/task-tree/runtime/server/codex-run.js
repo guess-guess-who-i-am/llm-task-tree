@@ -20,6 +20,7 @@ import { open as openFile } from "node:fs/promises";
 import path from "node:path";
 import { OPEN_GRAPH_PROMPT } from "./codex-prompts.js";
 import { startDeepSeekTurn, deepSeekThreadLink } from "./deepseek-run.js";
+import { loadThreadDialogue } from './thread-dialogue-store.js';
 
 export { OPEN_GRAPH_PROMPT };
 
@@ -540,7 +541,17 @@ export function threadDeepLink(threadId) {
 export async function readCodexThread(threadId, { spawnCodex = null } = {}) {
   const id = String(threadId || "").trim();
   if (!id) throw new Error("threadId is required");
-  if (typeof spawnCodex !== "function") return { id, cwd: "", turns: [], provider: "deepseek" };
+  if (typeof spawnCodex !== "function") {
+    const messages = await loadThreadDialogue({threadId:id});
+    const turns = [];
+    for (const message of messages) {
+      if (message.role === 'user' || !turns.length) turns.push({id:`${id}-text-${turns.length+1}`,items:[]});
+      turns.at(-1).items.push(message.role === 'user'
+        ? {type:'userMessage',content:[{type:'text',text:message.content}]}
+        : {type:'agentMessage',phase:'final_answer',text:message.content});
+    }
+    return {id,cwd:'',turns,provider:'deepseek'};
+  }
   return withSession(spawnCodex, async (session) => {
     const result = await withTimeout(
       session.request("thread/read", { threadId: id, includeTurns: true }),

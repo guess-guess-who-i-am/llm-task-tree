@@ -15,6 +15,9 @@ function normalized(value) {
 function isSubstantiveFile(file) {
   const rel = normalized(file);
   if (!rel || EXCLUDED_PREFIXES.some((prefix) => rel.startsWith(prefix))) return false;
+  // Tree changes have their own quality/receipt checks. IDE bookkeeping is not
+  // implementation work; neither should send a content-only turn into a code/flow loop.
+  if (isTreeMarkdownPath(rel) || /^\.task-tree-[^/]+$/.test(rel)) return false;
   if (/\.(log|tmp)$/i.test(rel) || rel === ".task-tree-port" || rel === ".task-tree-ports") return false;
   if (/^scripts\/steps\/[^/]+\/latest\//.test(rel) || rel === "skill-routing-log.md") return false;
   return true;
@@ -166,7 +169,7 @@ export async function repairTurnMaintenance({ projectRoot, changedFiles = [], ac
   return { changedFiles: [...new Set(changed)], repairs };
 }
 
-export async function auditTurnMaintenance({ projectRoot, startedAtMs = 0, changedFiles = [], activeTreeId = "" }) {
+export async function auditTurnMaintenance({ projectRoot, startedAtMs = 0, changedFiles = [], activeTreeId = "", qualityMode = process.env.TASK_TREE_QUALITY_MODE || 'strict' }) {
   const registryFile = path.join(projectRoot, "task-trees.json");
   const registry = await loadTreeRegistry({ projectRoot, registryFile, create: false });
   const tree = findTree(registry, activeTreeId || registry.activeMethod);
@@ -194,14 +197,14 @@ export async function auditTurnMaintenance({ projectRoot, startedAtMs = 0, chang
     (report.longLines || []).map((item) => ({ ...item, file: report.file }))
   );
   if (changedViolations.length) {
-    issues.push({
+    (qualityMode === 'advisory' ? warnings : issues).push({
       code: "TREE_FIELDS_OVER_BUDGET",
       message: `本轮写入的树有 ${changedViolations.length} 项质量违规：${compactViolationSummary(qualityReports)}。请精炼为简明中文；历史移到 versions/，代码、原始样例和复杂英文术语移到证据文件。`
     });
   }
   if (changedLongLines.length) {
     const shown = changedLongLines.slice(0, 8).map((item) => `${item.file}:${item.line}(${item.chars})`).join("、");
-    issues.push({
+    (qualityMode === 'advisory' ? warnings : issues).push({
       code: "TREE_LONG_LINES_AFTER_WRITE",
       message: `本轮写入的树仍有 ${changedLongLines.length} 行超过 240 字符：${shown}。请拆成短 bullet 或移出原始证据。`
     });

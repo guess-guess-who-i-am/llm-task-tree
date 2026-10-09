@@ -14,6 +14,122 @@ const main = '# LLM Task Graph\n## ROOT - 项目总目标\n- Problem: 保留主�
 const sub = '# LLM Task Graph Subtree\n> Fold root: N1\n## N1 - 身体底盘\n- Problem: 保持健康\n## N1_A - 睡眠\n- Problem: 建立作息\n- NextIdea: 保存睡眠记录\n## N1_B - 时间\n- Problem: 安排时间\n# GraphState\n- Current: N1\n- Next: N1_A\n# Edges\n## EA - 睡眠\n- Endpoints: N1, N1_A\n## EB - 时间\n- Endpoints: N1, N1_B\n';
 let root, child, browser, base, gateway;
 const attachmentModelRequests = [];
+test('node next-step editors directly accept pasted images, dropped documents and local clipboard paths', async t => {
+  const page = await pageFor(t); await enter(page); page.setDefaultTimeout(15000);
+  const query = '?treeId=method&nodeId=N1_A';
+  t.after(async () => {
+    await fetch(base + '/api/codex/conversation' + query, { method: 'DELETE' });
+    const { materials } = await (await fetch(base + '/api/node/materials' + query)).json();
+    for (const ref of materials) await fetch(base + '/api/node/materials' + query, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: ref.id }) });
+  });
+  await page.locator('#focusLensOpenBtn').click();
+  await page.locator('[data-focus-lens-node="N1_A"]').first().click();
+  const input = page.locator('[data-focus-lens-next-idea="N1_A"]');
+  const original = await input.inputValue(), beforeCount = attachmentModelRequests.length;
+  const prevented = await input.evaluate(el => {
+    const data = new DataTransfer();
+    const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='), c => c.charCodeAt(0));
+    data.items.add(new File([bytes], '直接粘贴.png', { type: 'image/png' }));
+    data.setData('text/plain', '/clipboard/image.png');
+    const event = new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true });
+    el.dispatchEvent(event); return event.defaultPrevented;
+  });
+  assert.equal(prevented, true, 'the next-step editor must consume image paste instead of inserting its path');
+  await page.waitForSelector('.focusLensNextWork .nodeEditorMaterial img');
+  await input.evaluate(el => {
+    for (const name of ['拖入的文档.txt', '连续拖入.txt']) {
+      const data = new DataTransfer(); data.items.add(new File(['DIRECT_EDITOR_DOCUMENT_' + name], name, { type: 'text/plain' }));
+      el.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
+    }
+  });
+  await page.waitForFunction(() => document.querySelectorAll('.focusLensNextWork .nodeEditorMaterial').length === 3);
+  const require = createRequire(import.meta.url);
+  const { createCanvas } = createRequire(require.resolve('pdfjs-dist/package.json'))('@napi-rs/canvas');
+  const jpeg = createCanvas(20, 20).toBuffer('image/jpeg');
+  const imagePath = path.join(root, "Tiger'e 有空格.jpg"), documentPath = path.join(root, '粘贴的原文.md');
+  await writeFile(imagePath, jpeg); await writeFile(documentPath, 'LOCAL_DOCUMENT_FULL_TEXT_END');
+  for (const value of [imagePath, 'file://' + encodeURI(documentPath)]) {
+    assert.equal(await input.evaluate((el, value) => {
+      const data = new DataTransfer(); data.setData('text/plain', value);
+      const event = new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true });
+      el.dispatchEvent(event); return event.defaultPrevented;
+    }, value), true);
+  }
+  await page.waitForFunction(() => document.querySelectorAll('.focusLensNextWork .nodeEditorMaterial').length === 5);
+  assert.equal(await input.inputValue(), original);
+  assert.equal(await page.locator('#nodeMaterialsDialog').evaluate(el => el.open), false, 'no attachment button or popup is needed');
+  assert.equal(attachmentModelRequests.length, beforeCount, 'adding materials does not execute the model');
+  const { materials } = await (await fetch(base + '/api/node/materials' + query)).json();
+  assert.equal(materials.length, 5); assert.ok(materials.every(m => m.enabled));
+  const image = materials.find(m => m.name === path.basename(imagePath));
+  assert.deepEqual(Buffer.from(await (await fetch(base + image.url)).arrayBuffer()), jpeg);
+  await rm(imagePath); await rm(documentPath);
+  assert.deepEqual(Buffer.from(await (await fetch(base + image.url)).arrayBuffer()), jpeg, 'import takes a durable snapshot');
+  // Ordinary prose, copied document text and remote URLs remain normal text input.
+  for (const value of ['文档正文直接放在说明中', 'https://example.com/image.png', '请看 /tmp/photo.png 然后分析']) {
+    assert.equal(await input.evaluate((el, value) => {
+      const data = new DataTransfer(); data.setData('text/plain', value);
+      const event = new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true });
+      el.dispatchEvent(event); return event.defaultPrevented;
+    }, value), false);
+  }
+  await page.screenshot({ path: path.join(source, 'artifacts/node-editor-materials.png') });
+  await page.reload(); await page.waitForSelector('[data-node-id="N1_A"]');
+  await page.locator('#focusLensOpenBtn').click();
+  await page.locator('[data-focus-lens-node="N1_A"]').first().click();
+  await page.waitForFunction(() => document.querySelectorAll('.focusLensNextWork .nodeEditorMaterial').length === 5);
+  const response = page.waitForResponse(r => new URL(r.url()).pathname === '/api/codex/run' && r.request().method() === 'POST');
+  await page.locator('[data-focus-lens-action="run-agent"]').click(); await response;
+  await page.waitForFunction(() => document.querySelector('#directRunDialogStatus').textContent.includes('执行完成'));
+  const request = attachmentModelRequests.at(-1);
+  assert.match(JSON.stringify(request), /DIRECT_EDITOR_DOCUMENT_|LOCAL_DOCUMENT_FULL_TEXT_END/);
+  assert.ok(request.messages.some(m => Array.isArray(m.content) && m.content.filter(c => c.type === 'image_url').length === 2));
+});
+
+test('local attachment import validates explicit paths and node scope without running a model', async t => {
+  const file = path.join(root, '导入协议.txt'); await writeFile(file, 'IMPORT_CONTRACT_END');
+  const send = (nodeId, body, type = 'application/json') => fetch(base + '/api/chat/attachments/import?treeId=method&nodeId=' + nodeId,
+    { method: 'POST', headers: { 'content-type': type }, body: JSON.stringify(body) });
+  assert.equal((await send('N1_A', { path: 'relative.txt' })).status, 400);
+  assert.equal((await send('N1_A', { path: path.join(root, '不存在.txt') })).status, 404);
+  assert.equal((await send('N1_A', { path: root })).status, 400);
+  assert.equal((await send('ABSENT', { path: file })).status, 404);
+  assert.equal((await send('N1_A', { path: file }, 'text/plain')).status, 415);
+  const result = await send('N1_A', { path: file }); assert.equal(result.status, 201, await result.clone().text());
+  const { attachment } = await result.json();
+  assert.equal(await (await fetch(base + attachment.url)).text(), 'IMPORT_CONTRACT_END');
+  const foreign = new URL(base + attachment.url); foreign.searchParams.set('nodeId', 'N2');
+  assert.equal((await fetch(foreign)).status, 403);
+});
+test('node-card drops keep their original node while navigating, and failed path imports can be retried', async t => {
+  const page = await pageFor(t), query = '?treeId=method&nodeId=N2';
+  t.after(async () => {
+    const { materials } = await (await fetch(base + '/api/node/materials' + query)).json();
+    for (const ref of materials) await fetch(base + '/api/node/materials' + query, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: ref.id }) });
+  });
+  const input = page.locator('[data-node-id="N2"] .nextIdeaInput');
+  assert.equal(await input.evaluate(el => {
+    const data = new DataTransfer(); data.setData('text/plain', '/tmp/no-such-node-material-image-123456.png');
+    const event = new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true });
+    el.dispatchEvent(event); return event.defaultPrevented;
+  }), true);
+  await page.waitForFunction(() => document.querySelector('[data-node-id="N2"] .nodeEditorMaterialStatus').textContent.includes('不存在'));
+  await page.route('**/api/chat/attachments?*', async route => {
+    await new Promise(resolve => setTimeout(resolve, 250)); await route.continue();
+  });
+  const count = attachmentModelRequests.length;
+  const saved = page.waitForResponse(r => new URL(r.url()).pathname === '/api/node/materials' && r.request().method() === 'GET' && r.url().includes('nodeId=N2'));
+  await page.locator('[data-node-id="N2"]').evaluate(el => {
+    const data = new DataTransfer(); data.items.add(new File(['ORIGINAL_NODE_N2_DOCUMENT'], '切换时拖入.txt', { type: 'text/plain' }));
+    el.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
+  });
+  await enter(page);
+  await saved;
+  const { materials } = await (await fetch(base + '/api/node/materials' + query)).json();
+  assert.equal(materials.length, 1); assert.equal(materials[0].name, '切换时拖入.txt');
+  assert.equal((await (await fetch(base + '/api/node/materials?treeId=method&nodeId=N1_A')).json()).materials.length, 0);
+  assert.equal(attachmentModelRequests.length, count);
+});
 test('node materials survive reload, select execution payloads and join a draft conversation without calling the model', async t => {
   const page = await pageFor(t); await enter(page);
   const query = '?treeId=method&nodeId=N1_A';

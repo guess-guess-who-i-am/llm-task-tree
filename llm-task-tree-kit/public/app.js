@@ -763,6 +763,7 @@ function renderTree() {
 
   rerenderEdges();
   if (focusLensOpen) renderFocusLens();
+  refreshVisibleNodeMaterials();
   if (positionsChanged && !dirty && !saveInFlight) markDirty("将补齐节点位置避免图谱重叠");
 }
 
@@ -901,7 +902,7 @@ function renderFocusLens() {
   const actionsOpen = Boolean(els.focusLensBody.querySelector(".focusLensActionsMenu")?.open);
   els.focusLensBody.innerHTML = `
     ${renderFocusLensRelation("从哪里来", relations.parents, "before")}
-    <article class="focusLensCenter">
+    <article class="focusLensCenter" data-node-editor-id="${attr(node.id)}">
       <header class="focusLensCenterHeader">
         <div class="focusLensCenterIdentity">
           <span class="focusLensNodeId">${escapeHtml(node.id)}</span>
@@ -929,6 +930,7 @@ function renderFocusLens() {
           <h3>下一步</h3>
         </header>
         <textarea class="focusLensNextIdeaInput" data-focus-lens-next-idea="${attr(node.id)}" placeholder="写一句可执行的话，并说明服务的方向和完成判据">${escapeHtml(node.nextIdea || "")}</textarea>
+        ${nodeEditorMaterialBox(node.id)}
       </section>
       <div class="focusLensFields">
         <section class="focusLensField focusLensField--problem">
@@ -963,6 +965,7 @@ function renderFocusLens() {
     </article>
     ${renderFocusLensRelation("接下来通向", relations.children, "after")}
   `;
+  refreshVisibleNodeMaterials();
 }
 
 function openFocusLens(nodeId, { preserveActions = false } = {}) {
@@ -2659,6 +2662,7 @@ function nextIdeaBox(node) {
     <span class="nextIdeaBox">
       <span class="nextIdeaLabel">Agent 下一步思路 · 唯一执行依据</span>
       <textarea class="nextIdeaInput" placeholder="写这个节点接下来怎么推进">${escapeHtml(node.nextIdea || "")}</textarea>
+      ${nodeEditorMaterialBox(node.id)}
     </span>
   `;
 }
@@ -6524,7 +6528,123 @@ const directRunAttachmentDrafts = new Map();
 const directRunSubmittingNodes = new Set();
 const directRunMaterialSelection = new Map();
 const nodeMaterialPending = new Set();
+const nodeMaterialPendingCounts = new Map();
+const nodeEditorMaterialStates = new Map();
 let materialView = null;
+function beginNodeMaterialSave(scope) {
+  const key = directRunNodeKey(scope);
+  nodeMaterialPendingCounts.set(key, (nodeMaterialPendingCounts.get(key) || 0) + 1);
+  nodeMaterialPending.add(key);
+}
+function endNodeMaterialSave(scope) {
+  const key = directRunNodeKey(scope), count = (nodeMaterialPendingCounts.get(key) || 1) - 1;
+  if (count) nodeMaterialPendingCounts.set(key, count);
+  else { nodeMaterialPendingCounts.delete(key); nodeMaterialPending.delete(key); }
+}
+function nodeEditorMaterialState(scope) {
+  const key = directRunNodeKey(scope);
+  if (!nodeEditorMaterialStates.has(key)) nodeEditorMaterialStates.set(key, { materials: [], status: '', loaded: false, loading: false, revision: 0 });
+  return nodeEditorMaterialStates.get(key);
+}
+function nodeEditorMaterialBox(nodeId) {
+  return `<span class="nodeEditorMaterials" data-material-tree="${attr(viewTreeId)}" data-material-node="${attr(nodeId)}">
+    <span class="nodeEditorMaterialHint">拖入文件或粘贴图片，直接加入节点资料 <button type="button" data-editor-material-manage="${attr(nodeId)}">管理</button></span>
+    <span class="nodeEditorMaterialFiles"></span><span class="nodeEditorMaterialStatus" role="status" aria-live="polite"></span></span>`;
+}
+function renderInlineNodeMaterials(scope) {
+  const state = nodeEditorMaterialState(scope);
+  for (const box of document.querySelectorAll('.nodeEditorMaterials')) {
+    if (box.dataset.materialTree !== scope.treeId || box.dataset.materialNode !== scope.nodeId) continue;
+    box.querySelector('.nodeEditorMaterialFiles').innerHTML = state.materials.map(ref => `<a class="nodeEditorMaterial${ref.enabled ? '' : ' is-disabled'}" href="${attr(ref.url)}" target="_blank" rel="noopener" title="${attr(ref.name)}${ref.enabled ? ' · 执行时使用' : ' · 未勾选'}">${ref.kind === 'image' ? `<img src="${attr(ref.url)}" alt="${attr(ref.name)}">` : '<span aria-hidden="true">▤</span>'}<span>${escapeHtml(ref.name)}</span>${ref.enabled ? '' : '<small>未勾选</small>'}</a>`).join('');
+    box.querySelector('.nodeEditorMaterialStatus').textContent = state.status;
+  }
+}
+async function refreshInlineNodeMaterials(scope) {
+  const state = nodeEditorMaterialState(scope), revision = ++state.revision;
+  state.loading = true;
+  try {
+    const materials = await materialRequest(scope);
+    if (revision === state.revision) { state.materials = materials; state.loaded = true; }
+    return true;
+  } catch (error) { if (revision === state.revision) state.status = error.message; return false; }
+  finally { if (revision === state.revision) state.loading = false; renderInlineNodeMaterials(scope); }
+}
+function refreshVisibleNodeMaterials() {
+  const seen = new Set();
+  for (const box of document.querySelectorAll('.nodeEditorMaterials')) {
+    const scope = { treeId: box.dataset.materialTree, nodeId: box.dataset.materialNode }, key = directRunNodeKey(scope);
+    if (seen.has(key)) continue; seen.add(key);
+    const state = nodeEditorMaterialState(scope);
+    renderInlineNodeMaterials(scope);
+    if (!state.loaded && !state.loading) void refreshInlineNodeMaterials(scope);
+  }
+}
+// Prefer clipboard bytes. A literal file path is used only when no File is available.
+// Mixed prose and remote URLs stay ordinary editable text, not import requests.
+function attachmentTransfer(data) {
+  if (!data) return { files: [], paths: [] };
+  const files = [...(data.files || [])];
+  if (!files.length) files.push(...[...(data.items || [])].filter(item => item.kind === 'file').map(item => item.getAsFile()).filter(Boolean));
+  if (files.length) return { files, paths: [] };
+  const uriList = data.getData('text/uri-list');
+  const lines = (uriList || data.getData('text/plain')).split(/\r?\n/).map(line => line.trim()).filter(line => line && !(uriList && line.startsWith('#')));
+  const paths = lines.map(line => {
+    if ((line[0] === '"' || line[0] === "'") && line.at(-1) === line[0]) line = line.slice(1, -1);
+    if (line.startsWith('file://')) {
+      try { const url = new URL(line); if (url.host && url.host !== 'localhost') return ''; line = decodeURIComponent(url.pathname); } catch { return ''; }
+    }
+    return line.replace(/\\([ '\\])/g, '$1');
+  });
+  const isPath = file => /^(?:\/(?!\/)|[a-z]:[\\/])/i.test(file) && !/[\r\n\0]/.test(file) && /\.(?:png|jpe?g|webp|pdf|docx?|rtf|txt|md|csv|json|ya?ml|log|js|ts|py|go|html|css|xml)$/i.test(file);
+  return { files: [], paths: paths.length && paths.every(isPath) ? [...new Set(paths)] : [] };
+}
+async function importNodeAttachment(scope, filePath) {
+  const response = await fetch(`/api/chat/attachments/import?${materialQuery(scope)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: filePath }) });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+  return payload.attachment;
+}
+async function addEditorNodeMaterials(scope, transfer) {
+  const state = nodeEditorMaterialState(scope);
+  beginNodeMaterialSave(scope); state.status = '正在保存资料…'; renderInlineNodeMaterials(scope);
+  const errors = [];
+  try {
+    await Promise.all([
+      ...transfer.files.map(file => ({ name: file.name, save: () => uploadNodeAttachment(scope, file) })),
+      ...transfer.paths.map(file => ({ name: file.split(/[\\/]/).at(-1), save: () => importNodeAttachment(scope, file) }))
+    ].map(async item => {
+      try { const ref = await item.save(); await materialRequest(scope, 'POST', { id: ref.id }); }
+      catch (error) { errors.push(`${item.name}：${error.message}`); }
+    }));
+    if (!await refreshInlineNodeMaterials(scope)) errors.push(`资料列表读取失败：${state.status}`);
+  } finally {
+    endNodeMaterialSave(scope);
+    state.status = errors.join('\n') || (nodeMaterialPending.has(directRunNodeKey(scope)) ? '正在保存资料…' : '资料已保存，执行时自动使用。');
+    renderInlineNodeMaterials(scope); renderDirectRunDialog();
+    if (materialView?.treeId === scope.treeId && materialView.nodeId === scope.nodeId) { materialView.materials = state.materials; renderNodeMaterials(materialView); }
+  }
+}
+function editorMaterialScope(target) {
+  const nodeId = target.closest('[data-node-editor-id]')?.dataset.nodeEditorId || target.closest('.graphNode[data-node-id]')?.dataset.nodeId;
+  return nodeId ? { treeId: viewTreeId, nodeId } : null;
+}
+document.addEventListener('dragover', event => {
+  if (editorMaterialScope(event.target) && (event.dataTransfer?.types.includes('Files') || event.dataTransfer?.types.includes('text/uri-list') || attachmentTransfer(event.dataTransfer).paths.length)) {
+    event.preventDefault(); event.dataTransfer.dropEffect = 'copy';
+  }
+});
+for (const type of ['drop', 'paste']) document.addEventListener(type, event => {
+  if (event.defaultPrevented || (type === 'paste' && !event.target.closest('.nextIdeaInput, [data-focus-lens-next-idea]'))) return;
+  const scope = editorMaterialScope(event.target); if (!scope) return;
+  const transfer = attachmentTransfer(type === 'paste' ? event.clipboardData : event.dataTransfer);
+  if (!transfer.files.length && !transfer.paths.length) return;
+  event.preventDefault(); event.stopPropagation();
+  void addEditorNodeMaterials(scope, transfer);
+});
+document.addEventListener('click', event => {
+  const button = event.target.closest('[data-editor-material-manage]');
+  if (button) { event.stopPropagation(); void openNodeMaterials(button.dataset.editorMaterialManage); }
+});
 function materialQuery(scope) { return new URLSearchParams({ treeId: scope.treeId, nodeId: scope.nodeId }); }
 async function materialRequest(scope, method = 'GET', body) {
   const response = await fetch(`/api/node/materials?${materialQuery(scope)}`, { method,
@@ -6569,10 +6689,10 @@ async function openNodeMaterials(nodeId, treeId = viewTreeId) {
 async function mutateNodeMaterials(view, action) {
   if (view.busy) return;
   view.busy = true; view.status = '正在保存…';
-  const key = directRunNodeKey(view); nodeMaterialPending.add(key); renderNodeMaterials(view);
+  beginNodeMaterialSave(view); renderNodeMaterials(view);
   try { await action(); }
   catch (error) { view.status = error.message; }
-  finally { view.busy = false; nodeMaterialPending.delete(key); renderNodeMaterials(view); renderDirectRunDialog(); }
+  finally { view.busy = false; endNodeMaterialSave(view); renderNodeMaterials(view); renderDirectRunDialog(); await refreshInlineNodeMaterials(view); }
 }
 async function addNodeMaterials(files) {
   const view = materialView;

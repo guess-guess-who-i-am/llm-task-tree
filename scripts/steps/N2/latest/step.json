@@ -3,8 +3,21 @@
   "nodeId": "N2",
   "title": "实现可视化图谱编辑器",
   "reportZh": "report.zh.md",
-  "updatedAt": "2026-08-17T14:26:39.4107495+08:00",
+  "updatedAt": "2026-10-09",
   "substeps": [
+    {
+      "title": "节点编辑框直接拖入粘贴及本地路径资料导入",
+      "functions": [
+        { "path": "public/app.js", "name": "addEditorNodeMaterials" },
+        { "path": "public/app.js", "name": "attachmentTransfer" },
+        { "path": "server/chat-attachments.js", "name": "importLocalAttachment" }
+      ],
+      "outputs": [
+        { "path": "docs/node-materials.zh.md" },
+        { "path": "server/subtree-workspace-ui.test.js" },
+        { "path": "artifacts/node-editor-materials.png" }
+      ]
+    },
     {
       "title": "节点资料纳入Git及克隆恢复验证",
       "functions": [

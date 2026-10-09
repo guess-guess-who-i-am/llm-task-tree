@@ -52,7 +52,7 @@ import { validateToolArguments } from './server/tool-arguments.js';
 import { assertMainTreeWrite, assertRenderableTree } from './server/tree-write-safety.js';
 import { dialogueMessages, serializeDialogueState, normalizeNodeDialogues, nodeConversationId, latestNodeRuns } from './server/dialogue-state.js';
 import { archiveThreadDialogue } from './server/thread-dialogue-store.js';
-import { saveAttachment, loadAttachment, materializeAttachments, attachmentReference, attachPromptImages, MAX_ATTACHMENT_BYTES } from './server/chat-attachments.js';
+import { saveAttachment, importLocalAttachment, loadAttachment, materializeAttachments, attachmentReference, attachPromptImages, MAX_ATTACHMENT_BYTES } from './server/chat-attachments.js';
 import { listNodeMaterials, updateNodeMaterial, filterMaterialHistory } from './server/node-materials.js';
 import { executionProgress, recordRunDuration, readableExecutionError } from './server/execution-progress.js';
 import { planSubtreeFold } from './server/subtree-fold.js';
@@ -4710,6 +4710,20 @@ const handleRequest = async (req, res) => {
           const action = req.method === 'POST' ? 'add' : req.method === 'PATCH' ? 'select' : 'remove';
           jsonResponse(res, 200, { materials: await updateNodeMaterial(scope, { action, id: body.id, ...(body.enabled !== undefined ? { enabled: body.enabled } : {}) }) });
         }
+      } catch (error) { jsonResponse(res, error.status || 400, { error: error.message }); }
+      return;
+    }
+    if (reqPath === '/api/chat/attachments/import' && req.method === 'POST') {
+      try {
+        if (!/^application\/json(?:;|$)/i.test(req.headers['content-type'] || '')) throw Object.assign(new Error('本地文件导入需要 JSON 请求。'), { status: 415 });
+        const url = new URL(req.url, `http://${req.headers.host}`);
+        const treeId = url.searchParams.get('treeId'), nodeId = url.searchParams.get('nodeId');
+        if (!treeId || !nodeId) throw Object.assign(new Error('导入需要 treeId 和 nodeId。'), { status: 400 });
+        const tree = await readDeepSeekTreeScope({ treeId });
+        if (!await findDeepSeekNode(tree, nodeId)) throw Object.assign(new Error('节点不存在。'), { status: 404 });
+        const body = JSON.parse(await readBody(req));
+        const attachment = await importLocalAttachment({ projectRoot, treeId, nodeId, path: body.path });
+        jsonResponse(res, 201, { attachment });
       } catch (error) { jsonResponse(res, error.status || 400, { error: error.message }); }
       return;
     }

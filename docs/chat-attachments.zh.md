@@ -17,6 +17,7 @@
 唯一附件解析与存储入口为 `server/chat-attachments.js`。
 
 - `POST /api/chat/attachments?treeId=…&nodeId=…&name=…`：原始文件字节；成功 201 返回 `{attachment:{id,name,kind,size,warning,url}}`。空文件、非法内容为 400，超限为 413，不支持类型为 415，文档解析失败为 422。
+- `POST /api/chat/attachments/import?treeId=…&nodeId=…`：JSON `{path}` 导入本次明确指定的本地文件，返回相同附件引用。节点卡片/鱼眼「下一步」框直接接收拖放与粘贴；浏览器只提供本地路径时也会保存原文件，而不是把路径当任务文字。具体边界见 `docs/node-materials.zh.md`。
 - 节点 `POST /api/codex/run` 新增 `attachments:[id,…]`；只能引用当前 treeId/nodeId 的附件。传对象代替标识数组为 400；不存在为 404；跨节点/树为 403。重复提交为 409。
 - `GET /api/chat/attachments/:id?treeId=…&nodeId=…`：返回原文件；跨范围为 403，非法标识为 400，不存在为 404。图片可预览，文档作为下载；禁止 MIME 嗅探和缓存。
 - 持久消息仍以字符串 `content` 表示对话，新增 `attachments` 引用字段；模型请求才转为全文/原图内容块，避免把 Base64 重复存入历史。

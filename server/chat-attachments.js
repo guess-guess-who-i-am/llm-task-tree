@@ -82,6 +82,29 @@ export function attachmentReference(meta) {
     url: `/api/chat/attachments/${meta.id}?treeId=${encodeURIComponent(meta.treeId)}&nodeId=${encodeURIComponent(meta.nodeId)}` };
 }
 
+// A browser may expose a Finder/clipboard file as a literal path instead of a File.
+// Only the path explicitly pasted/dropped by the user is read; never scan folders.
+export async function importLocalAttachment({ path: sourcePath, ...scope }) {
+  if (typeof sourcePath !== 'string' || !sourcePath.trim()) throw fail('需要明确的本地文件路径。');
+  let file = sourcePath;
+  if (file.startsWith('file://')) {
+    try { file = fileURLToPath(file); } catch { throw fail('本地文件地址无效。'); }
+  }
+  if (!path.isAbsolute(file)) throw fail('需要绝对文件路径。');
+  const extension = path.extname(file).toLowerCase();
+  let info;
+  try { info = await stat(file); }
+  catch (error) {
+    if (['ENOENT', 'ENOTDIR'].includes(error.code)) throw fail('本地文件不存在，请重新拖入文件。', 404);
+    if (error.code === 'EACCES') throw fail('无法读取该文件，请直接拖入文件。', 403);
+    throw error;
+  }
+  if (!info.isFile()) throw fail('只能添加文件，不能添加文件夹。');
+  if (!imageTypes[extension] && !textTypes.has(extension) && !['.pdf', '.docx', '.doc', '.rtf'].includes(extension)) throw fail('不支持此文件类型，请上传图片、PDF、Word 或文本。', 415);
+  if (info.size > MAX_ATTACHMENT_BYTES) throw fail('单个附件不能超过 20 MiB；不会截断文件。', 413);
+  return saveAttachment({ ...scope, name: path.basename(file), bytes: await readFile(file) });
+}
+
 export async function saveAttachment({ projectRoot, treeId, nodeId, name, bytes }) {
   if (!treeId || !nodeId) throw fail('附件需要树和节点标识。');
   if (!Buffer.isBuffer(bytes) || !bytes.length) throw fail('文件为空。');

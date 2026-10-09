@@ -48,8 +48,8 @@
 - Metrics:
 - Notes:
 - CodeLoc:
-- CurrentResult: 节点尺寸按内容自适应，宏观、细节和手机回归通过；标题无裁切、节点无重叠。仍待用户实用验证，“一眼看清并直接编辑”未达到。
-- RootCauseAnalysis: 固定尺寸与固定操作栏造成短节点空白、长节点受限；宏观排版还需为细节高度预留空间。
+- CurrentResult: 节点编辑框可拖入、粘贴资料，路径转存与刷新执行通过；资料随Git恢复，30项回归通过。原树和对话不变，易读性待验证。
+- RootCauseAnalysis: 附件事件仅接在弹窗和对话框，节点编辑框走默认粘贴；纯路径剪贴板也未转为资料。
 - CaseStudy:
 - NextIdea:
 - SelectedSkills:

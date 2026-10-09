@@ -6954,6 +6954,14 @@ body.embedMode .chainDock {
 .nodeMaterial { border: 1px solid #dce4df; border-radius: 12px; padding: 14px; display: grid; gap: 12px; }
 .nodeMaterial a { display: flex; gap: 12px; align-items: center; overflow-wrap: anywhere; }
 .nodeMaterial img { width: 100px; height: 80px; object-fit: contain; border-radius: 8px; background: #eff3f0; }
+.nodeEditorMaterials { display: grid; gap: 6px; margin-top: 8px; min-width: 0; font-size: 12px; line-height: 1.5; }
+.nodeEditorMaterialHint { color: #68766c; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.nodeEditorMaterialHint button { border: 0; padding: 2px 5px; background: transparent; color: #176b5c; cursor: pointer; text-decoration: underline; font: inherit; }
+.nodeEditorMaterialFiles { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.nodeEditorMaterial { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 4px 7px; border: 1px solid #cedbd3; border-radius: 7px; background: #f4f8f5; color: #255647; text-decoration: none; overflow-wrap: anywhere; }
+.nodeEditorMaterial img { width: 32px; height: 28px; object-fit: contain; flex: none; border-radius: 3px; }
+.nodeEditorMaterial.is-disabled { opacity: .6; }
+.nodeEditorMaterialStatus { white-space: pre-wrap; color: #526758; }
 .nodeMaterial label { display: flex; gap: 6px; align-items: center; justify-content: flex-start; width: fit-content; }
 .nodeMaterial input[type="checkbox"], .directRunComposerFooter input[type="checkbox"] { width: auto; flex: none; margin: 0; }
 .nodeMaterial div { display: flex; gap: 8px; flex-wrap: wrap; }

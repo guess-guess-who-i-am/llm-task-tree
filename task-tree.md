@@ -48,8 +48,8 @@
 - Metrics:
 - Notes:
 - CodeLoc:
-- CurrentResult: 节点编辑框可拖入、粘贴资料，路径转存与刷新执行通过；资料随Git恢复，30项回归通过。原树和对话不变，易读性待验证。
-- RootCauseAnalysis: 附件事件仅接在弹窗和对话框，节点编辑框走默认粘贴；纯路径剪贴板也未转为资料。
+- CurrentResult: 编辑框拖粘资料、随Git恢复已验证。底部缩为复制按钮和可折叠链，21项浏览器回归及安装版测试通过；易读性待实际反馈。
+- RootCauseAnalysis: 旧底栏重复显示整段命令；窄屏网格溢出遮挡按钮，改为主区域内部滚动。
 - CaseStudy:
 - NextIdea:
 - SelectedSkills:

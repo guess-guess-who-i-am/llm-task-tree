@@ -14,6 +14,66 @@ const main = '# LLM Task Graph\n## ROOT - 项目总目标\n- Problem: 保留主�
 const sub = '# LLM Task Graph Subtree\n> Fold root: N1\n## N1 - 身体底盘\n- Problem: 保持健康\n## N1_A - 睡眠\n- Problem: 建立作息\n- NextIdea: 保存睡眠记录\n## N1_B - 时间\n- Problem: 安排时间\n# GraphState\n- Current: N1\n- Next: N1_A\n# Edges\n## EA - 睡眠\n- Endpoints: N1, N1_A\n## EB - 时间\n- Endpoints: N1, N1_B\n';
 let root, child, browser, base, gateway;
 const attachmentModelRequests = [];
+test('compact chain dock always offers copy, hides the long command and remembers collapse on desktop and mobile', async t => {
+  const page = await pageFor(t);
+  t.after(async () => { await writeFile(path.join(root, 'task-tree.md'), main); await writeFile(path.join(root, 'subtrees/N1.md'), sub); });
+  const beforeCount = attachmentModelRequests.length;
+  await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => { window.copiedChainText = text; } } }));
+  assert.equal(await page.locator('#chainLoopCmdCopyBtn').isVisible(), true, 'copy must be available without expanding the chain');
+  assert.ok((await page.locator('.chainDock').boundingBox()).height <= 44);
+  assert.equal(await page.locator('#chainSlot').isVisible(), false);
+  await page.locator('#chainLoopCmdCopyBtn').click();
+  const copied = await page.evaluate(() => window.copiedChainText);
+  assert.match(copied, /^\/loop 3m/); assert.match(copied, /GraphState.NextPlan/); assert.match(copied, /chain-advance/);
+  assert.ok(copied.includes(new URL(base).port));
+  await page.locator('#toggleChainDockBtn').focus(); await page.keyboard.press('Space');
+  assert.equal(await page.locator('#toggleChainDockBtn').getAttribute('aria-expanded'), 'true');
+  assert.equal(await page.locator('#chainSlot').isVisible(), true);
+  assert.equal(await page.locator('#chainLoopCmdText').count(), 0, 'no large command block remains in the workspace');
+  assert.ok((await page.locator('.chainDock').boundingBox()).height <= 104);
+  await page.locator('[data-node-id="N2"] [data-action="add-to-chain"]').dispatchEvent('click');
+  await page.waitForSelector('.chainCard[data-chain-id="N2"]');
+  assert.match(await page.locator('#chainDockSummary').innerText(), /1 个节点/);
+  await page.waitForFunction(() => document.querySelector('#saveState').textContent === '已保存');
+  await page.reload(); await page.waitForSelector('.graphNode');
+  if (await page.locator('#projectOverviewDialog').evaluate(el => el.open)) await page.locator('#projectOverviewClose').click();
+  assert.equal(await page.locator('#chainSlot').isVisible(), true, 'expanded choice survives reload');
+  await page.screenshot({ path: path.join(source, 'artifacts/compact-chain-desktop.png') });
+  await page.locator('#toggleChainDockBtn').click();
+  await page.reload(); await page.waitForSelector('.graphNode');
+  if (await page.locator('#projectOverviewDialog').evaluate(el => el.open)) await page.locator('#projectOverviewClose').click();
+  assert.equal(await page.locator('#chainSlot').isVisible(), false, 'collapsed choice survives reload');
+  assert.equal(await page.locator('#chainLoopCmdCopyBtn').isVisible(), true);
+  await enter(page);
+  await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => { window.copiedChainText = text; } } }));
+  await page.locator('#chainLoopCmdCopyBtn').click();
+  assert.ok((await page.evaluate(() => window.copiedChainText)).includes('subtree=subtrees%2FN1.md'));
+  await page.locator('[data-node-id="N1_A"] [data-action="add-to-chain"]').dispatchEvent('click');
+  await page.waitForSelector('.chainCard[data-chain-id="N1_A"]', { state: 'attached' });
+  await page.waitForFunction(() => document.querySelector('#saveState').textContent === '已保存');
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.ok((await page.locator('.chainDock').boundingBox()).height <= 44);
+  const copyBounds = await page.locator('#chainLoopCmdCopyBtn').boundingBox();
+  assert.ok(copyBounds.x >= 0 && copyBounds.x + copyBounds.width <= 390);
+  const hit = await page.locator('#toggleChainDockBtn').evaluate(el => {
+    const rect = el.getBoundingClientRect();
+    const target = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    return { clickable: el.contains(target), target: target?.id,
+      bounds: Object.fromEntries(['.layout', '.graphPane', '.graphViewport', '.chainDock'].map(selector => {
+        const node = document.querySelector(selector), box = node.getBoundingClientRect();
+        return [selector, { top: box.top, bottom: box.bottom, height: box.height }];
+      })) };
+  });
+  assert.equal(hit.clickable, true, JSON.stringify(hit));
+  await page.locator('#toggleChainDockBtn').click();
+  assert.ok((await page.locator('.chainDock').boundingBox()).height <= 124);
+  await page.screenshot({ path: path.join(source, 'artifacts/compact-chain-mobile.png') });
+  await page.setViewportSize({ width: 820, height: 844 });
+  await page.locator('#toggleChainDockBtn').click();
+  assert.equal(await page.locator('#chainSlot').isVisible(), false);
+  await page.locator('#chainLoopCmdCopyBtn').click();
+  assert.equal(attachmentModelRequests.length, beforeCount, 'copy and collapse never execute a model');
+});
 test('node next-step editors directly accept pasted images, dropped documents and local clipboard paths', async t => {
   const page = await pageFor(t); await enter(page); page.setDefaultTimeout(15000);
   const query = '?treeId=method&nodeId=N1_A';
@@ -315,8 +375,16 @@ test('real upload UI sends document contents, supports attachment-only messages 
   });
   await page.waitForFunction(() => document.querySelectorAll('.directRunAttachmentDraft img').length === 2 && !document.querySelector('#directRunSendBtn').disabled);
   await page.route('**/api/codex/run', route => route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: 'fixture submission failed' }) }));
+  // Other background status updates can replace the error before polling sees it.
+  await page.evaluate(() => {
+    window.uploadStatusHistory = [];
+    new MutationObserver(() => window.uploadStatusHistory.push(document.querySelector('#saveState').textContent))
+      .observe(document.querySelector('#saveState'), { childList: true, characterData: true, subtree: true });
+  });
+  const failedSubmission = page.waitForResponse(r => new URL(r.url()).pathname === '/api/codex/run' && r.status() === 502);
   await page.locator('#directRunSendBtn').click();
-  await page.waitForFunction(() => document.querySelector('#saveState')?.textContent.includes('fixture submission failed'));
+  await failedSubmission;
+  await page.waitForFunction(() => window.uploadStatusHistory.some(text => text.includes('fixture submission failed')) && !document.querySelector('#directRunSendBtn').disabled);
   assert.equal(await page.locator('.directRunAttachmentDraft').count(), 2, 'failed submission must preserve attachments');
   await page.unroute('**/api/codex/run');
   await page.locator('#directRunSendBtn').click();

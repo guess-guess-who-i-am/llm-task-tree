@@ -6,6 +6,20 @@
   "updatedAt": "2026-10-09",
   "substeps": [
     {
+      "title": "底部复制与可折叠紧凑执行链",
+      "functions": [
+        { "path": "public/app.js", "name": "renderChainDock" },
+        { "path": "public/app.js", "name": "applyChainDockCollapseState" },
+        { "path": "public/app.js", "name": "copyChainLoopPrompt" }
+      ],
+      "outputs": [
+        { "path": "docs/compact-chain.zh.md" },
+        { "path": "server/subtree-workspace-ui.test.js" },
+        { "path": "artifacts/compact-chain-desktop.png" },
+        { "path": "artifacts/compact-chain-mobile.png" }
+      ]
+    },
+    {
       "title": "节点编辑框直接拖入粘贴及本地路径资料导入",
       "functions": [
         { "path": "public/app.js", "name": "addEditorNodeMaterials" },

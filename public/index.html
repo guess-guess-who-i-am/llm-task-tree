@@ -246,19 +246,20 @@
         </aside>
       </main>
 
-      <div id="chainLoopCmdBar" class="chainLoopCmdBar hidden" aria-label="Codex loop 命令">
-        <span class="chainLoopCmdLabel">链式循环</span>
-        <button type="button" id="chainRunBtn" class="chainRunBtn" title="直接发给 Codex 桌面端：按 chain-step 算出的单步提示跑一轮，不用复制命令">▶ 直接开跑</button>
-        <code id="chainLoopCmdText" class="chainLoopCmdText"></code>
-        <button type="button" id="chainLoopCmdCopyBtn" class="chainLoopCmdCopyBtn" title="复制 loop 命令，给 Cursor 或别的 Agent 用">复制</button>
-      </div>
       <footer class="chainDock is-collapsed" aria-label="Agent 执行链">
-        <button id="toggleChainDockBtn" type="button" class="chainDockToggle" title="展开执行链" aria-expanded="false">⌃</button>
-        <span class="chainDockLabel">执行链</span>
-        <span id="chainDockSummary" class="chainDockSummary">0 个节点</span>
-        <div id="chainSlot" class="chainSlot"></div>
-        <button id="chainLoopHelpBtn" type="button" class="chainLoopHelpBtn" title="链式 loop 使用说明">循环说明</button>
-        <button id="chainClearBtn" type="button" class="chainClearBtn" title="清空执行链">清空</button>
+        <div class="chainDockBar">
+          <button id="toggleChainDockBtn" type="button" class="chainDockToggle" title="展开执行链" aria-expanded="false" aria-controls="chainDockBody">⌃ 执行链</button>
+          <span id="chainDockSummary" class="chainDockSummary">0 个节点</span>
+          <button type="button" id="chainLoopCmdCopyBtn" class="chainLoopCmdCopyBtn" title="复制完整链式循环命令">复制</button>
+        </div>
+        <div id="chainDockBody" class="chainDockBody">
+          <div id="chainSlot" class="chainSlot"></div>
+          <div class="chainDockActions">
+            <button type="button" id="chainRunBtn" class="chainRunBtn" title="按执行链的下一步执行一轮">▶ 执行下一步</button>
+            <button id="chainLoopHelpBtn" type="button" class="chainLoopHelpBtn" title="链式循环使用说明">说明</button>
+            <button id="chainClearBtn" type="button" class="chainClearBtn" title="清空执行链">清空</button>
+          </div>
+        </div>
       </footer>
     </div>
     <dialog id="projectOverviewDialog" class="projectOverviewDialog" aria-label="项目决策总览">

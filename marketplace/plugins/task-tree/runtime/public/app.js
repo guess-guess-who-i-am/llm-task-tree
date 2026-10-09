@@ -388,8 +388,6 @@ const els = {
   chainLoopHelpPort: document.querySelector("#chainLoopHelpPort"),
   chainLoopHelpPrompt: document.querySelector("#chainLoopHelpPrompt"),
   chainLoopHelpCopyBtn: document.querySelector("#chainLoopHelpCopyBtn"),
-  chainLoopCmdBar: document.querySelector("#chainLoopCmdBar"),
-  chainLoopCmdText: document.querySelector("#chainLoopCmdText"),
   chainLoopCmdCopyBtn: document.querySelector("#chainLoopCmdCopyBtn"),
   chainRunBtn: document.querySelector("#chainRunBtn"),
   projectSwitchBtn: document.querySelector("#projectSwitchBtn"),
@@ -4201,20 +4199,9 @@ function wireChainLoopHelp() {
   });
 }
 
-function renderChainLoopCmdBar() {
-  if (!els.chainLoopCmdBar) return;
-  const show = !chainDockCollapsed && (chainAutoAdvance || parseChainIds(chainText).length > 0 || workspaceMode === "subtree");
-  els.chainLoopCmdBar.classList.toggle("hidden", !show);
-  const text = buildChainLoopPromptText({
-    subtreePath: workspaceMode === "subtree" ? activeSubtreePath : ""
-  });
-  if (els.chainLoopCmdText) els.chainLoopCmdText.textContent = text;
-}
-
 function renderChainDock() {
   if (!els.chainSlot) return;
   applyChainDockCollapseState({ persist: false });
-  renderChainLoopCmdBar();
   const ids = parseChainIds(chainText);
   if (els.chainAutoAdvanceBtn) {
     els.chainAutoAdvanceBtn.classList.toggle("active", chainAutoAdvance);
@@ -6379,7 +6366,7 @@ function toggleRightPane() {
 function applyChainDockCollapseState({ persist = true } = {}) {
   els.chainDock?.classList.toggle("is-collapsed", chainDockCollapsed);
   if (els.toggleChainDockBtn) {
-    els.toggleChainDockBtn.textContent = chainDockCollapsed ? "⌃" : "⌄";
+    els.toggleChainDockBtn.textContent = chainDockCollapsed ? "⌃ 执行链" : "⌄ 执行链";
     els.toggleChainDockBtn.title = chainDockCollapsed ? "展开执行链" : "收起执行链";
     els.toggleChainDockBtn.setAttribute("aria-expanded", chainDockCollapsed ? "false" : "true");
   }
@@ -6390,7 +6377,6 @@ function applyChainDockCollapseState({ persist = true } = {}) {
       // ignore storage errors
     }
   }
-  renderChainLoopCmdBar();
 }
 
 function initChainDockCollapseState() {

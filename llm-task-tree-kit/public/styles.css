@@ -330,44 +330,6 @@ h1 {
   .workspaceNavButton { flex: 1; }
 }
 
-.chainLoopCmdBar {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 44px;
-  padding: 6px 16px;
-  border-top: 1px solid var(--line);
-  background: #f4f7fb;
-  font-size: 12px;
-}
-
-.chainLoopCmdBar.hidden {
-  display: none;
-}
-
-.chainLoopCmdLabel {
-  flex-shrink: 0;
-  font-weight: 600;
-  color: var(--muted);
-}
-
-.chainLoopCmdText {
-  flex: 1;
-  min-width: 0;
-  max-height: 72px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  padding: 4px 8px;
-  border-radius: 6px;
-  background: #fff;
-  border: 1px solid var(--line);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
-  line-height: 1.35;
-}
-
 .chainRunBtn {
   flex-shrink: 0;
   padding: 4px 12px;
@@ -464,38 +426,53 @@ h1 {
 .chainDock {
   flex-shrink: 0;
   display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 68px;
-  padding: 8px 16px;
+  flex-direction: column;
+  gap: 0;
+  padding: 0 12px;
   border-top: 1px solid var(--line);
   background: #fbfbf8;
 }
 
-.chainDock.is-collapsed {
+.chainDockBar {
+  display: flex;
+  align-items: center;
   min-height: 40px;
-  padding-top: 5px;
-  padding-bottom: 5px;
+  width: 100%;
   gap: 8px;
 }
 
-.chainDock.is-collapsed .chainSlot,
-.chainDock.is-collapsed .chainLoopHelpBtn,
-.chainDock.is-collapsed .chainClearBtn {
+.chainDockBody {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0 0 6px;
+}
+
+.chainDock.is-collapsed .chainDockBody {
   display: none;
+}
+
+.chainDockActions { display: flex; gap: 5px; flex-shrink: 0; align-items: center; }
+.chainDockActions button { min-height: 28px; height: 28px; padding: 3px 8px; border-radius: 6px; }
+@media (max-width: 600px) {
+  .chainDockBody { flex-wrap: wrap; gap: 4px; }
+  .chainDockBody .chainSlot { flex-basis: 100%; }
+  .chainDockActions { margin-left: auto; }
 }
 
 .chainDockToggle {
   flex: 0 0 auto;
-  width: 28px;
+  min-width: 84px;
   height: 28px;
-  padding: 0;
+  padding: 0 7px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--panel);
   color: var(--muted);
   cursor: pointer;
-  font-size: 16px;
+  font-size: 12px;
+  font-weight: 600;
   line-height: 1;
 }
 
@@ -504,30 +481,21 @@ h1 {
   color: var(--accent);
 }
 
-.chainDockLabel {
-  flex-shrink: 0;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--muted);
-}
-
 .chainDockSummary {
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
   color: var(--muted);
   font-size: 12px;
   white-space: nowrap;
 }
 
-.chainDock.is-collapsed .chainDockSummary {
-  margin-right: auto;
-}
-
 .chainSlot {
   flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 48px;
+  min-height: 36px;
   overflow-x: auto;
   padding: 2px 0;
 }
@@ -6596,6 +6564,7 @@ textarea:focus {
 @media (max-width: 1120px) {
   .layout {
     height: calc(100vh - 78px);
+    overflow: auto;
     grid-template-columns: 1fr;
     grid-template-rows: 260px minmax(420px, 1fr) 220px;
   }
@@ -6780,7 +6749,6 @@ body.snapshotMode .versionPane,
 body.snapshotMode .paneResizeHandle,
 body.snapshotMode .paneEdgeToggle,
 body.snapshotMode .graphPane > .paneHeader,
-body.snapshotMode .chainLoopCmdBar,
 body.snapshotMode .chainDock,
 body.snapshotMode .workspaceBanner,
 body.snapshotMode .floatingPanel {
@@ -6935,10 +6903,6 @@ body.embedFullscreen .toolbar button {
 }
 
 /* Docked bars are sized for a full window and would eat a third of the widget. */
-body.embedMode .chainLoopCmdBar {
-  display: none;
-}
-
 body.embedMode .chainDock {
   max-height: 32vh;
 }

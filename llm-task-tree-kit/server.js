@@ -51,6 +51,7 @@ import { patchNodeFields } from "./server/tree-node-patch.js";
 import { validateToolArguments } from './server/tool-arguments.js';
 import { assertMainTreeWrite, assertRenderableTree } from './server/tree-write-safety.js';
 import { dialogueMessages, serializeDialogueState, normalizeNodeDialogues, nodeConversationId, latestNodeRuns } from './server/dialogue-state.js';
+import { reviseUserMessage, dialogueSnapshot, exportDialogueToDesktop } from './server/dialogue-actions.js';
 import { archiveThreadDialogue } from './server/thread-dialogue-store.js';
 import { saveAttachment, importLocalAttachment, loadAttachment, materializeAttachments, attachmentReference, attachPromptImages, MAX_ATTACHMENT_BYTES } from './server/chat-attachments.js';
 import { listNodeMaterials, updateNodeMaterial, filterMaterialHistory } from './server/node-materials.js';
@@ -148,6 +149,7 @@ async function ensureProjectGitRepository() {
 const executionScopes = createExecutionScopeStore({ projectRoot });
 const parallelCodex = createParallelCodexCoordinator({ projectRoot });
 const directRuns = new Map();
+const directRunControllers = new Map();
 const directConversations = new Map();
 const deletingDirectConversations = new Set();
 const startingDirectConversations = new Set();
@@ -4758,6 +4760,9 @@ const handleRequest = async (req, res) => {
 
     if (reqPath === "/api/codex/run" && req.method === "POST") {
       const body = req.headers["content-length"] ? JSON.parse(await readBody(req)) : {};
+      if (body.editMessageIndex !== undefined && (body.progress !== true || typeof body.prompt !== 'string' || !body.prompt.trim())) {
+        jsonResponse(res, 400, { error: '编辑重发需要指定节点，并提供非空的新消息。' }); return;
+      }
       if (body.attachments !== undefined && body.progress !== true) {
         jsonResponse(res, 400, { error: '附件只能发送到指定节点的对话，请提供 progress、treeId 和 nodeId。' }); return;
       }
@@ -4803,11 +4808,16 @@ const handleRequest = async (req, res) => {
           const conversation = directConversations.get(conversationId) || { id: conversationId, nodeId, treeId: deepSeekTreeScope.tree.id, messages: [], activeRunId: "", threadId: '' };
           if (conversation.activeRunId) {
             const active = directRuns.get(conversation.activeRunId);
-            if (active && ["starting", "running"].includes(active.status)) {
+            if (active && ["starting", "running", "stopping"].includes(active.status)) {
               jsonResponse(res, 409, { error: "这个节点的上一轮对话还在执行，请等它完成后再继续。", runId: active.id, conversationId });
               return;
             }
           }
+          const editing = body.editMessageIndex !== undefined;
+          if (editing && (!body.sourceRunId || body.sourceRunId !== [...directRuns.values()].find(r => r.conversationId === conversationId)?.id)) {
+            jsonResponse(res, 409, { error: '对话已更新，请刷新后重新选择要编辑的消息。' }); return;
+          }
+          const revised = editing ? reviseUserMessage(conversation.messages, body.editMessageIndex, prompt) : null;
           if (body.attachments !== undefined && (!Array.isArray(body.attachments) || !body.attachments.every(id => typeof id === 'string'))) {
             jsonResponse(res, 400, { error: 'attachments 必须是附件标识数组。' }); return;
           }
@@ -4816,13 +4826,15 @@ const handleRequest = async (req, res) => {
           const scope = { projectRoot, treeId: deepSeekTreeScope.tree.id, nodeId };
           if (body.useNodeMaterials !== undefined && typeof body.useNodeMaterials !== 'boolean') throw Object.assign(new Error('useNodeMaterials 必须是布尔值。'), { status: 400 });
           const materials = await listNodeMaterials(scope);
-          const attachments = await Promise.all((body.attachments || []).map(async id => attachmentReference((await loadAttachment({ ...scope, id })).meta)));
+          const attachmentIds = [...new Set([...(body.attachments || []), ...(revised?.at(-1)?.attachments || []).map(a => a.id)])];
+          const attachments = await Promise.all(attachmentIds.map(async id => attachmentReference((await loadAttachment({ ...scope, id })).meta)));
           if (body.useNodeMaterials !== false) attachments.push(...materials.filter(m => m.enabled));
           attachments.push(...await attachPromptImages(prompt, scope));
           const uniqueAttachments = [...new Map(attachments.map(a => [a.id, a])).values()];
           const userMessage = { role: "user", content: prompt, ...(uniqueAttachments.length ? { attachments: uniqueAttachments } : {}) };
-          const messages = [...dialogueMessages(conversation.messages), userMessage];
+          const messages = [...(revised ? revised.slice(0, -1) : dialogueMessages(conversation.messages)), userMessage];
           const modelMessages = await materializeAttachments(filterMaterialHistory(messages, materials, uniqueAttachments.map(a => a.id)), scope);
+          if (editing) await backupDirectDialogues({ runs: [...directRuns.values()].filter(r => r.conversationId === conversationId), conversations: [conversation] }, 'edited');
           const tracked = {
             id,
             nodeId,
@@ -4846,12 +4858,15 @@ const handleRequest = async (req, res) => {
             if (old.treeId === tracked.treeId && old.nodeId === nodeId) directRuns.delete(old.id);
           }
           directRuns.set(id, tracked);
+          const runController = new AbortController();
+          directRunControllers.set(id, runController);
           conversation.activeRunId = id;
           conversation.messages = messages;
           directConversations.set(conversationId, conversation);
           directRunEvent(tracked, "queued", "已收到节点执行请求");
           await persistDirectState();
           const result = await startCodexTurn({
+            signal: runController.signal,
             prompt, messages: modelMessages, dialogueContext: messages, cwd: projectRoot, threadId: conversation.threadId || '', waitForCompletion: false,
             environment: { TASK_TREE_QUALITY_MODE: 'advisory' },
             systemPrompt: deepSeekSystemPrompt,
@@ -4859,30 +4874,34 @@ const handleRequest = async (req, res) => {
             initialToolCalls: initialReads.map(({name,args},index)=>({id:`host-${index}-${id}`,type:'function',function:{name,arguments:JSON.stringify(args)}})),
             toolHandler: (name, args) => executeDeepSeekTaskTreeTool(name, { ...args, treeId: args.treeId || deepSeekTreeScope.tree.id, ...(name === 'task_tree_focus' ? { nodeId: args.nodeId || nodeId } : {}) }),
             onAccepted: ({ threadId, turnId }) => {
-              tracked.status = "running"; tracked.threadId = threadId || ""; tracked.turnId = turnId || "";
+              if (tracked.status !== 'stopping') tracked.status = "running";
+              tracked.threadId = threadId || ""; tracked.turnId = turnId || "";
               conversation.threadId = threadId || '';
               directRunEvent(tracked, "turn/accepted", "模型已接受执行");
             },
             onNotification: (message) => directRunNotification(tracked, message),
             onCompleted: async ({ status, error, output, reasoning, timing, messages: completedMessages }) => {
-              try {
+              try { if (status !== 'stopped') {
                 const scope = await readDeepSeekTreeScope({ treeId: deepSeekTreeScope.tree.id });
                 const fresh = await readTreeSummary({ projectRoot, tree: scope.tree, markdown: scope.markdown, persist: true });
                 tracked.treeSummary = { snapshotPath: fresh.snapshotPath, fingerprint: fresh.fingerprint, generatedAt: fresh.generatedAt };
+              }
               } catch (summaryError) { tracked.summaryWarning = summaryError.message; }
               tracked.timing = timing;
-              tracked.status = status === "failed" || error ? "failed" : "completed";
+              tracked.status = status === 'stopped' ? 'stopped' : status === "failed" || error ? "failed" : "completed";
               tracked.error = error?.message || "";
               tracked.output = String(output || tracked.streams?.agentMessage?.text || "");
               tracked.reasoning = String(reasoning || tracked.streams?.reasoning?.text || "");
               conversation.messages = dialogueMessages(completedMessages || [...messages, { role: "assistant", content: tracked.output }]);
               conversation.activeRunId = "";
               directConversations.set(conversationId, conversation);
-              directRunEvent(tracked, tracked.status, tracked.status === "completed" ? "执行完成" : (tracked.error || "执行失败"));
+              directRunEvent(tracked, tracked.status, tracked.status === 'stopped' ? '已停止；已保存的文件不会回滚' : tracked.status === "completed" ? "执行完成" : (tracked.error || "执行失败"));
               recordRunDuration(directTimingSamples,tracked);
               await persistDirectState();
+              directRunControllers.delete(id);
             }
           }).catch(error => {
+            directRunControllers.delete(id);
             tracked.status = 'failed'; tracked.error = error.message;
             conversation.activeRunId = '';
             directRunEvent(tracked, 'failed', error.message);
@@ -4922,6 +4941,31 @@ const handleRequest = async (req, res) => {
     }
 
     const directRunMatch = reqPath.match(/^\/api\/codex\/run\/([A-Za-z0-9-]+)$/);
+    const stopRunMatch = reqPath.match(/^\/api\/codex\/run\/([A-Za-z0-9-]+)\/stop$/);
+    if (stopRunMatch && req.method === 'POST') {
+      const body = JSON.parse(await readBody(req));
+      const run = directRuns.get(stopRunMatch[1]);
+      if (!run || run.treeId !== body.treeId || run.nodeId !== body.nodeId) { jsonResponse(res, 404, { error: '找不到该节点的执行记录' }); return; }
+      if (!['starting', 'running', 'stopping'].includes(run.status)) { jsonResponse(res, 200, { run: publicDirectRun(run) }); return; }
+      const controller = directRunControllers.get(run.id);
+      if (!controller) { jsonResponse(res, 409, { error: '执行控制已断开，请刷新状态。' }); return; }
+      run.status = 'stopping';
+      directRunEvent(run, 'stopping', '正在停止模型和工具；已保存的文件不会回滚');
+      controller.abort(new DOMException('用户停止执行', 'AbortError'));
+      await persistDirectState();
+      jsonResponse(res, 202, { run: publicDirectRun(run) }); return;
+    }
+    if (reqPath === '/api/codex/conversation/export' && req.method === 'POST') {
+      const body = JSON.parse(await readBody(req));
+      if (!body.treeId || !body.nodeId) { jsonResponse(res, 400, { error: '导出需要 treeId 和 nodeId' }); return; }
+      const id = nodeConversationId(body.treeId, body.nodeId);
+      const conversation = directConversations.get(id);
+      const run = [...directRuns.values()].find(r => r.conversationId === id);
+      if (!conversation && !run) { jsonResponse(res, 404, { error: '找不到节点对话' }); return; }
+      const file = await exportDialogueToDesktop({ treeId: body.treeId, nodeId: body.nodeId,
+        status: run?.status, messages: dialogueSnapshot(conversation, run), baseUrl: `http://${req.headers.host}` });
+      jsonResponse(res, 200, { ok: true, path: file }); return;
+    }
     if (reqPath === '/api/codex/runs' && req.method === 'GET') {
       jsonResponse(res, 200, {runs:latestNodeRuns(directRuns).map(publicDirectRun)});
       return;
@@ -4934,7 +4978,7 @@ const handleRequest = async (req, res) => {
       const conversationId = nodeConversationId(treeId, nodeId);
       const runs = [...directRuns.values()].filter(run => run.treeId === treeId && run.nodeId === nodeId);
       const conversation = directConversations.get(conversationId);
-      if (runs.some(run => ['starting', 'running'].includes(run.status)) || deletingDirectConversations.has(conversationId) || startingDirectConversations.has(conversationId)) {
+      if (runs.some(run => ['starting', 'running', 'stopping'].includes(run.status)) || deletingDirectConversations.has(conversationId) || startingDirectConversations.has(conversationId)) {
         jsonResponse(res, 409, { error: '节点还在执行，请等本轮完成后再删除对话。' }); return;
       }
       if (!runs.length && !conversation) { jsonResponse(res, 404, { error: '找不到节点对话' }); return; }

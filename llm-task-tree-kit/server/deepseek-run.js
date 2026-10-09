@@ -171,6 +171,7 @@ async function readResponse(response, notify) {
     if (!response.ok) throw new Error(data?.error?.message || `DeepSeek HTTP ${response.status}`);
     const choice = data?.choices?.[0] || {};
     const item = contentFromChoice(choice);
+    if (item.text) notify?.({ method: 'item/updated', params: { item: { type: 'agentMessage', delta: item.text } } });
     return {
       ...item,
       toolCalls: item.toolCalls.map(normalizeToolCall),
@@ -275,6 +276,7 @@ export async function startDeepSeekTurn({
   threadId: previousThreadId = '',
   forkThreadId = '',
   forceNewThread = false,
+  signal = null,
   runtimeFactory = createSharedAgentRuntime
 } = {}) {
   const config = loadConfig(cwd, { environment: environment || {}, model });
@@ -284,12 +286,19 @@ export async function startDeepSeekTurn({
   const startedAt = Date.now();
   const timing = { startedAt: new Date(startedAt).toISOString(), requestMs: null, totalMs: null, provider: "deepseek", rounds: [], tools: [] };
   const controller = new AbortController();
+  const cancel = () => controller.abort(signal.reason);
+  if (signal?.aborted) cancel();
+  else signal?.addEventListener('abort', cancel, { once: true });
   const timeoutMs = Math.max(1000, Number(completionTimeoutMs) || 600000);
   const deadlineAt = startedAt + timeoutMs;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let liveAssistantText = '';
+  let streamedOutput = '';
   const notify = (message) => {
-    if (message.method === 'item/updated' && message.params?.item?.type === 'agentMessage') liveAssistantText += message.params.item.delta || '';
+    if (message.method === 'item/updated' && message.params?.item?.type === 'agentMessage') {
+      liveAssistantText += message.params.item.delta || '';
+      streamedOutput += message.params.item.delta || '';
+    }
     try { onNotification?.({ ...message, params: { ...(message.params || {}), threadId, turnId } }); } catch {}
   };
   const execute = async () => {
@@ -309,19 +318,23 @@ export async function startDeepSeekTurn({
       lastSavedDialogue = snapshot;
     };
     try {
+      controller.signal.throwIfAborted();
       const runtimeStarted = Date.now();
       notify({ method: 'runtime/loading', params: { message: '正在加载共享的 Codex 全局配置与 Hook' } });
       runtime = await runtimeFactory({ cwd, environment: environment || {}, signal: controller.signal, excludedTools: tools.map(t => t.function.name) });
+      controller.signal.throwIfAborted();
       timing.runtimeMs = Date.now() - runtimeStarted;
       timing.workerPid = runtime.worker?.pid || null;
       const lifecycle = { session_id: threadId, turn_id: turnId, prompt: String(prompt || ''), source: 'startup' };
       let refreshedSystemPrompt;
       const runHook = async (event, input) => {
+        controller.signal.throwIfAborted();
         const hookStarted = Date.now();
         let result;
         try { result = await runtime.hooks(event, input); }
         finally { (timing.hooks ||= []).push({ event, toolCallId: input.tool_call_id || null, durationMs: Date.now() - hookStarted }); }
         refreshedSystemPrompt = result.systemPrompt || refreshedSystemPrompt;
+        controller.signal.throwIfAborted();
         notify({ method: 'hook/completed', params: { event, reports: result.reports || [], blocked: result.blocked, message: `${event} Hook 已执行${result.reports?.some(r => r.stderr) ? '（有警告）' : ''}` } });
         return result;
       };
@@ -389,7 +402,7 @@ export async function startDeepSeekTurn({
           const executeStarted = Date.now();
           try { toolResult = runtimeNames.has(call.function.name)
             ? await runtime.call(call.function.name, args)
-            : await toolHandler(call.function.name, args, { threadId, turnId, toolCallId: call.id }); }
+            : await toolHandler(call.function.name, args, { threadId, turnId, toolCallId: call.id, signal: controller.signal }); }
           finally { toolTiming.executeMs = Date.now() - executeStarted; }
           if (toolResult?.image) {
             image = toolResult.image;
@@ -431,6 +444,7 @@ export async function startDeepSeekTurn({
           reads = [];
         };
         for (const call of calls) {
+          controller.signal.throwIfAborted();
           if (isParallelRead(call)) reads.push(call);
           else { await flushReads(); append([await executeTool(call, roundNumber)]); }
         }
@@ -445,6 +459,7 @@ export async function startDeepSeekTurn({
         await executeCalls(prepared, 0);
       }
       for (let round = 0; round < rounds; round += 1) {
+        controller.signal.throwIfAborted();
         const roundStarted = Date.now();
         const roundTiming = { round: round + 1, startedAt: new Date(roundStarted).toISOString(), requestMs: null, streamMs: null, totalMs: null, toolCalls: 0 };
         timing.rounds.push(roundTiming);
@@ -481,6 +496,7 @@ export async function startDeepSeekTurn({
           notify({ method: 'model/round-completed', params: { ...roundTiming } });
         }
         output += result.text || "";
+        controller.signal.throwIfAborted();
         reasoning += result.reasoning || "";
         usage = result.usage || usage;
         if (result.finishReason === 'length') throw new Error('模型输出达到长度限制，未完成；不能标记执行成功');
@@ -515,13 +531,20 @@ export async function startDeepSeekTurn({
       return completed;
     } catch (error) {
       const detail = error?.cause?.code || error?.cause?.message || '';
-      completed = { threadId, turnId, status: "failed", error: { message: error?.name === "AbortError" ? "DeepSeek 请求超时" : `${String(error.message || error)}${detail ? `（${detail}）` : ''}` }, timing: { ...timing, totalMs: Date.now() - startedAt } };
+      const stopped = Boolean(signal?.aborted);
+      const partial = streamedOutput || output;
+      finalDialogueAnswer = partial;
+      completed = { threadId, turnId, status: stopped ? 'stopped' : 'failed', output: partial,
+        ...(dialogueContext ? { messages: [...dialogueMessages(dialogueContext), ...(partial ? [{ role: 'assistant', content: partial }] : [])] } : {}),
+        ...(!stopped ? { error: { message: controller.signal.aborted ? 'DeepSeek 请求超时' : `${String(error.message || error)}${detail ? `（${detail}）` : ''}` } } : {}),
+        timing: { ...timing, totalMs: Date.now() - startedAt } };
       return completed;
     } finally {
       clearInterval(dialogueFlushTimer);
       try { await saveDialogue(); } catch {}
-      await runtime?.close?.();
+      try { await runtime?.close?.(); } catch (error) { completed.cleanupWarning = String(error.message || error); }
       clearTimeout(timer);
+      signal?.removeEventListener('abort', cancel);
       // Publishing completion unlocks deletion/continuation. All durable writes
       // must already be finished so a deleted dialogue cannot be recreated.
       await onCompleted?.(completed);

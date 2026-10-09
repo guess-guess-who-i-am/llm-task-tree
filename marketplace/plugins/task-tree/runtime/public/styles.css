@@ -6346,6 +6346,13 @@ div.codexParallelWriteSet {
 .directRunDialogTools button:hover { border-color: var(--accent); color: var(--accent); }
 .directRunDialogTools button:disabled { opacity: .45; cursor: not-allowed; }
 .directRunDialogTools .directRunDeleteBtn { width: auto; padding: 0 9px; font-size: 12px; color: #a33a32; }
+.directRunDialogTools .directRunTextBtn { width: auto; padding: 0 9px; font-size: 12px; white-space: nowrap; }
+.directRunEditBtn { float: right; padding: 2px 7px; border: 1px solid var(--line); border-radius: 5px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.directRunEditBtn:disabled { opacity: .4; cursor: not-allowed; }
+.directRunEditHint { margin: 0 auto 8px; max-width: 780px; font-size: 12px; color: #7a5720; }
+.directRunEditHint button { margin-left: 8px; }
+#directRunStopBtn { color: #a33a32; }
+.directRunDialogStatus[data-status="stopped"] { color: #7a5720; }
 .directRunDialogTools select { max-width: 220px; padding: 0 7px; }
 .directRunTranscript { overflow: auto; padding: 24px clamp(16px, 5vw, 72px); scroll-behavior: auto; }
 .directRunSystemEvent { margin: 0 auto 10px; color: var(--muted); font-size: 12px; text-align: center; }
@@ -6370,8 +6377,12 @@ div.codexParallelWriteSet {
 
 @media (max-width: 700px) {
   .directRunDialog { width: calc(100vw - 16px); height: calc(100vh - 16px); border-radius: 8px; }
-  .directRunDialogHeader { padding: 13px 14px; }
-  .directRunDialogTools select { max-width: 120px; }
+  .directRunDialogHeader { padding: 13px 14px; flex-wrap: wrap; gap: 10px; }
+  .directRunDialogTitleGroup { width: 100%; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+  .directRunDialogEyebrow { grid-column: 1 / -1; }
+  .directRunDialogTools { width: 100%; }
+  .directRunDialogTools button { flex-shrink: 0; white-space: nowrap; }
+  .directRunDialogTools select { flex: 1; min-width: 0; max-width: none; }
   .directRunTranscript { padding: 18px 12px; }
   .directRunComposer { padding: 10px 12px 12px; }
 }

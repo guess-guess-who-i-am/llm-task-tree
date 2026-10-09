@@ -295,6 +295,11 @@ const els = {
   directRunNextBtn: document.querySelector("#directRunNextBtn"),
   directRunConversationSelect: document.querySelector("#directRunConversationSelect"),
   directRunDeleteBtn: document.querySelector("#directRunDeleteBtn"),
+  directRunExportBtn: document.querySelector("#directRunExportBtn"),
+  directRunStopBtn: document.querySelector("#directRunStopBtn"),
+  directRunEditHint: document.querySelector("#directRunEditHint"),
+  directRunCancelEditBtn: document.querySelector("#directRunCancelEditBtn"),
+  directRunActionStatus: document.querySelector("#directRunActionStatus"),
   directRunTranscript: document.querySelector("#directRunTranscript"),
   directRunComposer: document.querySelector("#directRunComposer"),
   directRunMessageInput: document.querySelector("#directRunMessageInput"),
@@ -6485,6 +6490,20 @@ els.directRunNextBtn?.addEventListener("click", () => selectAdjacentDirectRun(1)
 els.directRunDeleteBtn?.addEventListener("click", () => {
   deleteDirectRunConversation().catch((error) => setSaveState(`删除节点对话失败：${error.message}`));
 });
+els.directRunStopBtn?.addEventListener('click', () => stopDirectRun().catch(error => setSaveState(`停止失败：${error.message}`)));
+els.directRunExportBtn?.addEventListener('click', () => exportDirectRun().catch(error => setSaveState(`导出失败：${error.message}`)));
+els.directRunCancelEditBtn?.addEventListener('click', () => { cancelDirectRunEdit(); renderDirectRunDialog(); });
+els.directRunTranscript?.addEventListener('click', event => {
+  const button = event.target.closest('[data-direct-run-edit]');
+  if (!button || button.disabled) return;
+  const run = directRunStates.get(activeDirectRunId);
+  const index = Number(button.dataset.directRunEdit), message = run?.messages?.[index];
+  if (!message || message.role !== 'user' || isDirectRunBusy(run)) return;
+  cancelDirectRunEdit();
+  directRunEditing = { runId: run.id, nodeKey: directRunNodeKey(run), messageIndex: index, previousDraft: els.directRunMessageInput.value };
+  els.directRunMessageInput.value = message.content;
+  renderDirectRunDialog(); els.directRunMessageInput.focus();
+});
 els.directRunTranscript?.addEventListener("scroll", () => {
   if (directRunTranscriptRendering) return;
   const transcript = els.directRunTranscript;
@@ -6503,6 +6522,15 @@ els.directRunComposer?.addEventListener("submit", (event) => {
 });
 const directRunAttachmentDrafts = new Map();
 const directRunSubmittingNodes = new Set();
+let directRunEditing = null;
+const directRunActionNotices = new Map();
+const directRunStoppingNodes = new Set();
+const directRunExportingNodes = new Set();
+function cancelDirectRunEdit() {
+  if (!directRunEditing) return;
+  els.directRunMessageInput.value = directRunEditing.previousDraft;
+  directRunEditing = null;
+}
 const directRunMaterialSelection = new Map();
 const nodeMaterialPending = new Set();
 const nodeMaterialPendingCounts = new Map();
@@ -6829,6 +6857,8 @@ async function runCodex(body = {}) {
 
 function directRunStatusLabel(status) {
   if (status === 'draft') return '待发送 · 尚未调用模型';
+  if (status === 'stopping') return '正在停止 · 等待工具清理';
+  if (status === 'stopped') return '本轮已停止 · 可继续对话';
   return status === "running" ? "执行中 · 尚未结束" : status === "completed" ? "本轮已结束 · 执行完成" : status === "failed" ? "本轮已结束 · 执行失败" : "启动中 · 尚未结束";
 }
 
@@ -6842,11 +6872,11 @@ function directRunProgressText(run) {
   if (!run) return "等待执行";
   if (run.status === 'draft') return '填写要求后发送；加入资料不会自动执行。';
   const progress = run.progress || {};
-  const terminal = ["completed", "failed"].includes(run.status);
+  const terminal = ["completed", "failed", "stopped"].includes(run.status);
   const start = Date.parse(run.createdAt || "");
   const end = terminal ? Date.parse(run.updatedAt || "") : Date.now();
   const elapsed = Number.isFinite(progress.elapsedMs) ? progress.elapsedMs : (Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, end - start) : 0);
-  if (terminal) return `${directRunStatusLabel(run.status)} · 本轮用时 ${directRunDurationLabel(elapsed)}${run.status === "completed" ? " · 单轮执行结束不代表整个目标已完成，可继续发送消息" : " · 请查看下方失败原因，可继续发送消息"}`;
+  if (terminal) return `${directRunStatusLabel(run.status)} · 本轮用时 ${directRunDurationLabel(elapsed)}${run.status === 'stopped' ? ' · 已保存的文件不会回滚' : run.status === "completed" ? " · 单轮执行结束不代表整个目标已完成，可继续发送消息" : " · 请查看下方失败原因，可继续发送消息"}`;
   const samples = Number(progress.sampleCount || 0);
   const remaining = progress.estimatedRemainingMs;
   const estimate = samples > 0 && Number.isFinite(remaining) && remaining >= 0
@@ -6875,6 +6905,8 @@ function directRunEventsHtml(run) {
 }
 
 function directRunTypingLabel(run) {
+  if (run?.status === 'stopped') return '本轮已停止，可以修改消息重发或继续对话。';
+  if (run?.status === 'stopping') return '正在停止模型和工具…';
   if (run?.status === "completed") return "本轮已结束，模型没有返回文字回复。";
   if (run?.status === "failed") return "本轮已结束，执行失败；请查看上方失败原因。";
   return run?.status === "running" ? "正在执行，等待下一段输出…" : "正在准备执行…";
@@ -6895,7 +6927,7 @@ function orderedDirectRuns() {
 
 function isDirectRunBusy(run) {
   return Boolean(run && [...directRunStates.values()].some((item) =>
-    directRunNodeKey(item) === directRunNodeKey(run) && ["starting", "running"].includes(item.status)));
+    directRunNodeKey(item) === directRunNodeKey(run) && ["starting", "running", "stopping"].includes(item.status)));
 }
 
 function directRunTranscriptHtml(run) {
@@ -6903,13 +6935,13 @@ function directRunTranscriptHtml(run) {
   if (!run) return `<div class="directRunEmpty">从节点右上角启动一次执行，或选择一条已有会话。</div>`;
   const reasoning = String(run.reasoning || run.streams?.reasoning?.text || "").trim();
   const output = String(run.output || run.streams?.agentMessage?.text || "").trim();
-  const streaming = !["completed", "failed"].includes(run.status);
+  const streaming = !["completed", "failed", "stopped"].includes(run.status);
   const streamMarkup = (value) => streaming
     ? escapeHtml(value).replace(/\n/g, "<br>")
     : renderMarkdownLite(value);
   const streamClass = streaming ? " is-streaming" : "";
   const statusLine = directRunEventsHtml(run);
-  const prior = (run.messages || []).map((message) => `<article class="directRunMessage directRunMessage--${message.role === "user" ? "user" : "assistant"}"><div class="directRunMessageRole">${message.role === "user" ? "你" : "DeepSeek"}</div><div class="directRunMarkdown">${renderMarkdownLite(message.content || "")}</div>${(message.attachments || []).map(a => `<a class="directRunSavedAttachment" href="${attr(a.url)}" target="_blank" rel="noopener">${a.kind === 'image' ? `<img src="${attr(a.url)}" alt="${attr(a.name)}">` : '▤'} ${escapeHtml(a.name)}</a>`).join('')}</article>`).join("");
+  const prior = (run.messages || []).map((message, index) => `<article class="directRunMessage directRunMessage--${message.role === "user" ? "user" : "assistant"}"><div class="directRunMessageRole">${message.role === "user" ? "你" : "DeepSeek"}${message.role === 'user' ? `<button type="button" class="directRunEditBtn" data-direct-run-edit="${index}">编辑重发</button>` : ''}</div><div class="directRunMarkdown">${renderMarkdownLite(message.content || "")}</div>${(message.attachments || []).map(a => `<a class="directRunSavedAttachment" href="${attr(a.url)}" target="_blank" rel="noopener">${a.kind === 'image' ? `<img src="${attr(a.url)}" alt="${attr(a.name)}">` : '▤'} ${escapeHtml(a.name)}</a>`).join('')}</article>`).join("");
   return `<details class="directRunToolLog"><summary>工具执行记录（可展开）</summary><div data-direct-run-events>${statusLine}</div></details>${prior}${reasoning ? `<details class="directRunReasoning"><summary>思考过程</summary><div class="directRunMarkdown${streamClass}" data-direct-run-reasoning>${streamMarkup(reasoning)}</div></details>` : ""}${output ? `<article class="directRunMessage directRunMessage--assistant" data-direct-run-output><div class="directRunMessageRole">DeepSeek</div><div class="directRunMarkdown${streamClass}">${streamMarkup(output)}</div></article>` : `<div class="directRunTyping" data-direct-run-typing>${directRunTypingLabel(run)}</div>`}`;
 }
 
@@ -6939,6 +6971,7 @@ function renderDirectRunDialog() {
     activeDirectRunId = runs.find((item) => previous && directRunNodeKey(item) === directRunNodeKey(previous))?.id || runs.at(-1)?.id || "";
   }
   const run = directRunStates.get(activeDirectRunId);
+  if (directRunEditing && (directRunEditing.runId !== run?.id || directRunEditing.nodeKey !== directRunNodeKey(run))) cancelDirectRunEdit();
   const node = nodes.find((item) => item.id === run?.nodeId);
   els.directRunDialogTitle.textContent = node?.title || run?.nodeId || "节点执行";
   els.directRunDialogStatus.textContent = run ? directRunStatusLabel(run.status) : "等待执行";
@@ -6967,6 +7000,16 @@ function renderDirectRunDialog() {
   const deleting = Boolean(run && directRunDeletingNodes.has(directRunNodeKey(run)));
   els.directRunSendBtn.disabled = !run || busy || deleting || directRunSubmittingNodes.has(directRunNodeKey(run));
   els.directRunSendBtn.disabled ||= Boolean(run && nodeMaterialPending.has(directRunNodeKey(run)));
+  const submitting = Boolean(run && directRunSubmittingNodes.has(directRunNodeKey(run)));
+  els.directRunSendBtn.textContent = directRunEditing ? '保存并重发' : '发送';
+  els.directRunEditHint.hidden = !directRunEditing;
+  els.directRunCancelEditBtn.disabled = submitting;
+  els.directRunStopBtn.hidden = !busy;
+  els.directRunStopBtn.disabled = !run || run.status === 'stopping' || directRunStoppingNodes.has(directRunNodeKey(run));
+  els.directRunStopBtn.textContent = run?.status === 'stopping' ? '停止中…' : '停止';
+  els.directRunExportBtn.disabled = !run || run.status === 'draft' || directRunExportingNodes.has(directRunNodeKey(run));
+  els.directRunActionStatus.textContent = run ? directRunActionNotices.get(directRunNodeKey(run)) || '' : '';
+  els.directRunActionStatus.hidden = !els.directRunActionStatus.textContent;
   els.directRunMaterialsBtn.disabled = !run;
   els.directRunUseMaterials.checked = !run || directRunMaterialSelection.get(directRunNodeKey(run)) !== false;
   renderAttachmentDrafts();
@@ -6977,7 +7020,7 @@ function renderDirectRunDialog() {
   const transcript = els.directRunTranscript;
   const output = directRunStreamValue(run, "output");
   const reasoning = directRunStreamValue(run, "reasoning");
-  const streaming = !["completed", "failed"].includes(run?.status);
+  const streaming = !["completed", "failed", "stopped"].includes(run?.status);
   const outputElement = transcript.querySelector("[data-direct-run-output] .directRunMarkdown");
   const reasoningElement = transcript.querySelector("[data-direct-run-reasoning]");
   const typingElement = transcript.querySelector("[data-direct-run-typing]");
@@ -7011,6 +7054,7 @@ function renderDirectRunDialog() {
     if (typingElement) typingElement.textContent = directRunTypingLabel(run);
     if (directRunTranscriptFollowOutput && wasNearBottom) transcript.scrollTop = transcript.scrollHeight;
   }
+  for (const button of transcript.querySelectorAll('[data-direct-run-edit]')) button.disabled = busy || deleting || submitting;
 }
 
 function scheduleDirectRunDialogRender() {
@@ -7037,6 +7081,7 @@ async function continueDirectRun() {
   const drafts = attachmentDrafts(run);
   if (!run || (!message && !drafts.length) || drafts.some(d => d.status !== 'ready') || isDirectRunBusy(run) || directRunDeletingNodes.has(directRunNodeKey(run)) || directRunSubmittingNodes.has(directRunNodeKey(run))) return;
   const sent = [...drafts];
+  const editing = directRunEditing;
   directRunSubmittingNodes.add(directRunNodeKey(run));
   renderDirectRunDialog();
   try {
@@ -7049,9 +7094,11 @@ async function continueDirectRun() {
     fresh: false,
     open: false,
     progress: true,
+    ...(editing ? { editMessageIndex: editing.messageIndex, sourceRunId: editing.runId } : {}),
     nodeId: run.nodeId
   });
   if (payload?.id || payload?.runId) {
+    directRunEditing = null;
     if (run.status === 'draft') directRunStates.delete(run.id);
     if (els.directRunMessageInput.value === message) els.directRunMessageInput.value = "";
     for (const item of sent) { const index = drafts.indexOf(item); if (index >= 0) drafts.splice(index, 1); }
@@ -7059,6 +7106,37 @@ async function continueDirectRun() {
     if (node) setSaveState(`已继续${node.title || node.id}的对话`);
   }
   } finally { directRunSubmittingNodes.delete(directRunNodeKey(run)); renderDirectRunDialog(); }
+}
+
+async function stopDirectRun() {
+  const run = directRunStates.get(activeDirectRunId);
+  if (!run || !isDirectRunBusy(run) || run.status === 'stopping') return;
+  const key = directRunNodeKey(run);
+  directRunStoppingNodes.add(key); renderDirectRunDialog();
+  try {
+    const response = await fetch(`/api/codex/run/${encodeURIComponent(run.id)}/stop`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ treeId: run.treeId, nodeId: run.nodeId }) });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    // Poll the authoritative result: a simultaneous completion must not regress
+    // from stopped back to the earlier stopping response.
+    await pollDirectRun(run.id);
+    setSaveState('已请求停止；已保存的文件不会回滚');
+  } finally { directRunStoppingNodes.delete(key); renderDirectRunDialog(); }
+}
+
+async function exportDirectRun() {
+  const run = directRunStates.get(activeDirectRunId);
+  if (!run || run.status === 'draft') return;
+  const key = directRunNodeKey(run);
+  if (directRunExportingNodes.has(key)) return;
+  directRunExportingNodes.add(key); renderDirectRunDialog();
+  try {
+    const response = await fetch('/api/codex/conversation/export', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ treeId: run.treeId, nodeId: run.nodeId }) });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    setSaveState(`对话已导出到桌面：${payload.path}`);
+    directRunActionNotices.set(key, `已导出到桌面：${payload.path}`);
+  } finally { directRunExportingNodes.delete(key); renderDirectRunDialog(); }
 }
 
 async function deleteDirectRunConversation() {
@@ -7106,7 +7184,7 @@ async function pollDirectRun(runId) {
     if (deletedDirectRunIds.has(runId)) return;
     directRunStates.set(runId, run);
     scheduleDirectRunDialogRender();
-    if (["completed", "failed"].includes(run.status)) { stopDirectRunPolling(runId); return; }
+    if (["completed", "failed", "stopped"].includes(run.status)) { stopDirectRunPolling(runId); return; }
   } catch (error) {
     const current = directRunStates.get(runId);
     if (current) {
@@ -7114,7 +7192,7 @@ async function pollDirectRun(runId) {
       scheduleDirectRunDialogRender();
     }
     stopDirectRunPolling(runId);
-    if (current && ["starting", "running"].includes(current.status)) directRunPollers.set(runId, setTimeout(() => pollDirectRun(runId), 1000));
+    if (current && ["starting", "running", "stopping"].includes(current.status)) directRunPollers.set(runId, setTimeout(() => pollDirectRun(runId), 1000));
     return;
   }
   directRunPollers.set(runId, setTimeout(() => pollDirectRun(runId), 200));
@@ -7127,7 +7205,7 @@ async function restoreDirectRunConversations() {
   for (const run of payload.runs || []) {
     if (deletedDirectRunIds.has(run.id)) continue;
     directRunStates.set(run.id, run);
-    if (['starting','running'].includes(run.status) && !directRunPollers.has(run.id)) pollDirectRun(run.id);
+    if (['starting','running','stopping'].includes(run.status) && !directRunPollers.has(run.id)) pollDirectRun(run.id);
   }
   renderDirectRunDialog();
   if (els.directRunReopenBtn) els.directRunReopenBtn.hidden = !orderedDirectRuns().length;

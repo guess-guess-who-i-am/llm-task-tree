@@ -48,8 +48,8 @@
 - Metrics:
 - Notes:
 - CodeLoc:
-- CurrentResult: 编辑框拖粘资料与Git恢复已验证；执行链可折叠复制，子树切换改为标题栏按钮，不占独立行。21项浏览器及安装版测试通过；易读性待反馈。
-- RootCauseAnalysis: 独立色条挤占树空间；导航收进标题栏，长状态不再挤压标题。
+- CurrentResult: 节点对话可真实停止、编辑重发和桌面全文导出；82项回归通过，安装版已更新，两工作区树与对话保持不变；易读性待反馈。
+- RootCauseAnalysis: 旧界面仅能停止轮询，缺少模型取消与消息重发；现接通请求及工具信号，编辑替换后续对话并先备份。
 - CaseStudy:
 - NextIdea:
 - SelectedSkills:

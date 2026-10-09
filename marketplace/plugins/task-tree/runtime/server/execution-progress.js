@@ -18,7 +18,7 @@ export function readableExecutionError(error) {
 }
 
 export function executionProgress(run,samples=[],now=Date.now()) {
-  const terminal=['completed','failed'].includes(run.status);
+  const terminal=['completed','failed','stopped'].includes(run.status);
   const started=Date.parse(run.createdAt);
   const ended=terminal?Date.parse(run.updatedAt):now;
   const elapsedMs=Number.isFinite(started)?Math.max(0,(Number.isFinite(ended)?ended:now)-started):0;
@@ -27,7 +27,7 @@ export function executionProgress(run,samples=[],now=Date.now()) {
   const median=durations.length?(durations.length%2?durations[mid]:(durations[mid-1]+durations[mid])/2):null;
   const overEstimate=!terminal&&median!==null&&elapsedMs>=median;
   const countdown=run.phase==='retrying'&&Number.isFinite(run.retryAt)?`（约 ${Math.max(0,Math.ceil((run.retryAt-now)/1000))} 秒后再次请求）`:'';
-  return {phase:terminal?run.status:run.phase||'model',label:terminal?(run.status==='completed'?'本轮已结束，执行完成':'本轮已结束，执行失败'):(phaseLabels[run.phase]||phaseLabels.model)+countdown,
+  return {phase:terminal?run.status:run.phase||'model',label:terminal?(run.status==='completed'?'本轮已结束，执行完成':run.status==='stopped'?'本轮已停止':'本轮已结束，执行失败'):run.status==='stopping'?'正在停止模型和工具':(phaseLabels[run.phase]||phaseLabels.model)+countdown,
     elapsedMs,lastActivityAt:run.updatedAt||run.createdAt,
     estimatedRemainingMs:terminal?0:median!==null&&!overEstimate?Math.round(median-elapsedMs):null,
     estimatedTotalMs:median,estimateRangeMs:durations.length?[Math.max(0,durations[0]-elapsedMs),Math.max(0,durations.at(-1)-elapsedMs)]:null,

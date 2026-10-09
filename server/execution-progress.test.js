@@ -2,6 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { executionProgress, recordRunDuration, readableExecutionError } from './execution-progress.js';
 
+test('stopped is terminal, freezes elapsed time and never becomes a successful ETA sample', () => {
+  const run = { treeId: 'a', nodeId: 'N1', status: 'stopped', createdAt: new Date(1000).toISOString(), updatedAt: new Date(2500).toISOString() };
+  const progress = executionProgress(run, [], 9000);
+  assert.equal(progress.elapsedMs, 1500); assert.equal(progress.estimatedRemainingMs, 0); assert.match(progress.label, /已停止/);
+  const samples = []; recordRunDuration(samples, run); assert.deepEqual(samples, []);
+  assert.match(executionProgress({ ...run, status: 'stopping' }).label, /正在停止/);
+});
+
 test('no invented ETA, terminal state and elapsed time are explicit', () => {
   const run={treeId:'a',nodeId:'N9',status:'running',createdAt:new Date(1000).toISOString(),updatedAt:new Date(2000).toISOString(),phase:'model'};
   assert.equal(executionProgress(run,[],5000).estimatedRemainingMs,null);

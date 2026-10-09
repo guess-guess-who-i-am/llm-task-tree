@@ -10,7 +10,7 @@ export function dialogueMessages(messages) {
 const values = collection => collection instanceof Map ? [...collection.values()]
   : Array.isArray(collection) ? collection : [];
 const text = value => typeof value === 'string' ? value : '';
-const interrupted = status => ['starting', 'running'].includes(status);
+const interrupted = status => ['starting', 'running', 'stopping'].includes(status);
 
 // Node identity is scoped to a tree, never to a turn or a model thread.
 export function nodeConversationId(treeId, nodeId) {

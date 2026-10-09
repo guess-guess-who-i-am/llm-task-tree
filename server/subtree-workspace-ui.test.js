@@ -14,6 +14,82 @@ const main = '# LLM Task Graph\n## ROOT - 项目总目标\n- Problem: 保留主�
 const sub = '# LLM Task Graph Subtree\n> Fold root: N1\n## N1 - 身体底盘\n- Problem: 保持健康\n## N1_A - 睡眠\n- Problem: 建立作息\n- NextIdea: 保存睡眠记录\n## N1_B - 时间\n- Problem: 安排时间\n# GraphState\n- Current: N1\n- Next: N1_A\n# Edges\n## EA - 睡眠\n- Endpoints: N1, N1_A\n## EB - 时间\n- Endpoints: N1, N1_B\n';
 let root, child, browser, base, gateway;
 const attachmentModelRequests = [];
+let cancelledFixtureStreams = 0;
+test('node dialogue stops live output independently, edits and resends with attachments, and exports full desktop records', async t => {
+  const post = (route, body) => fetch(base + route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const latest = async id => (await (await fetch(base + '/api/codex/run/' + id)).json()).run;
+  const finished = async id => {
+    for (let i = 0; i < 100; i++) { const run = await latest(id); if (['completed', 'failed', 'stopped'].includes(run.status)) return run; await new Promise(r => setTimeout(r, 50)); }
+    throw new Error('fixture turn did not finish');
+  };
+  const exported = [];
+  t.after(async () => {
+    for (const file of exported) await rm(file);
+    for (const nodeId of ['N2', 'ROOT']) await fetch(base + '/api/codex/conversation?treeId=method&nodeId=' + nodeId, { method: 'DELETE' });
+  });
+  const local = path.join(root, '编辑原附件.txt'); await writeFile(local, 'EDIT_ORIGINAL_ATTACHMENT_FULL_TEXT');
+  const imported = await post('/api/chat/attachments/import?treeId=method&nodeId=N2', { path: local });
+  const { attachment } = await imported.json();
+  const started = await post('/api/codex/run', { treeId: 'method', nodeId: 'N2', progress: true, prompt: '[DIALOGUE_CANCEL_FIXTURE] 原问题', attachments: [attachment.id] });
+  assert.equal(started.status, 202); const first = await started.json();
+  const other = await post('/api/codex/run', { treeId: 'method', nodeId: 'ROOT', progress: true, prompt: '另节点正常执行' });
+  const otherRun = await other.json();
+  const page = await pageFor(t); page.setDefaultTimeout(15000);
+  await page.locator('#directRunReopenBtn').click();
+  await page.locator('#directRunConversationSelect').selectOption(first.id);
+  await page.waitForFunction(() => document.querySelector('[data-direct-run-output]')?.textContent.includes('停止前的部分中文输出'));
+  assert.equal(await page.locator('[data-direct-run-edit="0"]').isDisabled(), true);
+  assert.equal(await page.locator('#directRunSendBtn').isDisabled(), true);
+  assert.equal((await post('/api/codex/run/' + first.id + '/stop', { treeId: 'reference', nodeId: 'N2' })).status, 404);
+  // Export during execution includes the live partial text, never the tool log.
+  const liveExport = await (await post('/api/codex/conversation/export', { treeId: 'method', nodeId: 'N2' })).json(); exported.push(liveExport.path);
+  assert.match(await readFile(liveExport.path, 'utf8'), /停止前的部分中文输出/);
+  assert.equal(path.dirname(liveExport.path), path.join(os.homedir(), 'Desktop'));
+  await page.locator('#directRunStopBtn').click();
+  await page.waitForFunction(() => document.querySelector('#directRunDialogStatus').textContent.includes('本轮已停止'));
+  assert.equal((await finished(first.id)).status, 'stopped');
+  assert.equal((await finished(otherRun.id)).status, 'completed', 'other nodes remain unaffected');
+  assert.ok(cancelledFixtureStreams > 0, 'gateway streaming connection was actually closed');
+  assert.equal(await page.locator('#directRunSendBtn').isDisabled(), false);
+  assert.equal(await page.locator('#directRunStopBtn').isVisible(), false);
+  assert.equal((await post('/api/codex/run/' + first.id + '/stop', { treeId: 'method', nodeId: 'N2' })).status, 200, 'repeat stop is idempotent');
+  const durable = JSON.parse(await readFile(path.join(root, '.task-tree-direct-state.json'), 'utf8'));
+  assert.equal(durable.conversations.find(c => c.nodeId === 'N2').messages.at(-1).content, '停止前的部分中文输出');
+  await page.reload(); if (await page.locator('#projectOverviewDialog').evaluate(el => el.open)) await page.locator('#projectOverviewClose').click();
+  await page.locator('#directRunReopenBtn').click(); await page.locator('#directRunConversationSelect').selectOption(first.id);
+  await page.locator('#directRunMessageInput').fill('LATER_TURN_TO_BE_REPLACED'); await page.locator('#directRunSendBtn').click();
+  await page.waitForFunction(() => document.querySelector('#directRunDialogStatus').textContent.includes('执行完成'));
+  await page.locator('#directRunMessageInput').fill('保留草稿');
+  await page.locator('[data-direct-run-edit="0"]').click();
+  assert.match(await page.locator('#directRunMessageInput').inputValue(), /原问题/);
+  await page.locator('#directRunCancelEditBtn').click(); assert.equal(await page.locator('#directRunMessageInput').inputValue(), '保留草稿');
+  await page.locator('[data-direct-run-edit="0"]').click();
+  const changed = '编辑后的新问题全文' + '完整中文'.repeat(2000);
+  await page.locator('#directRunMessageInput').fill(changed);
+  const resentResponse = page.waitForResponse(r => new URL(r.url()).pathname === '/api/codex/run' && r.request().method() === 'POST');
+  await page.locator('#directRunSendBtn').click(); const resent = await (await resentResponse).json();
+  await page.waitForFunction(() => document.querySelector('#directRunDialogStatus').textContent.includes('执行完成'));
+  const request = attachmentModelRequests.at(-1), payloadText = JSON.stringify(request.messages);
+  assert.ok(payloadText.includes(changed)); assert.match(payloadText, /EDIT_ORIGINAL_ATTACHMENT_FULL_TEXT/);
+  assert.doesNotMatch(payloadText, /LATER_TURN_TO_BE_REPLACED|停止前的部分中文输出/);
+  const backups = await (await import('node:fs/promises')).readdir(path.join(root, '.task-tree-dialogue-backups'));
+  const backup = JSON.parse(await readFile(path.join(root, '.task-tree-dialogue-backups', backups.find(n => n.endsWith('-edited.json'))), 'utf8'));
+  assert.match(JSON.stringify(backup), /LATER_TURN_TO_BE_REPLACED/);
+  assert.equal((await post('/api/codex/run', { treeId: 'method', nodeId: 'N2', progress: true, prompt: '旧页面编辑', sourceRunId: first.id, editMessageIndex: 0 })).status, 409);
+  for (const index of [1, -1, 999, '0']) assert.equal((await post('/api/codex/run', { treeId: 'method', nodeId: 'N2', progress: true, prompt: '错误索引', sourceRunId: resent.id, editMessageIndex: index })).status, 400);
+  assert.equal((await post('/api/codex/run', { treeId: 'method', nodeId: 'N2', progress: true, prompt: ' ', sourceRunId: resent.id, editMessageIndex: 0 })).status, 400);
+  const exportResponse = page.waitForResponse(r => new URL(r.url()).pathname === '/api/codex/conversation/export');
+  await page.locator('#directRunExportBtn').click(); const file = (await (await exportResponse).json()).path; exported.push(file);
+  const markdown = await readFile(file, 'utf8'); assert.ok(markdown.includes(changed)); assert.match(markdown, /编辑原附件.txt/);
+  assert.doesNotMatch(markdown, /tool\/completed|工具执行记录|LATER_TURN_TO_BE_REPLACED/);
+  await page.waitForFunction(() => document.querySelector('#directRunActionStatus').textContent.includes('已导出到桌面'));
+  assert.equal((await post('/api/codex/conversation/export', {})).status, 400);
+  assert.equal((await post('/api/codex/conversation/export', { treeId: 'method', nodeId: 'ABSENT' })).status, 404);
+  await page.screenshot({ path: path.join(source, 'artifacts/dialogue-actions-desktop.png') });
+  await page.setViewportSize({ width: 390, height: 844 });
+  const box = await page.locator('#directRunExportBtn').boundingBox(); assert.ok(box.x >= 0 && box.x + box.width <= 390);
+  await page.screenshot({ path: path.join(source, 'artifacts/dialogue-actions-mobile.png') });
+});
 test('compact chain dock always offers copy, hides the long command and remembers collapse on desktop and mobile', async t => {
   const page = await pageFor(t);
   t.after(async () => { await writeFile(path.join(root, 'task-tree.md'), main); await writeFile(path.join(root, 'subtrees/N1.md'), sub); });
@@ -309,6 +385,13 @@ before(async () => {
   gateway = http.createServer(async (req, res) => {
     let input = ''; for await (const chunk of req) input += chunk;
     attachmentModelRequests.push(JSON.parse(input));
+    if (input.includes('[DIALOGUE_CANCEL_FIXTURE]')) {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.write('data: {"choices":[{"delta":{"content":"停止前的部分中文输出"}}]}\n\n');
+      const timer = setTimeout(() => res.end('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'), 10000);
+      res.on('close', () => { clearTimeout(timer); if (!res.writableEnded) cancelledFixtureStreams++; });
+      return;
+    }
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ choices: [{ message: { content: '附件内容已收到，可以继续对话。' }, finish_reason: 'stop' }] }));
   });

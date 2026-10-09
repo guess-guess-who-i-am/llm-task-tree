@@ -5,6 +5,15 @@ import { dialogueMessages, serializeDialogueState, restoreDialogueState } from '
 const user = content => ({ role: 'user', content });
 const assistant = content => ({ role: 'assistant', content });
 
+test('restart recovers stopping partial output but preserves a completed stopped record', () => {
+  for (const status of ['stopping', 'stopped']) {
+    const state = restoreDialogueState({ runs: [{ id: 'r', conversationId: 'c', nodeId: 'N1', treeId: 'a', status, messages: [user('开始')], output: '完整部分输出' }],
+      conversations: [{ id: 'c', treeId: 'a', nodeId: 'N1', messages: status === 'stopped' ? [user('开始'), assistant('完整部分输出')] : [user('开始')] }] });
+    assert.equal(state.runs[0].status, status === 'stopping' ? 'failed' : 'stopped');
+    assert.deepEqual(state.conversations[0].messages, [user('开始'), assistant('完整部分输出')]);
+  }
+});
+
 test('durable messages contain only full user and assistant text', () => {
   const full = '完整、不截断的对话🙂\n'.repeat(20000);
   assert.deepEqual(dialogueMessages([

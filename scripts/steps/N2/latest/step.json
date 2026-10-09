@@ -6,6 +6,22 @@
   "updatedAt": "2026-10-09",
   "substeps": [
     {
+      "title": "节点对话真正停止、编辑重发及桌面导出",
+      "functions": [
+        { "path": "public/app.js", "name": "stopDirectRun" },
+        { "path": "public/app.js", "name": "continueDirectRun" },
+        { "path": "server/deepseek-run.js", "name": "startDeepSeekTurn" },
+        { "path": "server/dialogue-actions.js", "name": "exportDialogueToDesktop" }
+      ],
+      "outputs": [
+        { "path": "docs/dialogue-actions.zh.md" },
+        { "path": "server/dialogue-actions.test.js" },
+        { "path": "server/subtree-workspace-ui.test.js" },
+        { "path": "artifacts/dialogue-actions-desktop.png" },
+        { "path": "artifacts/dialogue-actions-mobile.png" }
+      ]
+    },
+    {
       "title": "子树切换按钮收进原有图谱标题栏",
       "functions": [
         { "path": "public/app.js", "name": "renderWorkspaceBanner" }

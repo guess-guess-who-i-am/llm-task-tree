@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createSharedAgentRuntime } from './shared-agent-worker.js';
@@ -25,7 +25,21 @@ test('eight callers in two projects share a worker and warm MCP; cancellation an
   values.forEach((v,i) => assert.equal(v.content, i%2 ? 'b' : 'a'));
   const focus = await Promise.all(runtimes.map(r => r.call('task_tree_focus',{})));
   focus.forEach((v,i) => assert.equal(v.projectRoot,projects[i%2]));
+  const cancelledCall = runtimes[0].call('exec_command', { command: `"${process.execPath}" -e 'require("node:fs").writeFileSync("active-tool.pid",String(process.pid));setTimeout(()=>{},30000)'` }).then(() => false, () => true);
+  let toolPid;
+  for (let i = 0; i < 100 && !toolPid; i++) {
+    toolPid = Number(await readFile(path.join(projects[0], 'active-tool.pid'), 'utf8').catch(() => ''));
+    if (!toolPid) await new Promise(r => setTimeout(r, 20));
+  }
+  assert.ok(toolPid, 'real tool process must be running before cancellation');
   controllers[0].abort();
+  assert.equal(await cancelledCall, true);
+  let alive = true;
+  for (let i = 0; i < 100 && alive; i++) {
+    try { process.kill(toolPid, 0); } catch (error) { if (error.code === 'ESRCH') alive = false; else throw error; }
+    if (alive) await new Promise(r => setTimeout(r, 20));
+  }
+  assert.equal(alive, false, 'cancel kills the active tool process, not just its progress polling');
   await assert.rejects(runtimes[0].call('read_file',{path:'marker.txt'}));
   assert.equal((await runtimes[2].call('read_file',{path:'marker.txt'})).content,'a');
   await Promise.all(runtimes.map(r => r.close()));

@@ -60,6 +60,54 @@ async function run(t, responses, options = {}) {
 
 const fallbackEnvironment={MODEL_AGENT_MAIN_BASE_URL:'https://primary.invalid/v1',MODEL_AGENT_MAIN_API_KEY:'test-only',MODEL_AGENT_MAIN_MODEL:'test-model',MODEL_AGENT_MAIN_FALLBACK_BASE_URLS:'https://backup-a.invalid/v1,https://backup-b.invalid/v1'};
 
+test('user cancellation interrupts a live stream, retains partial dialogue and publishes only after cleanup', async t => {
+  const controller = new AbortController(), saved = [], lifecycle = [];
+  const state = await run(t, [init => new Response(new ReadableStream({ start(stream) {
+    stream.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"已收到的中文"}}]}\n\n'));
+    init.signal.addEventListener('abort', () => stream.error(init.signal.reason), { once: true });
+    setImmediate(() => controller.abort());
+  } }), { headers: { 'content-type': 'text/event-stream' } })], {
+    signal: controller.signal, dialogueContext: [{ role: 'user', content: '原问题' }],
+    runtime: { saveDialogue: async (_, messages) => saved.push(messages), close: async () => lifecycle.push('closed') },
+    onCompleted: result => { lifecycle.push('published'); assert.equal(result.status, 'stopped'); }
+  });
+  assert.equal(state.result.status, 'stopped'); assert.equal(state.result.error, undefined);
+  assert.equal(state.result.output, '已收到的中文'); assert.equal(state.requests.length, 1);
+  assert.deepEqual(state.result.messages, [{ role: 'user', content: '原问题' }, { role: 'assistant', content: '已收到的中文' }]);
+  assert.deepEqual(saved.at(-1), state.result.messages); assert.deepEqual(lifecycle, ['closed', 'published']);
+});
+
+test('user cancellation during retry backoff prevents all subsequent requests', async t => {
+  const controller = new AbortController();
+  const state = await run(t, [() => { setTimeout(() => controller.abort(), 30); return new Response('暂时异常', { status: 502 }); }], { signal: controller.signal });
+  assert.equal(state.result.status, 'stopped'); assert.equal(state.requests.length, 1);
+});
+
+test('cancelling a tool stops its signal and prevents the next write and model round', async t => {
+  const controller = new AbortController(), executed = [];
+  const state = await run(t, [json({ content: '开始工具', tool_calls: [call('long_tool'), call('next_write')] }, 'tool_calls')], {
+    signal: controller.signal, tools: [schema('long_tool'), schema('next_write')],
+    toolHandler: async (name, _, context) => {
+      executed.push(name);
+      return new Promise((resolve, reject) => { context.signal.addEventListener('abort', () => reject(context.signal.reason), { once: true }); setImmediate(() => controller.abort()); });
+    }
+  });
+  assert.equal(state.result.status, 'stopped'); assert.deepEqual(executed, ['long_tool']);
+  assert.equal(state.requests.length, 1); assert.equal(state.result.output, '开始工具');
+});
+
+test('already cancelled turns do not load a runtime or send a request, whereas timeout remains failed', async t => {
+  const controller = new AbortController(); controller.abort();
+  const cancelled = await run(t, [], { signal: controller.signal, runtimeFactory: async () => { throw new Error('must not load'); } });
+  assert.equal(cancelled.result.status, 'stopped'); assert.equal(cancelled.requests.length, 0);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let ready; const started = new Promise(resolve => ready = resolve);
+  const pending = run(t, [init => new Promise((resolve, reject) => { ready(); init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true }); })], { completionTimeoutMs: 1000 });
+  await started; t.mock.timers.tick(1000);
+  const timedOut = await pending;
+  assert.equal(timedOut.result.status, 'failed'); assert.match(timedOut.result.error.message, /超时/);
+});
+
 test('local image tool outputs become native user image blocks after all tool receipts, never Base64 tool text', async t => {
   const state = await run(t, [json({ tool_calls: [call('view_image')] }, 'tool_calls'), json({ content: '背景是蓝色。' })], {
     tools: [schema('view_image')], toolHandler: async () => ({ path: 'photo.jpg', image: { mimeType: 'image/jpeg', data: '/9j/fixture-original' } })

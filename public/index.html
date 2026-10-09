@@ -207,6 +207,7 @@
                   <button id="directRunPrevBtn" type="button" title="上一个节点对话" aria-label="上一个节点对话">←</button>
                   <select id="directRunConversationSelect" aria-label="切换节点对话"></select>
                   <button id="directRunNextBtn" type="button" title="下一个节点对话" aria-label="下一个节点对话">→</button>
+                  <button id="directRunExportBtn" class="directRunTextBtn" type="button" title="将对话全文导出到桌面" disabled>导出</button>
                   <button id="directRunDeleteBtn" class="directRunDeleteBtn" type="button" title="删除当前节点对话，不删除节点" disabled>删除</button>
                   <button id="directRunExpandBtn" type="button" title="放大对话框">⛶</button>
                   <button id="directRunDialogClose" type="button" title="关闭对话框">×</button>
@@ -218,6 +219,8 @@
               </section>
               <div id="directRunTranscript" class="directRunTranscript" aria-live="polite"></div>
               <form id="directRunComposer" class="directRunComposer">
+                <div id="directRunEditHint" class="directRunEditHint" hidden>编辑重发将替换此消息之后的对话（原记录会备份），不会回滚文件。<button id="directRunCancelEditBtn" type="button">取消编辑</button></div>
+                <div id="directRunActionStatus" class="directRunEditHint" role="status" hidden></div>
                 <div id="directRunAttachments" class="directRunAttachments" aria-live="polite"></div>
                 <textarea id="directRunMessageInput" rows="3" placeholder="继续和当前节点对话，补充信息或要求下一步…"></textarea>
                 <div class="directRunComposerFooter">
@@ -226,6 +229,7 @@
                   <label><input id="directRunUseMaterials" type="checkbox" checked>使用节点勾选资料</label>
                   <input id="directRunFileInput" type="file" hidden multiple accept=".png,.jpg,.jpeg,.webp,.pdf,.docx,.doc,.rtf,.txt,.md,.csv,.json,.yaml,.yml,.log,.js,.ts,.py,.go,.html,.css,.xml">
                   <span id="directRunConversationMeta">同一节点会话会保留上下文</span>
+                  <button id="directRunStopBtn" type="button" hidden>停止</button>
                   <button id="directRunSendBtn" type="submit">发送</button>
                 </div>
                 <small class="directRunAttachmentHelp">可拖入图片、PDF、Word 或文本，也可粘贴图片 · 单个文件最多 20 MiB · 文档全文送入上下文，不截断</small>

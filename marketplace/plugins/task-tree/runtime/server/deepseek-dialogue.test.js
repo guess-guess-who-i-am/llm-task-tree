@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { startDeepSeekTurn } from './deepseek-run.js';
+import { createSharedAgentRuntime } from './shared-agent-worker.js';
 
 test('provider-native workers resume and fork full saved dialogue without reusing tool messages',async t=>{
   const cwd=await mkdtemp(path.join(os.tmpdir(),'deepseek-durable-'));
@@ -43,4 +44,44 @@ test('provider-native workers resume and fork full saved dialogue without reusin
   assert.equal(legacyTool.status,'completed',JSON.stringify(legacyTool.error));
   const legacyDisk=JSON.parse(await readFile(path.join(codexHome,'task-tree-dialogues',legacyTool.threadId+'.json'),'utf8'));
   assert.deepEqual(legacyDisk.messages,[{role:'user',content:'real question'}]);
+});
+
+test('HTTP gateway and shared-worker restart preserve full dialogue and reuse its summary after fifty tool rounds', async t => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'deepseek-context-http-'));
+  const codexHome = path.join(cwd, 'codex'); await mkdir(codexHome);
+  const requests = []; let modelRounds = 0, writes = 0, pid;
+  const server = http.createServer(async (req, res) => {
+    let text = ''; for await (const chunk of req) text += chunk;
+    const body = JSON.parse(text); requests.push(body);
+    const message = body.stream === false ? { content: '目标：保留完整对话；已经成功保存的序号不得重复；下一步继续未完成序号。' }
+      : ++modelRounds <= 50 ? { content: null, tool_calls: [{ id: `write-${modelRounds}`, type: 'function', function: { name: 'save_item', arguments: JSON.stringify({ index: modelRounds }) } }] }
+      : { content: '完成了全部50项，原始对话可导出。' };
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ choices: [{ message, finish_reason: message.tool_calls ? 'tool_calls' : 'stop' }] }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { await new Promise(resolve => server.close(resolve)); if (pid) try { process.kill(pid, 'SIGTERM'); } catch {} });
+  const options = { cwd, waitForCompletion: true, runtimeToolNames: [],
+    environment: { CODEX_HOME: codexHome, MODEL_AGENT_MAIN_BASE_URL: `http://127.0.0.1:${server.address().port}`, MODEL_AGENT_MAIN_API_KEY: 'fixture', MODEL_AGENT_MAIN_MODEL: 'fixture', MODEL_AGENT_MAIN_CONTEXT_WINDOW: '32000' },
+    runtimeFactory: settings => createSharedAgentRuntime({ ...settings, homeDir: codexHome }),
+    tools: [{ type: 'function', function: { name: 'save_item', description: '保存一个序号', parameters: { type: 'object', properties: { index: { type: 'integer' } }, required: ['index'] } } }],
+    toolHandler: async (_, { index }) => { assert.equal(index, ++writes); return { ok: true, index, receipt: '临时工具明细'.repeat(120) }; } };
+  const messages = [...Array.from({ length: 12 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `历史${i}：` + '完整中文原文'.repeat(600) })), { role: 'user', content: '完成50项后停止，保留所有历史原文。' }];
+  const first = await startDeepSeekTurn({ ...options, messages }); pid = first.timing.workerPid;
+  assert.equal(first.status, 'completed', JSON.stringify(first.error));
+  assert.equal(writes, 50); assert.equal(first.timing.tools.length, 50);
+  assert.ok(first.timing.compactions.length >= 2, 'both loaded dialogue and accumulated tool results compact');
+  const file = path.join(codexHome, 'task-tree-dialogues', `${first.threadId}.json`);
+  const stored = JSON.parse(await readFile(file, 'utf8'));
+  assert.deepEqual(stored.messages.slice(0, messages.length), messages);
+  assert.ok(stored.contextCache.summary);
+  assert.ok(!JSON.stringify(stored).includes('临时工具明细'));
+  const summaries = requests.filter(body => body.stream === false).length;
+  process.kill(pid, 'SIGTERM'); await new Promise(resolve => setTimeout(resolve, 100));
+  const second = await startDeepSeekTurn({ ...options, threadId: first.threadId, prompt: '请继续原有对话' }); pid = second.timing.workerPid;
+  assert.equal(second.status, 'completed', JSON.stringify(second.error));
+  assert.equal(requests.filter(body => body.stream === false).length, summaries, 'persisted summary reused after real broker restart');
+  assert.ok(requests.at(-1).messages.some(m => m.content?.includes('历史上下文摘要')));
+  assert.ok(requests.at(-1).messages.some(m => m.content === '请继续原有对话'));
+  assert.equal(writes, 50);
 });

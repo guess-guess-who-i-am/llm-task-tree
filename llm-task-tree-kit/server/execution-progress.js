@@ -1,4 +1,4 @@
-const phaseLabels={queued:'请求已收到',loading:'正在加载共享工具',model:'正在等待模型响应',retrying:'网关暂时异常，正在自动恢复',streaming:'正在接收模型输出',tool:'正在调用工具',saving:'正在保存结果'};
+const phaseLabels={queued:'请求已收到',loading:'正在加载共享工具',model:'正在等待模型响应',summarizing:'正在整理长上下文，完成后继续执行',retrying:'网关暂时异常，正在自动恢复',streaming:'正在接收模型输出',tool:'正在调用工具',saving:'正在保存结果'};
 
 export function recordRunDuration(samples,run) {
   const totalMs=Number(run.timing?.totalMs) || Date.parse(run.updatedAt)-Date.parse(run.createdAt);
@@ -13,7 +13,6 @@ export function readableExecutionError(error) {
     const retries=raw.match(/已重试 (\d+) 次/);
     return `模型网关返回 HTTP ${http[1]}${retries?`（已自动重试 ${retries[1]} 次，仍失败）`:''}，本轮执行已失败；不是仍在执行。请稍后重试，已有成功保存的修改不会自动回滚。`;
   }
-  if(/工具执行超过 \d+ 轮/.test(raw)) return '本轮已达到工具调用轮数上限并停止，任务尚未完成；可在原节点继续，不需要新建对话。';
   return raw;
 }
 

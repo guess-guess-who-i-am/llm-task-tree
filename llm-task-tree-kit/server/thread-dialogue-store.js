@@ -29,6 +29,16 @@ export async function loadThreadDialogue({ codexHome, threadId } = {}) {
   }
 }
 
+export async function loadThreadContext({ codexHome, threadId } = {}) {
+  const file = dialogueFile(codexHome, threadId);
+  if (writes.has(file)) await writes.get(file);
+  try {
+    const state = JSON.parse(await readFile(file, 'utf8'));
+    if (state.threadId !== threadId) throw new Error('会话文件 threadId 与请求不符');
+    return state.contextCache || null;
+  } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+}
+
 // Remove from the live lookup, preserving a private recoverable copy.
 export async function archiveThreadDialogue({ codexHome, threadId } = {}) {
   const file = dialogueFile(codexHome, threadId);
@@ -40,7 +50,7 @@ export async function archiveThreadDialogue({ codexHome, threadId } = {}) {
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
 }
 
-export async function saveThreadDialogue({ codexHome, threadId, cwd, messages } = {}) {
+export async function saveThreadDialogue({ codexHome, threadId, cwd, messages, contextCache } = {}) {
   const file = dialogueFile(codexHome, threadId);
   // Capture the full text now, not after waiting behind another write.
   const content = JSON.stringify({
@@ -48,6 +58,7 @@ export async function saveThreadDialogue({ codexHome, threadId, cwd, messages } 
     threadId,
     cwd: typeof cwd === 'string' ? cwd : '',
     messages: dialogueMessages(messages),
+    ...(contextCache ? { contextCache } : {}),
   });
   const previous = writes.get(file) || Promise.resolve();
   const operation = previous.catch(() => {}).then(async () => {

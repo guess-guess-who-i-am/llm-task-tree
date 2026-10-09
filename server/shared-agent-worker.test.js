@@ -55,7 +55,8 @@ test('eight callers in two projects share a worker and warm MCP; cancellation an
   const updated = await createSharedAgentRuntime({cwd:projects[1],codexHome:home,homeDir:home,socketPath});
   assert.match(updated.systemPrompt,/UPDATED_GLOBAL_INSTRUCTIONS/);
   const threadId='deepseek-'+randomUUID();
-  await updated.saveDialogue(threadId,[{role:'user',content:'完整文字'},{role:'tool',content:'不存工具'},{role:'assistant',content:'已完成',tool_calls:[{id:'omit'}]}]);
+  const contextCache={schema:'deepseek-context/v1',sourceCount:1,fingerprint:'fixture',summary:'目标与进度摘要'};
+  await updated.saveDialogue(threadId,[{role:'user',content:'完整文字'},{role:'tool',content:'不存工具'},{role:'assistant',content:'已完成',tool_calls:[{id:'omit'}]}],contextCache);
   await updated.close();
   process.kill(finalPid,'SIGTERM');
   await new Promise(resolve=>setTimeout(resolve,100));
@@ -63,6 +64,7 @@ test('eight callers in two projects share a worker and warm MCP; cancellation an
   finalPid=recovered.worker.pid;
   assert.notEqual(finalPid,runtimes[0].worker.pid);
   assert.deepEqual(await recovered.loadDialogue(threadId),[{role:'user',content:'完整文字'},{role:'assistant',content:'已完成'}]);
+  assert.deepEqual(await recovered.loadContext(threadId),contextCache);
   await recovered.close();
 });
 

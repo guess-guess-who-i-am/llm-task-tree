@@ -7,6 +7,36 @@
   "reportZh": "report.zh.md",
   "substeps": [
     {
+      "title": "取消工具轮数上限与DeepSeek摘要交接",
+      "functions": [
+        {
+          "path": "server/deepseek-run.js",
+          "name": "startDeepSeekTurn"
+        },
+        {
+          "path": "server/deepseek-context.js",
+          "name": "createDeepSeekContext"
+        },
+        {
+          "path": "server/thread-dialogue-store.js",
+          "name": "loadThreadContext"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/deepseek-run.test.js"
+        },
+        {
+          "path": "server/deepseek-dialogue.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/deepseek-context-lifecycle.zh.md"
+        }
+      ]
+    },
+    {
       "title": "完整上下文规划、并发与冲突协商",
       "functions": [
         {

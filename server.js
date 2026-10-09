@@ -211,6 +211,8 @@ function directRunEvent(run, type, text = "", detail = {}) {
 function directRunNotification(run, message) {
   const params = message?.params || {};
   if(message?.method==='runtime/loading')run.phase='loading';
+  if(message?.method==='context/compaction-started')run.phase='summarizing';
+  if(message?.method==='context/compaction-completed')run.phase='model';
   if(['runtime/ready','model/request-started','model/round-completed'].includes(message?.method))run.phase='model';
   if(message?.method==='model/request-retrying'){
     run.phase='retrying';

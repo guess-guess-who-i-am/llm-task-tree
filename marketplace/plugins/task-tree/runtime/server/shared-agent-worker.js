@@ -7,7 +7,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createAgentRuntime } from './agent-runtime.js';
 import { createTaskTreeAgentTools } from './task-tree-agent-tools.js';
-import { loadThreadDialogue, saveThreadDialogue } from './thread-dialogue-store.js';
+import { loadThreadDialogue, loadThreadContext, saveThreadDialogue } from './thread-dialogue-store.js';
 
 // One private, per-user broker shared by every IDE project. The graph retriever
 // remains the existing Codex worker; this broker reuses MCP transports and indexes.
@@ -90,7 +90,8 @@ export async function createSharedAgentRuntime(options={}) {
       hooks:(event,input)=>request('hooks',{event,input}),
       call:(name,args)=>request('call',{name,args}),
       loadDialogue:threadId=>request('load_dialogue',{threadId}),
-      saveDialogue:(threadId,messages)=>request('save_dialogue',{threadId,messages}),
+      loadContext:threadId=>request('load_context',{threadId}),
+      saveDialogue:(threadId,messages,contextCache)=>request('save_dialogue',{threadId,messages,...(contextCache?{contextCache}:{})}),
       close:async()=>{signal?.removeEventListener('abort',abort);socket.end();}
     };
   } catch(error){signal?.removeEventListener('abort',abort);socket.destroy();throw error;}
@@ -130,7 +131,8 @@ export async function serveSharedAgentWorker(socketPath) {
           await opening;if(!runtime)throw new Error('Runtime not open');
           if(message.method==='call')result=await runtime.call(message.params.name,message.params.args);
           else if(message.method==='load_dialogue')result=await loadThreadDialogue({codexHome:settings.codexHome || settings.environment?.CODEX_HOME || path.join(settings.homeDir || os.homedir(),'.codex'),threadId:message.params.threadId});
-          else if(message.method==='save_dialogue')result=await saveThreadDialogue({codexHome:settings.codexHome || settings.environment?.CODEX_HOME || path.join(settings.homeDir || os.homedir(),'.codex'),cwd:settings.cwd,threadId:message.params.threadId,messages:message.params.messages});
+          else if(message.method==='load_context')result=await loadThreadContext({codexHome:settings.codexHome || settings.environment?.CODEX_HOME || path.join(settings.homeDir || os.homedir(),'.codex'),threadId:message.params.threadId});
+          else if(message.method==='save_dialogue')result=await saveThreadDialogue({codexHome:settings.codexHome || settings.environment?.CODEX_HOME || path.join(settings.homeDir || os.homedir(),'.codex'),cwd:settings.cwd,threadId:message.params.threadId,messages:message.params.messages,contextCache:message.params.contextCache});
           else if(message.method==='hooks'){
             result=await runtime.hooks(message.params.event,message.params.input);
             // SessionStart can refresh the catalog; forward the refreshed prompt.

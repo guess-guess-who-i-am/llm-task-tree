@@ -2,6 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { executionProgress, recordRunDuration, readableExecutionError } from './execution-progress.js';
 
+test('summarizing is an explicit running phase, not a terminal state', () => {
+  const progress = executionProgress({ status: 'running', phase: 'summarizing', createdAt: new Date().toISOString() });
+  assert.equal(progress.phase, 'summarizing');
+  assert.match(progress.label, /整理长上下文/);
+});
+
 test('stopped is terminal, freezes elapsed time and never becomes a successful ETA sample', () => {
   const run = { treeId: 'a', nodeId: 'N1', status: 'stopped', createdAt: new Date(1000).toISOString(), updatedAt: new Date(2500).toISOString() };
   const progress = executionProgress(run, [], 9000);

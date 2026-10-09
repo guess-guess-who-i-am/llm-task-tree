@@ -1,0 +1,211 @@
+{
+  "schema": "deepseek-context-verification/v1",
+  "modelEvidence": "本机HTTP模型替身；未请求真实DeepSeek",
+  "tests": [
+    {
+      "runtime": "Node 24",
+      "passed": 115,
+      "failed": 0,
+      "scope": "工具循环、上下文、全文存储、共享Worker、旧上下文生命周期、节点对话及导出"
+    },
+    {
+      "runtime": "Mac内置Node 22",
+      "passed": 78,
+      "failed": 0,
+      "scope": "执行与上下文相关集中回归"
+    },
+    {
+      "runtime": "Kit内置Node 22",
+      "passed": 15,
+      "failed": 0,
+      "scope": "安装副本的上下文、HTTP共享Worker端到端与阶段显示"
+    }
+  ],
+  "scenarios": {
+    "unlimitedToolRounds": 55,
+    "manualStopAtRound": 45,
+    "httpEndToEndToolCalls": 50,
+    "workerRestart": "全文与摘要恢复并复用",
+    "contextRejection": "整理后重试，不重复已保存工具"
+  },
+  "deployment": {
+    "ports": [
+      5491,
+      5866
+    ],
+    "businessFilesUnchanged": true,
+    "before": [
+      {
+        "port": 5866,
+        "root": "/Users/pku1727/Desktop/建模世界",
+        "hashes": {
+          "task-tree.md": "eb8f098e307eec9955ed4aebdc3a79cd2c1859af2340ccbcab9a18d1f3065a3b",
+          "task-trees.json": "aded893de0d58f256a517d4b5dd91059663dc1c01d8cff856d37620b9150ce1b",
+          ".task-tree-direct-state.json": "e5f544f7b9a6d47f0498d9f42e9d2fe81ddaf34b7ac97ee86ed1ce44f2023a74",
+          "subtrees/N1-subtree.md": "b3fe32f4986f21f33a574fa64e0920d5922e0164d3194a13407e242e7589688d",
+          "subtrees/N9-subtree.md": "494ba7debccd3503d9196aa0097763c7bcedc0e983fa0e2ad188613fcc4e4d17"
+        },
+        "runCount": 3
+      },
+      {
+        "port": 5491,
+        "root": "/Library/hyf/并行ide/llm-task-tree-macos/macos/IDE/workspace",
+        "hashes": {
+          "task-tree.md": "3dac833899e4daab59dfd08907859f94c22359a8360ceb8ad6fb299e9346b202",
+          "task-trees.json": "aded893de0d58f256a517d4b5dd91059663dc1c01d8cff856d37620b9150ce1b",
+          ".task-tree-direct-state.json": "698e150ee2fc86344726b348560a8d73a4429dd6d199430829fb1b7a675ea4a1"
+        },
+        "runCount": 0
+      }
+    ]
+  },
+  "treeReceipts": [
+    {
+      "ok": true,
+      "path": "subtrees/N3-subtree.md",
+      "changes": [
+        {
+          "kind": "node-field",
+          "nodeId": "N3",
+          "title": "让 Codex 同步维护任务图",
+          "field": "CurrentResult",
+          "before": "同文件与任务树合并、八路调度、追加和自动应用已验证；Planner与Worker摘要先行、按需读主树及子树、结束刷新通过51项回归及两项真实只读实验。网关超时仍影响速度，拆分语义与稳定提速未保证；证据：docs/tree-context.zh.md。",
+          "after": "同文件与任务树合并、八路调度和自动应用已验证；取消工具轮数上限与DeepSeek摘要交接通过115项回归，本机HTTP与真实共享服务完成50次调用及重启复用。真实模型摘要质量、拆分最优性与稳定提速仍待验证；证据：docs/deepseek-context-lifecycle.zh.md。"
+        }
+      ],
+      "changedNodeIds": [
+        "N3"
+      ]
+    },
+    {
+      "ok": true,
+      "file": "task-tree.md",
+      "applied": [
+        "CurrentResult",
+        "RootCauseAnalysis"
+      ],
+      "changes": [
+        {
+          "kind": "node-field",
+          "nodeId": "N3",
+          "title": "让 Codex 同步维护任务图",
+          "field": "CurrentResult",
+          "before": "55轮工具与第45轮停止通过；取消工具轮数上限，DeepSeek摘要交接待接入；并行拆分语义与稳定提速仍未保证。",
+          "after": "并行合并已验证；工具无轮数上限与摘要交接通过115项回归、端到端重启；保留全文，真实摘要质量与提速未验证。"
+        },
+        {
+          "kind": "node-field",
+          "nodeId": "N3",
+          "title": "让 Codex 同步维护任务图",
+          "field": "RootCauseAnalysis",
+          "before": "批量解析减少往返；三地址故障切换不重跑工具，仍受总超时与上游限制。",
+          "after": "旧循环硬限40轮且DeepSeek未接压缩；现持续执行并独立摘要，保留总超时。"
+        }
+      ],
+      "changedNodeIds": [
+        "N3"
+      ],
+      "executionScope": null,
+      "reason": "更新无轮数上限与摘要交接结论",
+      "flowSync": {
+        "changed": 0,
+        "skipped": false
+      },
+      "compact": {
+        "nodes": 14,
+        "bytes": 12252,
+        "overBudgetFields": 0,
+        "styleViolations": 0,
+        "longLines": 0
+      },
+      "startedServer": false,
+      "note": "changes 是服务端按实际落盘前后状态生成的真实差异；用户回执必须据此列出节点、字段、旧值 → 新值。节点补丁在服务端串行并基于最新树应用，执行范围会拒绝越权节点。"
+    }
+  ],
+  "treeRefinementReceipts": [
+    {
+      "ok": true,
+      "file": "task-tree.md",
+      "applied": [
+        "CurrentResult",
+        "RootCauseAnalysis"
+      ],
+      "changes": [
+        {
+          "kind": "node-field",
+          "nodeId": "N3",
+          "title": "让 Codex 同步维护任务图",
+          "field": "CurrentResult",
+          "before": "并行合并已验证；工具无轮数上限与摘要交接通过115项回归、端到端重启；保留全文，真实摘要质量与提速未验证。",
+          "after": "工具无轮数上限、摘要交接及全文恢复通过115项回归与端到端重启；真实摘要质量和提速未验证。"
+        },
+        {
+          "kind": "node-field",
+          "nodeId": "N3",
+          "title": "让 Codex 同步维护任务图",
+          "field": "RootCauseAnalysis",
+          "before": "旧循环硬限40轮且DeepSeek未接压缩；现持续执行并独立摘要，保留总超时。",
+          "after": "原40轮硬上限、缺少摘要交接导致中断。"
+        }
+      ],
+      "changedNodeIds": [
+        "N3"
+      ],
+      "executionScope": null,
+      "reason": "精炼N3索引并保留未验证边界",
+      "flowSync": {
+        "changed": 0,
+        "skipped": false
+      },
+      "compact": {
+        "nodes": 14,
+        "bytes": 12184,
+        "overBudgetFields": 0,
+        "styleViolations": 0,
+        "longLines": 0
+      },
+      "startedServer": false,
+      "note": "changes 是服务端按实际落盘前后状态生成的真实差异；用户回执必须据此列出节点、字段、旧值 → 新值。节点补丁在服务端串行并基于最新树应用，执行范围会拒绝越权节点。"
+    },
+    {
+      "ok": true,
+      "file": "task-tree.md",
+      "applied": [
+        "RootCauseAnalysis"
+      ],
+      "changes": [
+        {
+          "kind": "node-field",
+          "nodeId": "N3",
+          "title": "让 Codex 同步维护任务图",
+          "field": "RootCauseAnalysis",
+          "before": "原40轮硬上限、缺少摘要交接导致中断。",
+          "after": "工具硬限40轮且未接摘要。"
+        }
+      ],
+      "changedNodeIds": [
+        "N3"
+      ],
+      "executionScope": null,
+      "reason": "精炼N3根因索引",
+      "flowSync": {
+        "changed": 0,
+        "skipped": false
+      },
+      "compact": {
+        "nodes": 14,
+        "bytes": 12166,
+        "overBudgetFields": 0,
+        "styleViolations": 0,
+        "longLines": 0
+      },
+      "startedServer": false,
+      "note": "changes 是服务端按实际落盘前后状态生成的真实差异；用户回执必须据此列出节点、字段、旧值 → 新值。节点补丁在服务端串行并基于最新树应用，执行范围会拒绝越权节点。"
+    }
+  ],
+  "limitations": [
+    "真实DeepSeek摘要的语义质量与延迟尚未验证",
+    "摘要是有损归纳，原始聊天仍完整保存",
+    "默认十分钟总超时与现有Hook、重试规则保留"
+  ]
+}

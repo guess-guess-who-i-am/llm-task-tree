@@ -364,17 +364,110 @@ test('Stop block is sent back for repair, persistent block fails after two repai
   assert.match(blocked.result.error.message, /Stop Hook/);
 });
 
-test('tool errors become structured tool results for correction; round limit never claims completion', async t => {
+test('tool errors become structured tool results for correction', async t => {
   const errored = await run(t, [json({ tool_calls: [call('read_file')] }, 'tool_calls'), json({ content: '报告错误' })], {
     tools: [schema('read_file')], toolHandler: async () => { throw new Error('不存在'); }
   });
   assert.deepEqual(JSON.parse(errored.requests[1].messages.at(-1).content), { ok: false, error: '不存在' });
-  t.mock.restoreAll();
-  const limited = await run(t, [json({ tool_calls: [call('read_file')] }, 'tool_calls')], {
-    maxToolRounds: 1, tools: [schema('read_file')], toolHandler: async () => ({ ok: true })
+});
+
+test('tool execution continues past 40 rounds until the model completes, with no repeated writes', async t => {
+  let writes = 0;
+  const rounds = Array.from({ length: 55 }, (_, i) => json({ content: `第 ${i + 1} 轮`, tool_calls: [call('task_tree_write', { round: i + 1 }, `write-${i}`)] }, 'tool_calls'));
+  const state = await run(t, [...rounds, json({ content: '所有工具工作已完成' })], {
+    tools: [schema('task_tree_write')], toolHandler: async (_, args) => { assert.equal(args.round, ++writes); return { ok: true, saved: args.round }; }
   });
-  assert.equal(limited.result.status, 'failed');
-  assert.match(limited.result.error.message, /超过 1 轮/);
+  assert.equal(state.result.status, 'completed', state.result.error?.message);
+  assert.equal(writes, 55); assert.equal(state.requests.length, 56);
+  assert.equal(state.result.timing.tools.length, 55); assert.equal(state.result.timing.rounds.length, 56);
+  assert.ok(state.result.output.endsWith('所有工具工作已完成'));
+});
+
+test('manual stop remains effective after the previous tool round limit without starting another write', async t => {
+  const controller = new AbortController(); let writes = 0;
+  const state = await run(t, Array.from({ length: 45 }, (_, i) => json({ tool_calls: [call('task_tree_write', {}, `write-${i}`)] }, 'tool_calls')), {
+    signal: controller.signal, tools: [schema('task_tree_write')],
+    toolHandler: async () => { if (++writes === 45) controller.abort(); return { ok: true }; }
+  });
+  assert.equal(state.result.status, 'stopped'); assert.equal(writes, 45); assert.equal(state.requests.length, 45);
+});
+
+test('long history is summarized before execution without deleting archive text; cached summary resumes without another summary request', async t => {
+  const original = Array.from({ length: 12 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `原文${i}：` + '历史文字'.repeat(450) }));
+  const messages = [...original, { role: 'user', content: '最新要求：只改N9，保留其他节点' }];
+  const saved = [];
+  const environment = { MODEL_AGENT_MAIN_BASE_URL: 'https://isolated.invalid', MODEL_AGENT_MAIN_API_KEY: 'test-only', MODEL_AGENT_MAIN_MODEL: 'test-model', MODEL_AGENT_MAIN_CONTEXT_WINDOW: '8192' };
+  const state = await run(t, Array.from({ length: 100 }, () => init => {
+    const body = JSON.parse(init.body);
+    return json({ content: body.stream === false ? '用户目标：维护树；历史状态：已读文件；未决：完成N9。' : '已经完成N9' });
+  }), { messages, environment, runtime: { saveDialogue: async (_, archive, cache) => saved.push({ archive, cache }) } });
+  assert.equal(state.result.status, 'completed', state.result.error?.message);
+  assert.ok(state.requests.some(body => body.stream === false));
+  const main = state.requests.find(body => body.stream === true);
+  assert.ok(main.messages.some(m => m.content?.includes('历史上下文摘要')));
+  assert.ok(main.messages.some(m => m.content === messages.at(-1).content));
+  assert.deepEqual(saved.at(-1).archive, [...messages, { role: 'assistant', content: '已经完成N9' }]);
+  assert.deepEqual(state.result.messages, saved.at(-1).archive);
+  assert.ok(state.result.timing.compactions.length);
+  assert.ok(state.result.timing.summaryRequests.every(s => Number.isFinite(s.totalMs)));
+  assert.ok(!state.result.output.includes('用户目标：维护树'), 'summary is not presented as a new model reply');
+  assert.ok(saved.at(-1).cache?.summary);
+  t.mock.restoreAll();
+  const resumed = await run(t, [json({ content: '继续完成' })], { threadId: state.result.threadId, environment,
+    runtime: { loadDialogue: async () => saved.at(-1).archive, loadContext: async () => saved.at(-1).cache, saveDialogue: async (_, archive, cache) => { assert.ok(cache?.summary); } } });
+  assert.equal(resumed.result.status, 'completed', resumed.result.error?.message);
+  assert.equal(resumed.requests.length, 1);
+  assert.ok(resumed.requests[0].messages.some(m => m.content?.includes('历史上下文摘要')));
+});
+
+test('cancelling a summary prevents execution and preserves the complete original chat', async t => {
+  const controller = new AbortController(), saved = [];
+  const messages = [...Array.from({ length: 12 }, () => ({ role: 'assistant', content: '历史文字'.repeat(450) })), { role: 'user', content: '最新请求' }];
+  const state = await run(t, [init => new Promise((resolve, reject) => {
+    assert.equal(JSON.parse(init.body).stream, false);
+    init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+    setImmediate(() => controller.abort());
+  })], { messages, signal: controller.signal,
+    environment: { MODEL_AGENT_MAIN_BASE_URL: 'https://isolated.invalid', MODEL_AGENT_MAIN_API_KEY: 'test-only', MODEL_AGENT_MAIN_MODEL: 'test-model', MODEL_AGENT_MAIN_CONTEXT_WINDOW: '8192' },
+    runtime: { saveDialogue: async (_, archive) => saved.push(archive) } });
+  assert.equal(state.result.status, 'stopped');
+  assert.deepEqual(saved.at(-1), messages);
+  assert.equal(state.requests.length, 1); assert.equal(state.result.timing.tools.length, 0);
+});
+
+test('a gateway context-size rejection condenses history and retries without replaying saved writes', async t => {
+  let mainRequests = 0, writes = 0;
+  const state = await run(t, Array.from({ length: 20 }, () => init => {
+    if (JSON.parse(init.body).stream === false) return json({ content: '已保存第一项；继续，不重复保存。' });
+    if (++mainRequests === 1) return json({ tool_calls: [call('write', {}, 'one')] }, 'tool_calls');
+    if (mainRequests === 2) return new Response('context_length_exceeded: maximum context length', { status: 400 });
+    return json({ content: '完成' });
+  }), { messages: [...Array.from({ length: 10 }, () => ({ role: 'assistant', content: '历史内容'.repeat(100) })), { role: 'user', content: '当前要求' }],
+    tools: [schema('write')], toolHandler: async () => { writes++; return { ok: true, saved: true }; } });
+  assert.equal(state.result.status, 'completed', state.result.error?.message);
+  assert.equal(writes, 1); assert.equal(mainRequests, 3);
+  assert.ok(state.requests.at(-1).messages.some(m => m.content?.includes('历史上下文摘要')));
+  assert.equal(state.requests.at(-1).messages.at(-1).tool_call_id, 'one');
+});
+
+test('ongoing tool history compacts between complete groups, while all writes execute once past forty rounds', async t => {
+  let round = 0, writes = 0;
+  const state = await run(t, Array.from({ length: 150 }, () => init => {
+    if (JSON.parse(init.body).stream === false) return json({ content: '已经逐项保存；不重做先前写入，继续下一项。' });
+    if (++round <= 50) return json({ tool_calls: [call('write', { round }, `write-${round}`)] }, 'tool_calls');
+    return json({ content: '全部保存完成' });
+  }), { tools: [schema('write')], toolHandler: async (_, args) => { assert.equal(args.round, ++writes); return { ok: true, saved: writes, receipt: '完整返回'.repeat(60) }; },
+    environment: { MODEL_AGENT_MAIN_BASE_URL: 'https://isolated.invalid', MODEL_AGENT_MAIN_API_KEY: 'test-only', MODEL_AGENT_MAIN_MODEL: 'test-model', MODEL_AGENT_MAIN_CONTEXT_WINDOW: '8192' } });
+  assert.equal(state.result.status, 'completed', state.result.error?.message);
+  assert.equal(writes, 50); assert.equal(round, 51);
+  assert.ok(state.result.timing.compactions.length > 0);
+  for (const body of state.requests.filter(b => b.stream)) {
+    const calls = new Set();
+    for (const m of body.messages) {
+      for (const c of m.tool_calls || []) calls.add(c.id);
+      if (m.role === 'tool') assert.ok(calls.has(m.tool_call_id), 'no orphan receipts after summary');
+    }
+  }
 });
 
 test('safe reads overlap, mutations form ordering barriers, and per-call timing is recorded', async t => {

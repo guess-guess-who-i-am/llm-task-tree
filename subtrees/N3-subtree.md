@@ -24,7 +24,7 @@
   - server/codex-coordinator.js
   - server/parallel-worktree.js
   - public/app.js
-- CurrentResult: 同文件/任务树合并、八路调度、即时追加、上下文传递、自动应用通过；八参与者冲突解析一次。双分支、Mac通过；拆分与语义正确性无保证。
+- CurrentResult: 同文件与任务树合并、八路调度和自动应用已验证；取消工具轮数上限与DeepSeek摘要交接通过115项回归，本机HTTP与真实共享服务完成50次调用及重启复用。真实模型摘要质量、拆分最优性与稳定提速仍待验证；证据：docs/deepseek-context-lifecycle.zh.md。
 - RootCauseAnalysis: 旧冲突路径逐个串行咨询，模型回合随人数增加；Git非瓶颈。一次提交分支上下文给解析器；写集可并行，同会话复用需分叉，项目外修改不受 Git 保护。
 - CaseStudy:
   - 两任务改同一文件和任务树，通过双方对话合并后同时保留结果。

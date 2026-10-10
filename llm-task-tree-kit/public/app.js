@@ -8297,12 +8297,36 @@ async function exportFlowSvgFile() {
   }
 }
 
-loadTreeRegistryState()
-  .then(() => loadTree({ registryLoaded: true, fitView: snapshotMode || embedMode }))
-  .then(() => snapshotMode ? null : restoreDirectRunConversations())
-  .then(() => (snapshotMode ? enterSnapshotMode() : signalEmbedHost("rendered")))
-  .then(() => (embedMode && !snapshotMode ? enterEmbedLayout() : null))
-  .catch((error) => setSaveState(formatApiFetchError(error, null, "加载任务图")));
+let initialTreeLoading = false;
+async function initializeTreeView() {
+  if (initialTreeLoading) return;
+  initialTreeLoading = true;
+  window.taskTreeBoot?.loading('正在连接项目并加载任务树…');
+  try {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await loadTreeRegistryState();
+        await loadTree({ registryLoaded: true, fitView: snapshotMode || embedMode });
+        break;
+      } catch (error) {
+        if (attempt === 2) throw error;
+        await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+      }
+    }
+    if (snapshotMode) await enterSnapshotMode();
+    else {
+      signalEmbedHost('rendered');
+      restoreDirectRunConversations().catch(error => setSaveState(`对话恢复失败：${error.message}`));
+      if (embedMode) enterEmbedLayout().catch(error => setSaveState(error.message));
+    }
+    window.taskTreeBoot?.ready();
+  } catch (error) {
+    setSaveState(formatApiFetchError(error, null, '加载任务图'));
+    window.taskTreeBoot?.fail(error);
+  } finally { initialTreeLoading = false; }
+}
+if (window.taskTreeBoot) window.taskTreeBoot.retryApp = initializeTreeView;
+void initializeTreeView();
 
 // Snapshot mode renders once for a screenshot; polling would only repaint under the camera.
 if (!snapshotMode) {

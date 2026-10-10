@@ -66,7 +66,10 @@ if ! is_project_server; then
   fi
   GLOBAL_ENV_FILE="${TASK_TREE_GLOBAL_ENV_FILE:-$KIT_DIR/../../.env}"
   export HOST PORT TASK_TREE_STUB_DIR="$STUB_DIR" TASK_TREE_PROJECT_ROOT="$PROJECT_ROOT" TASK_TREE_GLOBAL_ENV_FILE="$GLOBAL_ENV_FILE"
-  "$NODE_BIN" --input-type=module - "$KIT_DIR/server.js" "$LOG_FILE" "$PID_FILE" <<'NODE'
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    "$NODE_BIN" "$KIT_DIR/scripts/project-service-macos.mjs" start "$STUB_DIR" "$PROJECT_ROOT" "$PORT" "$HOST" "$GLOBAL_ENV_FILE"
+  else
+    "$NODE_BIN" --input-type=module - "$KIT_DIR/server.js" "$LOG_FILE" "$PID_FILE" <<'NODE'
 import { spawn } from "node:child_process";
 import { openSync, closeSync, writeFileSync } from "node:fs";
 const [entry, logFile, pidFile] = process.argv.slice(2);
@@ -81,6 +84,7 @@ writeFileSync(pidFile, `${child.pid}\n`);
 child.unref();
 closeSync(log);
 NODE
+  fi
   for _ in $(seq 1 80); do
     if is_project_server; then break; fi
     sleep 0.25

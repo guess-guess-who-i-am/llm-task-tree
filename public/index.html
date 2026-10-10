@@ -1,15 +1,24 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-page-boot>
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>LLM Task Tree</title>
-    <link rel="stylesheet" href="/styles.css">
-  <link rel="stylesheet" href="/flow-view.css">
-  <link rel="stylesheet" href="/scratch-blocks.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
+    <style>
+      html[data-page-boot] #app { visibility: hidden; }
+      #pageBootStatus { position: fixed; inset: 0; z-index: 2147483647; display: grid; place-content: center; gap: 16px; padding: 32px; background: #fbfbf8; color: #25322b; font: 16px/1.6 system-ui, sans-serif; }
+      #pageBootStatus[hidden] { display: none !important; }
+      #pageBootStatus button { justify-self: start; padding: 8px 20px; cursor: pointer; }
+    </style>
+    <script src="/page-boot.js"></script>
   </head>
   <body>
+    <section id="pageBootStatus" role="status" aria-live="polite" data-state="loading">
+      <strong>LLM Task Tree</strong>
+      <div id="pageBootMessage">正在加载 IDE…</div>
+      <button type="button" id="pageBootRetry" hidden>重新连接</button>
+      <noscript>请启用 JavaScript 后重新打开 IDE。</noscript>
+    </section>
     <div id="app">
       <header class="topbar">
         <div class="topbarLead">
@@ -377,8 +386,6 @@
       </div>
       <pre id="filePreviewContent" class="filePreviewContent"></pre>
     </dialog>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
-    <script src="/tree-layout.js"></script>
-    <script src="/app.js"></script>
+    <script>window.taskTreeBoot.start();</script>
   </body>
 </html>

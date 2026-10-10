@@ -970,6 +970,9 @@ const mimeTypes = {
   ".css": "text/css; charset=utf-8",
   ".js": "application/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".woff2": "font/woff2",
+  ".woff": "font/woff",
+  ".ttf": "font/ttf",
   ".svg": "image/svg+xml; charset=utf-8"
 };
 
@@ -4231,7 +4234,13 @@ async function serveStatic(req, res) {
   }
 
   const ext = path.extname(filePath);
-  const body = await readFile(filePath);
+  let body = await readFile(filePath);
+  if (ext === '.html' && pathname === '/index.html') {
+    const boot = (await readFile(path.join(publicDir, 'page-boot.js'), 'utf8')).replace(/<\/script/gi, '<\\/script');
+    body = body.toString('utf8').replace('<script src="/page-boot.js"></script>', () => `<script>${boot}</script>`);
+  }
+  // A restored browser tab must revalidate HTML and scripts against the current service.
+  res.setHeader('cache-control', 'no-cache');
   send(res, 200, body, mimeTypes[ext] || "application/octet-stream");
 }
 

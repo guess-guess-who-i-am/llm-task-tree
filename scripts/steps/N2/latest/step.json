@@ -3,8 +3,24 @@
   "nodeId": "N2",
   "title": "实现可视化图谱编辑器",
   "reportZh": "report.zh.md",
-  "updatedAt": "2026-10-09",
+  "updatedAt": "2026-10-10",
   "substeps": [
+    {
+      "title": "本地页面资源恢复与macOS工程服务守护",
+      "functions": [
+        { "path": "public/page-boot.js", "name": "loadAsset" },
+        { "path": "public/app.js", "name": "initializeTreeView" },
+        { "path": "server.js", "name": "serveStatic" },
+        { "path": "scripts/project-service-macos.mjs", "name": "start/serve" }
+      ],
+      "outputs": [
+        { "path": "docs/page-loading-reliability.zh.md" },
+        { "path": "scripts/test-page-loading-ui.mjs" },
+        { "path": "scripts/test-project-service-macos.mjs" },
+        { "path": "scripts/test-deployed-page-loading.mjs" },
+        { "path": "artifacts/page-loading-webkit-main.png" }
+      ]
+    },
     {
       "title": "节点对话真正停止、编辑重发及桌面导出",
       "functions": [

@@ -18,6 +18,7 @@ if (Test-Path -LiteralPath (Join-Path $Root "model-agents")) {
   Copy-Item (Join-Path $Root "model-agents") (Join-Path $Kit "model-agents") -Recurse -Force
 }
 Copy-Item (Join-Path $Root "package.json") $Kit -Force
+Copy-Item (Join-Path $Root "package-lock.json") $Kit -Force
 Copy-Item (Join-Path $Root "打开任务图.cmd") $Kit -Force
 Copy-Item (Join-Path $Root "scripts\install-codex-hooks.mjs") (Join-Path $Kit "scripts\install-codex-hooks.mjs") -Force
 Copy-Item (Join-Path $Root "scripts\check-tree-compact.mjs") (Join-Path $Kit "scripts\check-tree-compact.mjs") -Force
@@ -27,6 +28,7 @@ Copy-Item (Join-Path $Root "scripts\mcp-server.mjs") (Join-Path $Kit "scripts\mc
 Copy-Item (Join-Path $Root "scripts\install-codex-mcp.mjs") (Join-Path $Kit "scripts\install-codex-mcp.mjs") -Force
 Copy-Item (Join-Path $Root "scripts\install-linux-project.mjs") (Join-Path $Kit "scripts\install-linux-project.mjs") -Force
 Copy-Item (Join-Path $Root "scripts\project-port.mjs") (Join-Path $Kit "scripts\project-port.mjs") -Force
+Copy-Item (Join-Path $Root "scripts\project-service-macos.mjs") (Join-Path $Kit "scripts\project-service-macos.mjs") -Force
 # Hosts that refuse to frame a plain http page need the UI over TLS; this is what creates and
 # revokes the loopback certificate the https listener uses.
 Copy-Item (Join-Path $Root "scripts\enable-local-https.ps1") (Join-Path $Kit "scripts\enable-local-https.ps1") -Force

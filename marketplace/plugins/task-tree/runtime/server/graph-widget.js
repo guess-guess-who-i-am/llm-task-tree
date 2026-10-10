@@ -19,9 +19,6 @@
 export const WIDGET_URI = "ui://task-tree/graph.html";
 export const WIDGET_MIME = "text/html;profile=mcp-app";
 
-/** KaTeX renders formulas in node fields, and it is the one thing still loaded from the network. */
-const CDN = ["https://cdn.jsdelivr.net"];
-
 /**
  * Loopback origins stay declared even though nothing is loaded from them any more: a host that does
  * allow local network access can still serve the page's images and links directly, and declaring an
@@ -31,7 +28,7 @@ export function widgetMeta(port = 0, httpsPort = 0) {
   const local = [];
   if (httpsPort) local.push(`https://127.0.0.1:${httpsPort}`, `https://localhost:${httpsPort}`);
   if (port) local.push(`http://127.0.0.1:${port}`, `http://localhost:${port}`);
-  const domains = [...CDN, ...local];
+  const domains = local;
   return {
     ui: {
       csp: { connectDomains: domains, resourceDomains: domains },

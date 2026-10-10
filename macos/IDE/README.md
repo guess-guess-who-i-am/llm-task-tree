@@ -2,7 +2,9 @@
 
 这里是 macOS 的独立启动入口和隔离测试区。IDE 数据项目安装到本目录的 `workspace/`，私有 Node.js 安装到 `runtime/`；真正的运行时代码只保留一份，在仓库的 `llm-task-tree-kit/`，避免 IDE 与 Kit 版本漂移。
 
-`open.command` 与 `open-project.command` 现在默认打开源码工程根目录及一直维护的工程树，方便用新版 IDE 改进自身；不会复制任务树或切换全局焦点。原来的 `workspace/` 数据保留，仍可双击它自己的启动入口打开。服务在独立进程组运行，关闭启动终端后仍可访问，以启动器实际输出的地址为准。
+`open.command` 与 `open-project.command` 现在默认打开源码工程根目录及一直维护的工程树，方便用新版 IDE 改进自身；不会复制任务树或切换全局焦点。原来的 `workspace/` 数据保留，仍可双击它自己的启动入口打开。macOS 首次启动时会注册项目级 LaunchAgent，关闭终端后仍可访问，登录时启动、崩溃后恢复；点页面关闭按钮或运行 `stop.command` 则保持停止，再双击入口可启动。以启动器实际输出的地址为准。
+
+页面启动所需样式、脚本和数学字体全部本地提供，不等待外部 CDN。短暂资源故障自动重试；持续故障显示具体资源和“重新连接”，不再静默留下无样式空树。加载与服务恢复的验证范围见 [诊断报告](../../docs/page-loading-reliability.zh.md)。
 
 桌面的“打开IDE工程.command”和“打开并行IDE.command”都可直接使用；启动器会解析快捷方式指向的真实文件，不会把桌面目录误认成工程。并行流程修复和六路真实 DeepSeek 验证见[本轮报告](../../docs/parallel-pipeline-repair.zh.md)。
 

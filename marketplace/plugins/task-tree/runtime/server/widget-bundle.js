@@ -17,8 +17,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 /** Loaded up front by index.html, in this order. */
-const STYLES = ["styles.css", "flow-view.css", "scratch-blocks.css"];
-const SCRIPTS = ["tree-layout.js", "app.js"];
+const STYLES = ["styles.css", "flow-view.css", "scratch-blocks.css", "vendor/katex/katex.min.css"];
+const SCRIPTS = ["page-boot.js", "vendor/katex/katex.min.js", "tree-layout.js", "app.js"];
 /** Pulled in later by `import()`, keyed by the path the page asks for. */
 const LAZY_MODULES = ["flow-view.js", "graph-export.js"];
 
@@ -42,21 +42,10 @@ function bodyOf(indexHtml) {
   return (match ? match[1] : indexHtml).replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
 }
 
-/** Only the stylesheet links that point somewhere the sandbox is allowed to reach. */
-function remoteStylesheets(indexHtml) {
-  return [...indexHtml.matchAll(/<link\s+rel="stylesheet"\s+href="(https:\/\/[^"]+)"[^>]*>/gi)]
-    .map((match) => match[0]);
-}
-
-function remoteScripts(indexHtml) {
-  return [...indexHtml.matchAll(/<script\s+src="(https:\/\/[^"]+)"[^>]*><\/script>/gi)]
-    .map((match) => match[0]);
-}
-
 /**
  * Replaces `fetch` for same-origin API paths, before any page code runs.
  *
- * Anything else - a CDN font, a data url - is left to the real fetch.
+ * Anything else, such as a data URL, is left to the real fetch.
  */
 export function embedApiShim() {
   return `
@@ -97,15 +86,25 @@ export function embedApiShim() {
  */
 export async function widgetBundle({ publicDir, lazyModules = LAZY_MODULES } = {}) {
   const indexHtml = await readPublic(publicDir, "index.html");
-  const styles = await Promise.all(STYLES.map((name) => readPublic(publicDir, name)));
+  const styles = await Promise.all(STYLES.map(async name => {
+    let source = await readPublic(publicDir, name);
+    if (name.endsWith('katex.min.css')) {
+      const fonts = [...new Set([...source.matchAll(/url\((fonts\/[^)]+)\)/g)].map(match => match[1]))];
+      for (const font of fonts) {
+        const bytes = await readFile(path.join(publicDir, 'vendor/katex', font));
+        const type = font.endsWith('.woff2') ? 'font/woff2' : font.endsWith('.woff') ? 'font/woff' : 'font/ttf';
+        source = source.replaceAll(`url(${font})`, `url(data:${type};base64,${bytes.toString('base64')})`);
+      }
+    }
+    return source;
+  }));
   const scripts = await Promise.all(SCRIPTS.map((name) => readPublic(publicDir, name)));
   const lazy = await Promise.all(lazyModules.map(async (name) => [`/${name}`, await readPublic(publicDir, name)]));
 
   return [
-    remoteStylesheets(indexHtml).join("\n"),
+    indexHtml.match(/<style>[\s\S]*?<\/style>/)?.[0] || '',
     `<style>\n${styles.join("\n")}\n</style>`,
     bodyOf(indexHtml),
-    remoteScripts(indexHtml).join("\n"),
     // Registered before the page loads, because the page reads its first tree during startup.
     `<script>window.__taskTreeEmbed = true;\nwindow.__taskTreeLazyModules = ${JSON.stringify(Object.fromEntries(lazy))};\n${embedApiShim()}</script>`,
     ...scripts.map((source) => `<script>${inlineSafe(source)}</script>`)

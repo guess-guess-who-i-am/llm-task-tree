@@ -48,8 +48,8 @@
 - Metrics:
 - Notes:
 - CodeLoc:
-- CurrentResult: 节点对话可真实停止、编辑重发和桌面全文导出；82项回归通过，安装版已更新，两工作区树与对话保持不变；易读性待反馈。
-- RootCauseAnalysis: 旧界面仅能停止轮询，缺少模型取消与消息重发；现接通请求及工具信号，编辑替换后续对话并先备份。
+- CurrentResult: 主树、子树及对话可正常显示；双浏览器加载回归与22项交互回归通过，服务可自动恢复；已复现加载故障已修复，未复现触发条件仍需观察。
+- RootCauseAnalysis: 重启后临时服务消失，外部CDN脚本阻塞应用；现用登录守护、本地资源与恢复提示。
 - CaseStudy:
 - NextIdea:
 - SelectedSkills:

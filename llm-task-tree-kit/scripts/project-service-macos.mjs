@@ -5,6 +5,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { localNetworkEnvironment } from '../server/network-environment.js';
+import { runtimeRevision, projectServiceIdle } from '../server/runtime-revision.js';
 
 const run = promisify(execFile);
 const [mode, stubDir, projectRoot, port, host, envFile] = process.argv.slice(2);
@@ -14,6 +15,7 @@ if (process.platform !== 'darwin') throw new Error('macOS project service requir
 if (mode === 'serve') {
   const child = spawn(process.execPath, [path.join(kitRoot, 'server.js')], {
     cwd: projectRoot,
+    detached: true,
     env: await localNetworkEnvironment({ ...process.env, HOST: host, PORT: port,
       TASK_TREE_STUB_DIR: stubDir, TASK_TREE_PROJECT_ROOT: projectRoot,
       TASK_TREE_GLOBAL_ENV_FILE: envFile }),
@@ -31,6 +33,7 @@ if (mode === 'serve') {
   const xml = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
   const args = [process.execPath, path.join(kitRoot, 'scripts/project-service-macos.mjs'), 'serve', stubDir, projectRoot, port, host, envFile];
   const log = path.join(projectRoot, '.task-tree-server.log');
+  const revision = await runtimeRevision(kitRoot);
   // Only paths and normal executable search paths are persisted, never inherited API keys.
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -38,7 +41,7 @@ if (mode === 'serve') {
 <key>Label</key><string>${label}</string>
 <key>ProgramArguments</key><array>${args.map(value => `<string>${xml(value)}</string>`).join('')}</array>
 <key>WorkingDirectory</key><string>${xml(projectRoot)}</string>
-<key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(path.dirname(process.execPath))}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+<key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(path.dirname(process.execPath))}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string><key>TASK_TREE_RUNTIME_REVISION</key><string>${revision}</string></dict>
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
 <key>ThrottleInterval</key><integer>2</integer>
@@ -47,7 +50,30 @@ if (mode === 'serve') {
 </dict></plist>\n`;
   const previous = await readFile(file, 'utf8').catch(() => '');
   const registered = await run('launchctl', ['print', `${domain}/${label}`]).then(() => true, () => false);
-  if (registered && previous !== plist) await run('launchctl', ['bootout', `${domain}/${label}`]);
+  if (!registered && await fetch(`http://${host}:${port}/api/project`, {signal:AbortSignal.timeout(1500)}).then(r=>r.ok,()=>false)) {
+    console.warn('端口已有非托管服务；保留现有进程，不创建竞争监听。');
+    process.exit(0);
+  }
+  if (registered && previous !== plist) {
+    const url = `http://${host}:${port}`;
+    const reachable = await fetch(`${url}/api/project`, {signal:AbortSignal.timeout(1500)}).then(r=>r.ok,()=>false);
+    if (reachable && !await projectServiceIdle(url, projectRoot)) {
+      console.warn('IDE更新已就绪；当前服务仍有任务或无法确认空闲，保留运行，待下次打开时更新。');
+      process.exit(0);
+    }
+    await run('launchctl', ['bootout', `${domain}/${label}`]);
+    // The supervisor forwards SIGTERM, but the detached child can exit later.
+    // Do not race a new server against the old listener on the same port.
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline && await fetch(`${url}/api/project`, {signal:AbortSignal.timeout(500)}).then(r=>r.ok,()=>false)) {
+      await new Promise(resolve=>setTimeout(resolve,50));
+    }
+    // launchctl bootout may return before the job is fully unregistered.
+    // Bootstrap during that gap fails with EIO even when the plist is valid.
+    while (Date.now() < deadline && await run('launchctl', ['print', `${domain}/${label}`]).then(()=>true,()=>false)) {
+      await new Promise(resolve=>setTimeout(resolve,50));
+    }
+  }
   if (previous !== plist) {
     await mkdir(path.dirname(file), { recursive: true });
     await writeFile(file, plist, { mode: 0o600 });

@@ -87,8 +87,10 @@ try {
   });
 
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => typeof openCodexParallelDialog === 'function');
   if (await page.locator("#projectOverviewDialog[open]").count()) await page.click("#projectOverviewClose");
-  await page.click("#codexParallelBtn");
+  await page.evaluate(() => localStorage.setItem(`task-tree:codex-parallel:${location.origin}${location.pathname}`, 'run-12345678'));
+  await page.evaluate(() => openCodexParallelDialog());
   await page.waitForSelector("#codexParallelDialog[open]");
   await page.waitForFunction(() => document.querySelectorAll("#codexParallelRows tr").length === 7);
 

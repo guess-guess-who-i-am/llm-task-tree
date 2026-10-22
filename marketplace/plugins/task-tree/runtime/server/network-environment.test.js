@@ -1,6 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { localNetworkEnvironment } from './network-environment.js';
+import { localNetworkEnvironment, configureNetworkRuntime } from './network-environment.js';
+
+test('remote runtime disables premature address racing without changing local defaults or explicit policy', () => {
+  const calls = [];
+  const network = { setDefaultAutoSelectFamily: value => calls.push(value) };
+  configureNetworkRuntime({ environment: {}, network });
+  assert.deepEqual(calls, []);
+  configureNetworkRuntime({ environment: { TASK_TREE_REMOTE_HOST: 'server' }, network });
+  assert.deepEqual(calls, [false]);
+  configureNetworkRuntime({ environment: { TASK_TREE_REMOTE_HOST: 'server', TASK_TREE_NETWORK_AUTOSELECT_FAMILY: 'true' }, network });
+  assert.deepEqual(calls, [false, true]);
+});
 
 test('Finder startup uses macOS proxy and keeps local task-tree HTTP outside it', async () => {
   const env=await localNetworkEnvironment({NO_PROXY:'example.local'}, {platform:'darwin',readProxy:async()=>'<dictionary> {\n HTTPEnable : 1\n HTTPProxy : 127.0.0.1\n HTTPPort : 7890\n HTTPSEnable : 1\n HTTPSProxy : 127.0.0.1\n HTTPSPort : 7890\n}'});

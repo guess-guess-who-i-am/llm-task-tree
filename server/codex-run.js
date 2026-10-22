@@ -37,8 +37,6 @@ const PIN_FILE = ".task-tree-thread";
  * the tool's text, never the `McpToolCall` event that carries `mcp_app_resource_uri`.
  */
 
-/** Long enough for a slow first model response; the child is killed either way so nothing leaks. */
-const TURN_TIMEOUT_MS = 10 * 60 * 1000;
 /** Failing to even accept the turn should surface fast instead of hanging the button. */
 const ACCEPT_TIMEOUT_MS = 60 * 1000;
 
@@ -313,8 +311,6 @@ async function startCodexTurnViaAppServer({
   developerInstructions = null,
   environment = null,
   waitForCompletion = false,
-  completionTimeoutMs = TURN_TIMEOUT_MS,
-  totalTimeoutMs = null,
   forceNewThread = false,
   onUsage = null,
   onContextCompaction = null,
@@ -331,10 +327,7 @@ async function startCodexTurnViaAppServer({
     try { return await operation(); } finally { timing[`${name}Ms`] = Date.now() - phaseStarted; }
   };
   const waitFor = (promise, timeoutMs, label) => {
-    const remaining = Number.isFinite(totalTimeoutMs) && totalTimeoutMs > 0
-      ? Math.max(1, totalTimeoutMs - (Date.now() - startedAt))
-      : timeoutMs;
-    return withTimeout(promise, Math.min(timeoutMs, remaining), label);
+    return withTimeout(promise, timeoutMs, label);
   };
 
   try {
@@ -479,7 +472,7 @@ async function startCodexTurnViaAppServer({
     }
 
     if (waitForCompletion) {
-      const turn = await phase("completion", () => waitFor(completed, completionTimeoutMs, "等待 Codex 完成"));
+      const turn = await phase("completion", () => completed);
       const messages = (turn?.items || [])
         .filter((item) => item?.type === "agentMessage" && typeof item.text === "string")
         .map((item) => item.text.trim())
@@ -512,8 +505,7 @@ async function startCodexTurnViaAppServer({
       };
     }
 
-    // Nothing awaits the rest of the turn; this only guarantees the child is reaped.
-    setTimeout(() => session.close(), TURN_TIMEOUT_MS).unref?.();
+    // The completion notification reaps the child; task age never closes it.
 
     timing.totalMs = Date.now() - startedAt;
     return { threadId, turnId: accepted?.turn?.id || null, resumed, forked, tokenUsage: lastTokenUsage, contextCompactions, timing };

@@ -144,6 +144,12 @@ try {
       remote++; attempted.push(route.request().url()); return route.abort();
     });
     await page.exposeFunction('fixtureBridge', async (_name, args) => {
+      if (args.path === '/api/codex/parallel/widget-agent-fixture') {
+        return { content: [{ type: 'text', text: JSON.stringify({ status: 200, body: JSON.stringify({ run: {
+          status: 'completed', jobs: [{ taskId: 'worker-1', title: '嵌入式分支', status: 'completed',
+            instruction: '完整分支任务', liveOutput: '嵌入窗口也能查看 Agent 输出' }]
+        } }) }) }] };
+      }
       const response = await fetch(url + args.path, { method: args.method, ...(args.body ? { body: args.body } : {}) });
       return { content: [{ type: 'text', text: JSON.stringify({ status: response.status, body: await response.text(), contentType: response.headers.get('content-type') }) }] };
     });
@@ -156,6 +162,18 @@ try {
     }
     assert.equal(remote, 0, 'embedded widget must also work without external assets: ' + attempted.join(', '));
     assert.equal(await page.evaluate(() => typeof katex.renderToString), 'function');
+    await page.evaluate(() => {
+      const button = document.createElement('button');
+      button.dataset.agentRun = 'widget-agent-fixture';
+      button.dataset.agentTask = 'worker-1';
+      document.body.append(button);
+      button.click();
+    });
+    await page.locator('#parallelAgentDialog').waitFor({ state: 'visible', timeout: 3000 });
+    await page.waitForFunction(() => document.querySelector('#parallelAgentOutput')?.textContent.includes('嵌入窗口也能查看 Agent 输出'), null, { timeout: 3000 });
+    assert.equal(await page.locator('#parallelAgentTask').textContent(), '完整分支任务');
+    assert.equal(await page.locator('#parallelAgentInput').isDisabled(), true);
+    await page.locator('#parallelAgentClose').click();
     assert.deepEqual(errors, []);
   });
 } finally {

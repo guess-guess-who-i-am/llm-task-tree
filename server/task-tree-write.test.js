@@ -18,26 +18,36 @@ test('real IDE tool boundary rejects subtree-as-main and links correct subtree w
   let call, seen=[];
   const provider=http.createServer(async(req,res)=>{
     let raw='';for await(const c of req)raw+=c;const body=JSON.parse(raw);seen.push(body);
+    const text=body.messages.map(message=>typeof message.content==='string'?message.content:'').join('\n');
+    if(body.tool_choice==='required'&&body.tools?.some(tool=>tool.function.name==='task_tree_continue_single')){
+      res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({choices:[{message:{tool_calls:[{id:'fixture-mode',type:'function',function:{name:'task_tree_continue_single',arguments:JSON.stringify({reason:'定点工具边界验证，无独立交付分支',nextCheckpoint:'调用指定工具并核对真实回执'})}}]},finish_reason:'tool_calls'}]}));
+      return;
+    }
+    if(body.tools?.some(tool=>tool.function.name==='completion_review_submit')){
+      res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({choices:[{message:{content:null,tool_calls:[{id:'fixture-review',type:'function',function:{name:'completion_review_submit',arguments:JSON.stringify({verdict:'pass',reason:'隔离候选已核对',evidence:['工具回执与树文件一致']})}}]},finish_reason:'tool_calls'}]}));
+      return;
+    }
     const last=body.messages.at(-1);
-    const message=last.role==='tool' && !last.tool_call_id.startsWith('host-')?{content:'测试结束'}:{content:null,tool_calls:[{id:'fixture',type:'function',function:{name:call.name,arguments:JSON.stringify(call.args)}}]};
+    const message=last.role==='tool' && last.name===call.name?{content:'测试结束'}:{content:null,tool_calls:[{id:'fixture',type:'function',function:{name:call.name,arguments:JSON.stringify(call.args)}}]};
     res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({choices:[{message,finish_reason:message.tool_calls?'tool_calls':'stop'}]}));
   });
   await new Promise(r=>provider.listen(0,'127.0.0.1',r));
-  const child=spawn(process.execPath,[path.join(source,'server.js')],{cwd:source,env:{...process.env,CODEX_HOME:home,PORT:'0',TASK_TREE_PROJECT_ROOT:cwd,TASK_TREE_NO_OPEN:'1',MODEL_AGENT_MAIN_BASE_URL:`http://127.0.0.1:${provider.address().port}`,MODEL_AGENT_MAIN_API_KEY:'fixture',MODEL_AGENT_MAIN_MODEL:'fixture'},stdio:['ignore','pipe','pipe']});
+  const child=spawn(process.execPath,[path.join(source,'server.js')],{cwd:source,env:{...process.env,CODEX_HOME:home,PORT:'0',TASK_TREE_PROJECT_ROOT:cwd,TASK_TREE_NO_OPEN:'1',TASK_TREE_GLOBAL_ENV_FILE:path.join(cwd,'.env'),TASK_TREE_API_CONNECTIONS_FILE:path.join(cwd,'api-connections.json'),MODEL_AGENT_MAIN_BASE_URL:`http://127.0.0.1:${provider.address().port}`,MODEL_AGENT_MAIN_API_KEY:'fixture',MODEL_AGENT_MAIN_MODEL:'fixture'},stdio:['ignore','pipe','pipe']});
   t.after(async()=>{child.kill();await new Promise(r=>provider.close(r));});
   const url=await new Promise((resolve,reject)=>{
     let log='',stderr='';child.stderr.on('data',c=>stderr+=c);const timer=setTimeout(()=>reject(new Error('IDE startup timeout: '+stderr)),10000);
     child.stdout.on('data',c=>{log+=c;const m=log.match(/running at (http:\/\/127\.0\.0\.1:\d+)/);if(m){clearTimeout(timer);resolve(m[1]);}});
     child.once('error',reject);
   });
-  async function invoke(name,args,treeId='method'){
+  async function invoke(name,args,treeId='method',expectFailure=false){
     call={name,args};seen=[];
     const accepted=await(await fetch(url+'/api/codex/run',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({progress:true,nodeId:'N9',treeId,prompt:'边界回归验证',conversationId:crypto.randomUUID()})})).json();
     for(let i=0;i<300;i++){
       const {run}=await(await fetch(url+'/api/codex/run/'+accepted.id)).json();
       if(!['starting','running'].includes(run.status)){
+        if(expectFailure && run.status==='failed') return {ok:false,error:run.error};
         assert.equal(run.status,'completed',run.error);
-        return JSON.parse(seen.find(b=>b.messages.at(-1)?.role==='tool' && !b.messages.at(-1).tool_call_id.startsWith('host-')).messages.at(-1).content);
+        return JSON.parse(seen.find(b=>b.messages.at(-1)?.role==='tool' && b.messages.at(-1).name===call.name).messages.at(-1).content);
       }
       await new Promise(r=>setTimeout(r,20));
     }
@@ -56,8 +66,9 @@ test('real IDE tool boundary rejects subtree-as-main and links correct subtree w
   assert.equal(await readFile(path.join(cwd,'task-tree.md'),'utf8'),main);
   const missing=await invoke('task_tree_write',{markdown:subtree.replace('# LLM Task Graph Subtree','# LLM Task Graph').replace('> Fold root: N9\n',''),reason:'缺少主树节点'});
   assert.equal(missing.ok,false);assert.match(missing.error,/ROOT|丢失|删除/);
-  const invisible=await invoke('task_tree_subtree',{action:'write',path:'subtrees/N9-subtree.md',markdown:subtree.replaceAll('N11','N9.1'),foldRoot:'N9',reason:'不受界面支持的ID'});
+  const invisible=await invoke('task_tree_subtree',{action:'write',path:'subtrees/N9-subtree.md',markdown:subtree.replaceAll('N11','N9.1'),foldRoot:'N9',reason:'不受界面支持的ID'},'method',true);
   assert.equal(invisible.ok,false,'a node that the actual UI cannot parse must not be saved');
+  await assert.rejects(readFile(path.join(cwd,'subtrees/N9-subtree.md'),'utf8'),{code:'ENOENT'});
   await writeFile(path.join(cwd,'task-tree.md'),main.replace('- NextPlan: 用户备忘','- NextPlan: 用户备忘\n- ChainForceNext: N9'));
   const saved=await invoke('task_tree_subtree',{action:'write',path:'subtrees/N9-subtree.md',markdown:subtree,foldRoot:'N9',reason:'展开身体'});
   assert.equal(saved.ok,true,JSON.stringify(saved));
@@ -74,19 +85,19 @@ test('real IDE tool boundary rejects subtree-as-main and links correct subtree w
   assert.equal(edgeNormalization.foldReceipt.retainedMainEdges[0].mainId,'E1');
   assert.match(await readFile(path.join(cwd,'subtrees/N9-subtree.md'),'utf8'),/## E2_N9 - 新内部关系/);
   assert.doesNotMatch(await readFile(path.join(cwd,'subtrees/N9-subtree.md'),'utf8'),/Endpoints: ROOT, N9/);
-  assert.equal(childPrepared.length,2);
+  assert.deepEqual(childPrepared.map(m=>m.name),['task_tree_node'],'host seed is the selected node; current tree map is a separate system section');
   assert.match(updated,/- ChainForceNext: N9/,'agent fold must preserve the pending user focus choice');
   assert.match(updated,/## ROOT - 生活目标/);assert.match(updated,/## N10 - 收入系统/);
   assert.match(updated,/- SubtreeFile: subtrees\/N9-subtree.md/);assert.match(updated,/- Folded: true/);
   assert.match(updated,/- NextPlan: 用户备忘/);
   const sub=await readFile(path.join(cwd,'subtrees/N9-subtree.md'),'utf8');assert.match(sub,/## N11 - 睡眠/);
-  const focused=await invoke('task_tree_focus',{nodeId:'N11'});assert.equal(focused.node.id,'N11');assert.equal(focused.node.fields.NextIdea.trim(),'记录三天睡眠时间。');
-  const childContext=seen[0].messages.find(m=>m.role==='tool'&&m.name==='task_tree_summary');
+  const focused=await invoke('task_tree_node',{nodeId:'N11'});assert.equal(focused.id,'N11');assert.equal(focused.fields.NextIdea.trim(),'记录三天睡眠时间。');
+  const childContext=seen[0].messages.find(m=>m.role==='system'&&m.content.includes('【当前任务树状态】'));
   assert.ok(childContext, 'host prepares a fresh map rather than an entire folded subtree');
   assert.doesNotMatch(childContext.content,/## N11 - 睡眠/,'folded descendants are opt-in, not automatically prepared');
   assert.ok(!seen[0].messages.some(m=>m.role==='tool'&&m.name==='task_tree_subtree'&&m.tool_call_id.startsWith('host-')));
   const childPatch=await invoke('task_tree_write',{nodeId:'N11',fields:{CurrentResult:'已记录第一天睡眠时间，尚未形成稳定习惯。'},reason:'子节点进展'});
-  assert.equal(childPatch.ok,true);assert.equal(childPatch.treePath,'subtrees/N9-subtree.md');
+  assert.equal(childPatch.ok,true,JSON.stringify(childPatch));assert.equal(childPatch.treePath,'subtrees/N9-subtree.md');
   assert.equal(await readFile(path.join(cwd,'task-tree.md'),'utf8'),updated);
   assert.match(await readFile(path.join(cwd,'subtrees/N9-subtree.md'),'utf8'),/已记录第一天睡眠时间/);
   const flow=await invoke('task_tree_flow_status',{});assert.equal(flow.ok,true);assert.equal(flow.available,false);

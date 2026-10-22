@@ -60,7 +60,8 @@ function edgeFacts(edge) {
 }
 
 /** A pure fold plan: host owns backups, index fields and atomic persistence. */
-export function planSubtreeFold(current,subtree,{rootId,previous=''}={}) {
+export function planSubtreeFold(current,subtree,{rootId,previous='',mode='fold'}={}) {
+  if(!['attach','fold'].includes(mode)) throw new Error('mode 必须为 attach 或 fold');
   const main=document(current), proposed=document(subtree), old=previous ? document(previous) : {nodes:[],edges:[]};
   const byId=new Map(main.nodes.map(n=>[n.id,n]));
   if(!rootId || !byId.has(rootId)) throw new Error(`主树中没有折叠根 ${rootId || '(empty)'}`);
@@ -70,7 +71,9 @@ export function planSubtreeFold(current,subtree,{rootId,previous=''}={}) {
     if(!doc.nodes.some(n=>n.id===rootId)) throw new Error(`子树缺少折叠根 ${rootId}`);
   }
   const nodeIds=new Set(byId.keys()), treeRoot=nodeIds.has('ROOT')?'ROOT':main.nodes[0]?.id;
-  const adjacency=globalThis.TaskTreeLayout.buildSpanningTreeAdjacency({nodeIds,edges:main.edges,rootId:treeRoot});
+  // Layout reachability is only the legacy fold selection. Attaching an
+  // independent document never infers ownership from graph relationships.
+  const adjacency=mode==='fold' ? globalThis.TaskTreeLayout.buildSpanningTreeAdjacency({nodeIds,edges:main.edges,rootId:treeRoot}) : new Map();
   const branch=new Set(), queue=[rootId];
   for(let i=0;i<queue.length;i++) {
     const id=queue[i]; if(branch.has(id)) continue;
@@ -136,7 +139,7 @@ export function planSubtreeFold(current,subtree,{rootId,previous=''}={}) {
   if(reached.size!==ids.size) throw new Error(`子树包含未连接到折叠根的节点：${[...ids].filter(id=>!reached.has(id)).join('、')}`);
   if(!/^>\s*Fold root:/m.test(proposed.prefix)) proposed.prefix=proposed.prefix.trimEnd()+`\n\n> Fold root: ${rootId}\n`;
   return {
-    markdown:render(main,main.nodes.filter(n=>!moved.has(n.id)),remainingEdges),
+    markdown:mode==='attach' ? current : render(main,main.nodes.filter(n=>!moved.has(n.id)),remainingEdges),
     subtreeMarkdown:render(proposed,[...nodes.values()],[...edges.values()]),
     movedNodeIds,renamedEdges,retainedMainEdges
   };

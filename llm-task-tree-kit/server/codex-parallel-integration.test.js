@@ -20,6 +20,74 @@ const within = (promise) => Promise.race([
   new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error("progress timed out")), 10000); timer.unref(); })
 ]);
 
+test('parallel final review supports deleting a migrated subtree without losing the delivered tree', {timeout:30000}, async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'parallel-tree-migration-'));
+  t.after(() => rm(root, {recursive:true,force:true}));
+  const markdown = '# LLM Task Graph\n## ROOT - 人物\n- Problem: 独立成树\n# GraphState\n- Current: ROOT\n- Next: ROOT\n# Edges\n';
+  await mkdir(path.join(root, 'subtrees'));
+  await writeFile(path.join(root, 'task-tree.md'), markdown);
+  await writeFile(path.join(root, 'subtrees/people-tree.md'), markdown);
+  let checks = 0;
+  const coordinator = createParallelCodexCoordinator({projectRoot:root,startTurn:async options => {
+    assert.equal(options.environment.TASK_TREE_QUALITY_MODE,'advisory','parallel Worker uses the IDE quality policy');
+    await mkdir(path.join(options.cwd, 'trees'), {recursive:true});
+    await writeFile(path.join(options.cwd, 'trees/people.md'), '# LLM Task Graph\n## PERSON - 人物树\n- CurrentResult: 已交付\n');
+    await writeFile(path.join(options.cwd, 'task-trees.json'), JSON.stringify({trees:[{id:'people',path:'trees/people.md'}]}));
+    await rm(path.join(options.cwd, 'subtrees/people-tree.md'));
+    return {status:'completed',output:'已迁移人物树'};
+  },reviewTurn:async options => {
+    assert.equal(options.environment.TASK_TREE_QUALITY_MODE,'advisory','parallel final checker inherits the same quality policy');
+    checks++;return {status:'completed',output:'{"verdict":"pass","reason":"已核对人物树迁移"}'};
+  }});
+  const run = await coordinator.start([{taskId:'migrate',nodeId:'ROOT',instruction:'迁移人物树'}], {nodeId:'ROOT',incremental:true,objective:'迁移人物树'});
+  const finished = await coordinator.wait(run.id);
+  assert.equal(finished.status, 'accepted', finished.error);
+  assert.equal(checks, 1);
+  assert.match(await readFile(path.join(root, 'trees/people.md'), 'utf8'), /已交付/);
+  await coordinator.drain();
+});
+
+test('adaptive plan applies an early worker and releases its dependent while a sibling is still running', { timeout: 30000 }, async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'incremental-pipeline-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(path.join(root, 'task-tree.md'), '# LLM Task Graph\n## ROOT - 流水执行\n- Problem: 逐项交付并释放依赖\n# GraphState\n- Current: ROOT\n- Next: ROOT\n# Edges\n');
+  const slow = deferred(), dependent = deferred();
+  let reviews=0;
+  t.after(() => slow.resolve());
+  const coordinator = createParallelCodexCoordinator({ projectRoot: root, startTurn: async options => {
+    const id = options.prompt.match(/^Task id: (.+)$/m)?.[1];
+    if (id === 'slow') await slow.promise;
+    if (id === 'dependent') {
+      assert.equal(await readFile(path.join(root, 'early.txt'), 'utf8'), 'early');
+      assert.equal(await readFile(path.join(options.cwd, 'early.txt'), 'utf8'), 'early');
+      await assert.rejects(readFile(path.join(root, 'slow.txt')), { code: 'ENOENT' });
+      dependent.resolve();
+    }
+    await writeFile(path.join(options.cwd, `${id}.txt`), id);
+    return { status: 'completed', output: `${id} 实际已完成`, threadId: `deepseek-${id}` };
+  }, reviewTurn: async options => {
+    reviews++;
+    assert.match(options.prompt, /用户目标：三项交付/);
+    // Acceptance checks the actual integrated workspace, not a redundant list
+    // of filenames in a prompt whose evidence is available through tools.
+    for (const id of ['early', 'slow', 'dependent']) {
+      assert.equal(await readFile(path.join(options.cwd, `${id}.txt`), 'utf8'), id);
+    }
+    return { status: 'completed', output: '{"verdict":"pass","reason":"交付完整"}' };
+  } });
+  const run = await coordinator.start(['early', 'slow', 'dependent'].map(taskId => ({ taskId, nodeId: 'ROOT', instruction: `交付${taskId}`,
+    dependsOn: taskId === 'dependent' ? ['early'] : [] })), { nodeId: 'ROOT', incremental: true, objective: '三项交付' });
+  try {
+    await within(dependent.promise);
+    assert.equal((await coordinator.get(run.id)).jobs.find(j => j.taskId === 'early').status, 'completed');
+    slow.resolve();
+    const finished = await coordinator.wait(run.id);
+    assert.equal(finished.status, 'accepted', finished.error);
+    assert.equal(reviews,1,'only the final whole-node checker runs');
+    for (const id of ['early', 'slow', 'dependent']) assert.equal(await readFile(path.join(root, `${id}.txt`), 'utf8'), id);
+  } finally { slow.resolve(); await coordinator.drain(); }
+});
+
 test("real coordinator resolves shared-file and task-tree conflicts, appends immediately and auto-applies", { timeout: 30000 }, async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "parallel-integrated-"));
   const projectRoot = path.join(root, "project");

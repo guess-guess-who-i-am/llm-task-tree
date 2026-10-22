@@ -1,6 +1,17 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import * as net from 'node:net';
 const run = promisify(execFile);
+
+// On the SSH host the default 250 ms address race aborts healthy IPv4
+// connections before they finish. Keep the OS/DNS-selected address rather
+// than imposing a shorter connection deadline than the API's own deadline.
+// This restores the previous Node 18 behavior only for remote IDE processes.
+export function configureNetworkRuntime({ environment = process.env, network = net } = {}) {
+  const value = environment.TASK_TREE_NETWORK_AUTOSELECT_FAMILY;
+  if (value === 'true' || value === 'false') network.setDefaultAutoSelectFamily?.(value === 'true');
+  else if (environment.TASK_TREE_REMOTE_HOST) network.setDefaultAutoSelectFamily?.(false);
+}
 
 // Node's maintained proxy implementation is enabled at process startup. Respect explicit
 // environment configuration, and use the actual macOS system proxy for Finder launches.

@@ -15,6 +15,138 @@ const sub = '# LLM Task Graph Subtree\n> Fold root: N1\n## N1 - 身体底盘\n- 
 let root, child, browser, base, gateway;
 const attachmentModelRequests = [];
 let cancelledFixtureStreams = 0;
+test('agent guidance HTTP endpoint persists receipts, deduplicates and distinguishes invalid, missing and finished targets',async()=>{
+  const id='agent-guidance-contract';
+  const run={id,status:'running',jobs:[{taskId:'a',status:'running',instruction:'完成A'},{taskId:'done',status:'completed',instruction:'完成B'}],events:[]};
+  await mkdir(path.join(root,'.task-tree-runs'),{recursive:true});
+  const file=path.join(root,'.task-tree-runs',id+'.json');await writeFile(file,JSON.stringify(run));
+  const post=async(body,runId=id)=>{
+    const response=await fetch(`${base}/api/codex/parallel/${runId}/messages`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+    return {status:response.status,...await response.json()};
+  };
+  const body={taskId:'a',content:'补齐验收要求',clientMessageId:'request-1'};
+  const saved=await post(body);assert.equal(saved.status,202);assert.equal(saved.message.status,'queued');
+  assert.equal((await post(body)).message.id,saved.message.id);
+  assert.equal(JSON.parse(await readFile(file,'utf8')).userMessages.length,1);
+  assert.equal((await post({...body,taskId:'missing'})).code,'AGENT_NOT_FOUND');
+  assert.equal((await post({...body,taskId:'done',clientMessageId:'done'})).code,'AGENT_NOT_RUNNING');
+  assert.equal((await post({...body,content:' '})).status,400);
+  assert.equal((await post({...body,content:'改变请求'})).status,409);
+  assert.equal((await post(body,'missing-run')).code,'RUN_NOT_FOUND');
+});
+
+test('Agent workbench shows live workers and accepts scoped guidance without losing drafts or scroll position',async t=>{
+  const page=await pageFor(t);page.setDefaultTimeout(10000);
+  const run={id:'agents-fixture',status:'running',objective:'协作实现',jobs:[
+    {taskId:'a',title:'实现读取',instruction:'完整任务：实现读取与验证，保留所有验收要求。',status:'running',startedAt:new Date().toISOString(),completedTools:3,activity:{label:'正在调用 read_file'},liveOutput:Array.from({length:50},(_,i)=>`第 ${i} 行进展`).join('\n\n')},
+    {taskId:'b',title:'实现写入',instruction:'实现写入并协调接口。',status:'running',liveOutput:'B 继续工作，不等待用户。'}],userMessages:[],peerMessages:[{id:'peer',fromTaskId:'a',toTaskId:'b',question:'统一返回哪些字段？',response:'使用 id 和 status。'}]};
+  const posts=[];let hold;
+  await page.route(/\/api\/codex\/parallel\/agents-fixture(?:\?.*)?$/,route=>route.fulfill({json:{run}}));
+  await page.route(/\/api\/codex\/parallel\/agents-fixture\/jobs\/[^/?]+(?:\?.*)?$/,route=>{
+    const id=new URL(route.request().url()).pathname.split('/').at(-1);
+    return route.fulfill({json:{job:run.jobs.find(job=>job.taskId===id),userMessages:run.userMessages,peerMessages:run.peerMessages}});
+  });
+  await page.route('**/api/codex/parallel/agents-fixture/messages',async route=>{
+    const body=route.request().postDataJSON();posts.push(body);
+    if(posts.length===1){await new Promise(resolve=>{hold=resolve;});await route.abort('failed');return;}
+    const message={...body,id:'saved-message',status:'queued',createdAt:new Date().toISOString()};run.userMessages.push(message);
+    await route.fulfill({status:202,json:{message,run}});
+  });
+  // Exercise the actual table entry, and verify node dialogues expose the same run.
+  await page.evaluate(run=>{
+    renderParallelRun(run);document.getElementById('codexParallelDialog').showModal();
+    const markup=directRunParallelHtml({parallel:run});
+    if(!markup.includes('data-agent-run="agents-fixture"'))throw new Error('node entry missing');
+  },run);
+  await page.locator('[data-agent-task="a"]').click();
+  await page.waitForFunction(()=>document.querySelector('#parallelAgentOutput')?.textContent.includes('第 49 行'));
+  assert.match(await page.locator('#parallelAgentActivity').innerText(),/3 次工具调用/);
+  await page.locator('#parallelAgentContent summary').click();
+  assert.match(await page.locator('#parallelAgentTask').innerText(),/保留所有验收要求/);
+  await page.locator('#parallelAgentInput').fill('只指导 A，补齐校验');
+  await page.locator('[data-agent-select="b"]').click();
+  assert.equal(await page.locator('#parallelAgentInput').inputValue(),'');
+  await page.locator('#parallelAgentInput').fill('B 的草稿');
+  await page.locator('[data-agent-select="a"]').click();
+  assert.equal(await page.locator('#parallelAgentInput').inputValue(),'只指导 A，补齐校验');
+  await page.locator('#parallelAgentSend').click();
+  await page.waitForFunction(()=>document.querySelector('#parallelAgentSend').disabled);
+  await page.locator('[data-agent-select="b"]').click();
+  assert.equal(await page.locator('#parallelAgentInput').inputValue(),'B 的草稿');
+  for(let i=0;i<100&&!hold;i++)await new Promise(resolve=>setTimeout(resolve,10));
+  hold();
+  await page.locator('[data-agent-select="a"]').click();
+  await page.waitForFunction(()=>!document.querySelector('#parallelAgentSend').disabled);
+  assert.equal(await page.locator('#parallelAgentInput').inputValue(),'只指导 A，补齐校验');
+  await page.locator('#parallelAgentSend').click();
+  await page.waitForFunction(()=>document.querySelector('#parallelAgentMessages').textContent.includes('等待下一次模型请求送达'));
+  assert.equal(posts.length,2);assert.equal(posts[0].clientMessageId,posts[1].clientMessageId,'uncertain network retry reuses its message id');
+  assert.equal(posts[1].taskId,'a');
+  assert.equal(await page.locator('#parallelAgentInput').inputValue(),'');
+  assert.match(await page.locator('#parallelAgentMessages').innerText(),/统一返回哪些字段/);
+  run.userMessages[0].status='delivered';run.jobs[0].liveOutput+='\n\n新的进度';
+  await page.locator('#parallelAgentContent').evaluate(el=>{el.scrollTop=40;});
+  await page.waitForFunction(()=>document.querySelector('#parallelAgentOutput').textContent.includes('新的进度'));
+  assert.equal(await page.locator('#parallelAgentContent').evaluate(el=>el.scrollTop),40,'stream does not force scrolling');
+  assert.match(await page.locator('#parallelAgentMessages').innerText(),/已交给模型/);
+  await page.screenshot({path:path.join(source,'artifacts/agent-workbench-desktop.png')});
+  await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.locator('#parallelAgentDialog').evaluate(el=>el.scrollWidth<=el.clientWidth),true);
+  await page.screenshot({path:path.join(source,'artifacts/agent-workbench-mobile.png')});
+  run.jobs[0].status='completed';run.jobs[0].acceptingGuidance=false;
+  await page.waitForFunction(()=>document.querySelector('#parallelAgentInput').disabled);
+  assert.match(await page.locator('#parallelAgentHint').innerText(),/回到节点/);
+  await page.locator('#parallelAgentClose').click();
+  assert.equal(await page.locator('#codexParallelDialog').evaluate(el=>el.open),true,'closing workbench returns to its parent dialog');
+  assert.equal(posts.length,2,'viewing/switching/closing never starts tasks');
+});
+
+test('failed node turn resumes through an empty Send with history, while empty editing and duplicate clicks stay guarded', async t => {
+  const post = body => fetch(base + '/api/codex/run', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  await fetch(base + '/api/codex/conversation?treeId=method&nodeId=N2', { method: 'DELETE' });
+  const first = await (await post({ treeId: 'method', nodeId: 'N2', progress: true, prompt: '[DIALOGUE_FAILURE_FIXTURE] 先完成剩余工作' })).json();
+  for (let i = 0; i < 500; i++) {
+    const run = (await (await fetch(base + '/api/codex/run/' + first.id)).json()).run;
+    if (run.status === 'failed') break;
+    await new Promise(resolve => setTimeout(resolve, 30));
+  }
+  const failedRun = (await (await fetch(base + '/api/codex/run/' + first.id)).json()).run;
+  assert.equal(failedRun.status, 'failed', JSON.stringify({ phase: failedRun.phase, requests: attachmentModelRequests.length, events: failedRun.events?.slice(-3) }));
+  const page = await pageFor(t); page.setDefaultTimeout(10000);
+  await page.locator('#directRunReopenBtn').click();
+  await page.locator('#directRunConversationSelect').selectOption(first.id);
+  await page.locator('[data-direct-run-edit="0"]').click();
+  await page.locator('#directRunMessageInput').fill('');
+  let sends = 0; page.on('request', r => { if (new URL(r.url()).pathname === '/api/codex/run' && r.method() === 'POST') sends++; });
+  await page.locator('#directRunSendBtn').click();
+  assert.equal(sends, 0, 'blank historical edit must never be interpreted as continuation');
+  await page.locator('#directRunCancelEditBtn').click();
+  await page.locator('#directRunMessageInput').fill('');
+  const response = page.waitForResponse(r => new URL(r.url()).pathname === '/api/codex/run' && r.request().method() === 'POST');
+  await page.locator('#directRunSendBtn').dblclick();
+  const acceptedResponse = await response;
+  assert.equal(acceptedResponse.status(), 202);
+  const sent = acceptedResponse.request().postDataJSON();
+  assert.equal(sent.fresh, false); assert.equal(sent.nodeId, 'N2'); assert.match(sent.prompt, /继续.*未完成/);
+  await page.waitForFunction(() => document.querySelector('#directRunDialogStatus').textContent.includes('执行完成'));
+  assert.equal(sends, 1, 'double click submits one turn only');
+  const request = attachmentModelRequests.at(-1);
+  assert(request.messages.some(m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('[DIALOGUE_FAILURE_FIXTURE]')));
+  assert(request.messages.some(m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('继续')));
+  await page.locator('#directRunMessageInput').fill('按我的新要求继续');
+  const next = page.waitForResponse(r => new URL(r.url()).pathname === '/api/codex/run' && r.request().method() === 'POST');
+  await page.locator('#directRunSendBtn').click();
+  const nextResponse = await next;
+  assert.equal(nextResponse.request().postDataJSON().prompt, '按我的新要求继续');
+  const last = await nextResponse.json();
+  for (let i = 0; i < 200; i++) {
+    const run = (await (await fetch(base + '/api/codex/run/' + last.id)).json()).run;
+    if (run.status === 'completed') break;
+    await new Promise(resolve => setTimeout(resolve, 30));
+  }
+  assert.equal((await (await fetch(base + '/api/codex/run/' + last.id)).json()).run.status, 'completed');
+  assert.equal((await fetch(base + '/api/codex/conversation?treeId=method&nodeId=N2', { method: 'DELETE' })).status, 200);
+});
 test('node dialogue stops live output independently, edits and resends with attachments, and exports full desktop records', async t => {
   const post = (route, body) => fetch(base + route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const latest = async id => (await (await fetch(base + '/api/codex/run/' + id)).json()).run;
@@ -37,7 +169,7 @@ test('node dialogue stops live output independently, edits and resends with atta
   const page = await pageFor(t); page.setDefaultTimeout(15000);
   await page.locator('#directRunReopenBtn').click();
   await page.locator('#directRunConversationSelect').selectOption(first.id);
-  await page.waitForFunction(() => document.querySelector('[data-direct-run-output]')?.textContent.includes('停止前的部分中文输出'));
+  await page.waitForFunction(() => document.querySelector('[data-direct-run-disclosure="live-process"]')?.textContent.includes('停止前的部分中文输出'));
   assert.equal(await page.locator('[data-direct-run-edit="0"]').isDisabled(), true);
   assert.equal(await page.locator('#directRunSendBtn').isDisabled(), true);
   assert.equal((await post('/api/codex/run/' + first.id + '/stop', { treeId: 'reference', nodeId: 'N2' })).status, 404);
@@ -217,9 +349,71 @@ test('node next-step editors directly accept pasted images, dropped documents an
   const response = page.waitForResponse(r => new URL(r.url()).pathname === '/api/codex/run' && r.request().method() === 'POST');
   await page.locator('[data-focus-lens-action="run-agent"]').click(); await response;
   await page.waitForFunction(() => document.querySelector('#directRunDialogStatus').textContent.includes('执行完成'));
-  const request = attachmentModelRequests.at(-1);
+  const request = attachmentModelRequests.findLast(r => r.messages.some(m => Array.isArray(m.content) && m.content.filter(c => c.type === 'image_url').length === 2));
+  assert.ok(request, 'both images must reach the model before the execution-choice reply');
   assert.match(JSON.stringify(request), /DIRECT_EDITOR_DOCUMENT_|LOCAL_DOCUMENT_FULL_TEXT_END/);
   assert.ok(request.messages.some(m => Array.isArray(m.content) && m.content.filter(c => c.type === 'image_url').length === 2));
+});
+
+test('node execution waits for every in-flight material save and submits once with the saved contents', async t => {
+  const page = await pageFor(t); await enter(page); page.setDefaultTimeout(15000);
+  const query = '?treeId=method&nodeId=N1_A';
+  t.after(async () => {
+    await fetch(base + '/api/codex/conversation' + query, { method: 'DELETE' });
+    const { materials } = await (await fetch(base + '/api/node/materials' + query)).json();
+    for (const ref of materials) await fetch(base + '/api/node/materials' + query, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: ref.id }) });
+  });
+  const releases = [];
+  await page.route('**/api/chat/attachments?*', async route => {
+    await new Promise(resolve => releases.push(resolve)); await route.continue();
+  });
+  let sends = 0;
+  page.on('request', r => { if (new URL(r.url()).pathname === '/api/codex/run' && r.method() === 'POST') sends++; });
+  await page.locator('[data-node-id="N1_A"]').evaluate(el => {
+    for (const name of ['等待资料一.txt', '等待资料二.txt']) {
+      const data = new DataTransfer(); data.items.add(new File(['WAIT_MATERIAL_CONTENT_' + name], name, { type: 'text/plain' }));
+      el.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
+    }
+    const button = el.querySelector('[data-action="run-direct"]'); button.click(); button.click();
+  });
+  await page.waitForFunction(() => document.querySelector('#saveState').textContent.includes('保存'));
+  assert.equal(sends, 0, 'must not submit while uploads are pending');
+  while (releases.length < 2) await new Promise(resolve => setTimeout(resolve, 10));
+  releases[0]();
+  await page.waitForResponse(r => new URL(r.url()).pathname === '/api/node/materials' && r.request().method() === 'POST');
+  assert.equal(sends, 0, 'first saved file is not enough');
+  const accepted = page.waitForResponse(r => new URL(r.url()).pathname === '/api/codex/run' && r.request().method() === 'POST');
+  releases[1]();
+  assert.equal((await accepted).status(), 202, 'saving must automatically resume the original click');
+  await page.waitForFunction(() => document.querySelector('#directRunDialogStatus').textContent.includes('执行完成'));
+  assert.equal(sends, 1, 'duplicate clicks during saving create only one execution');
+  const input = JSON.stringify(attachmentModelRequests.at(-1).messages);
+  assert.match(input, /WAIT_MATERIAL_CONTENT_等待资料一/); assert.match(input, /WAIT_MATERIAL_CONTENT_等待资料二/);
+});
+
+test('failed material save reports failure instead of silently executing without the material', async t => {
+  const page = await pageFor(t); await enter(page);
+  let release;
+  await page.route('**/api/chat/attachments?*', async route => {
+    await new Promise(resolve => release = resolve);
+    await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'fixture material save failed' }) });
+  });
+  let sends = 0;
+  page.on('request', r => { if (new URL(r.url()).pathname === '/api/codex/run' && r.method() === 'POST') sends++; });
+  await page.evaluate(() => {
+    window.materialSaveNotices = [];
+    new MutationObserver(() => window.materialSaveNotices.push(document.querySelector('#saveState').textContent))
+      .observe(document.querySelector('#saveState'), { childList: true, characterData: true, subtree: true });
+  });
+  await page.locator('[data-node-id="N1_A"]').evaluate(el => {
+    const data = new DataTransfer(); data.items.add(new File(['not saved'], '保存失败.txt', { type: 'text/plain' }));
+    el.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
+    el.querySelector('[data-action="run-direct"]').click();
+  });
+  while (!release) await new Promise(resolve => setTimeout(resolve, 10));
+  release();
+  await page.waitForFunction(() => window.materialSaveNotices.some(text => text.includes('fixture material save failed')));
+  assert.equal(sends, 0);
 });
 
 test('local attachment import validates explicit paths and node scope without running a model', async t => {
@@ -384,7 +578,22 @@ before(async () => {
   ] }));
   gateway = http.createServer(async (req, res) => {
     let input = ''; for await (const chunk of req) input += chunk;
-    attachmentModelRequests.push(JSON.parse(input));
+    const body = JSON.parse(input);
+    if (body.tool_choice === 'required' && body.tools?.some(t => t.function.name === 'task_tree_continue_single')) {
+      attachmentModelRequests.push(body);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({choices:[{finish_reason:'tool_calls',message:{tool_calls:[{id:'mode-fixture',type:'function',function:{name:'task_tree_continue_single',arguments:JSON.stringify({reason:'只读资料与界面回归，无独立交付分支',nextCheckpoint:'接收资料并返回回答'})}}]}}]}));return;
+    }
+    if (body.messages.some(m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('【功能验收】'))) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({choices:[{finish_reason:'tool_calls',message:{tool_calls:[{id:'review-fixture',type:'function',function:{name:'completion_review_submit',arguments:JSON.stringify({verdict:'pass',reason:'夹具对话已交付',evidence:['夹具只读问答已核对']})}}]}}]}));
+      return;
+    }
+    attachmentModelRequests.push(body);
+    const currentUser = JSON.parse(input).messages.findLast(m => m.role === 'user');
+    if (currentUser?.content?.includes?.('[DIALOGUE_FAILURE_FIXTURE]')) {
+      res.writeHead(400, { 'content-type': 'application/json' }); res.end('{"error":{"message":"fixture model failure"}}'); return;
+    }
     if (input.includes('[DIALOGUE_CANCEL_FIXTURE]')) {
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       res.write('data: {"choices":[{"delta":{"content":"停止前的部分中文输出"}}]}\n\n');
@@ -398,6 +607,8 @@ before(async () => {
   await new Promise(resolve => gateway.listen(0, '127.0.0.1', resolve));
   child = spawn(process.execPath, [path.join(source, 'server.js')], { cwd: source,
     env: { ...process.env, CODEX_HOME: path.join(root, '.codex'), PORT: '0', TASK_TREE_PROJECT_ROOT: root, TASK_TREE_NO_OPEN: '1',
+      TASK_TREE_GLOBAL_ENV_FILE: path.join(root, '.env'), TASK_TREE_API_CONNECTIONS_FILE: path.join(root, 'api-connections.json'),
+      MODEL_AGENT_MAIN_FALLBACK_BASE_URLS: '', MODEL_AGENT_MAIN_FALLBACK_MODELS: '',
       MODEL_AGENT_MAIN_BASE_URL: `http://127.0.0.1:${gateway.address().port}`, MODEL_AGENT_MAIN_API_KEY: 'fixture', MODEL_AGENT_MAIN_MODEL: 'fixture' }, stdio: ['ignore', 'pipe', 'pipe'] });
   base = await new Promise((resolve, reject) => {
     let log = '', errors = '';
@@ -531,6 +742,28 @@ test('folded-root lens can enter the independent subtree and navigate its childr
   assert.equal(await page.locator('.focusLensNodeId').innerText(), 'N1_A');
 });
 
+test('subtree controls remain clickable in macro zoom and use the delegated handler', async t => {
+  const page = await pageFor(t);
+  t.after(async () => {
+    await writeFile(path.join(root, 'task-tree.md'), main);
+    await writeFile(path.join(root, 'subtrees/N1.md'), sub);
+  });
+  await page.evaluate(() => document.querySelector('.graphPane')?.classList.add('semanticZoomMacro'));
+  const card = page.locator('[data-node-id="N1"]');
+  const navigation = card.locator('.subtreeNavigation');
+  assert.equal(await navigation.locator('[data-action="toggle-fold"]').isVisible(), true);
+  assert.equal(await navigation.locator('[data-action="edit-subtree"]').isVisible(), true);
+  await navigation.locator('[data-action="edit-subtree"]').click();
+  await page.waitForSelector('[data-node-id="N1_A"]');
+  await page.locator('#workspaceBannerExitBtn').click();
+  await page.waitForSelector('[data-node-id="ROOT"]');
+  await page.evaluate(() => document.querySelector('.graphPane')?.classList.add('semanticZoomMacro'));
+  await page.locator('[data-node-id="N1"] .subtreeNavigation [data-action="toggle-fold"]').click();
+  await page.waitForSelector('[data-node-id="N1_A"]');
+  assert.equal(await page.locator('[data-node-id="N1"]').count(), 1);
+  assert.equal(await page.locator('#workspaceBanner').getAttribute('aria-busy'), 'false');
+});
+
 test('compact subtree navigation stays in the existing header on desktop and mobile', async t => {
   for (const width of [1440, 390]) {
     const page = await pageFor(t, width);
@@ -623,6 +856,22 @@ test('navigation remains usable without native view transitions', async t => {
   assert.deepEqual(await page.evaluate(() => window.workspaceFallbackDurations), [200, 200]);
 });
 
+test('missing subtree names the absent file and remains retryable after it is restored', async t => {
+  const page = await pageFor(t);
+  t.after(() => writeFile(path.join(root, 'subtrees/N1.md'), sub));
+  await rm(path.join(root, 'subtrees/N1.md'));
+  await page.locator('#workspaceBannerEnterBtn').click();
+  await page.waitForFunction(() => document.querySelector('#saveState')?.textContent.includes('子树文件不存在：subtrees/N1.md'));
+  assert.equal(await page.locator('[data-node-id="ROOT"]').count(), 1);
+  assert.equal(await page.locator('#workspaceBannerEnterBtn').isEnabled(), true);
+  assert.equal(await page.locator('.graphPane').evaluate(el => el.inert), false);
+  await writeFile(path.join(root, 'subtrees/N1.md'), sub);
+  await page.locator('#workspaceBannerEnterBtn').click();
+  await page.waitForSelector('[data-node-id="N1_A"]');
+  await page.locator('#workspaceBannerExitBtn').click();
+  await page.waitForSelector('[data-node-id="ROOT"]');
+});
+
 test('failed subtree navigation stays on parent, unlocks controls and can be retried', async t => {
   const page = await pageFor(t);
   let requests = 0;
@@ -674,11 +923,14 @@ test('reload remains in the subtree, with layout, full editing and independent-w
   await enter(page);
   const parent = await readFile(path.join(root, 'task-tree.md'), 'utf8');
   assert.match(await page.locator('#workspaceBannerOpenBtn').getAttribute('href'), /subtree=subtrees%2FN1.md/);
+  // Reload moved into the toolbar's disclosure menu; exercise the visible UI.
+  await page.locator('#topbarMoreBtn').click();
   await page.locator('#reloadBtn').click();
   await page.waitForLoadState('domcontentloaded');
   await page.waitForFunction(() => !document.querySelector('#saveState')?.textContent.includes('加载中'));
   assert.equal(await page.locator('[data-node-id="ROOT"]').count(), 0, 'reload must not insert parent nodes into child workspace');
   assert.equal(await page.locator('[data-node-id="N1_A"]').count(), 1);
+  await page.locator('#topbarMoreBtn').click();
   await page.locator('#layoutTreeBtn').click();
   await page.locator('#fitViewBtn').click();
   await page.locator('[data-node-id="N1_A"] [data-action="set-next"]').dispatchEvent('click');
@@ -756,7 +1008,7 @@ test('lens has a compact top-right direct-single-node icon on main, subtree and 
     assert.equal(await button.count(), 1);
     assert.equal(await button.isVisible(), true);
     assert.equal(await button.innerText(), '▶');
-    assert.equal(await button.getAttribute('aria-label'), '直接执行此节点');
+    assert.equal(await button.getAttribute('aria-label'), '执行此节点');
     assert.equal(await button.evaluate(el => el.closest('details') === null), true, 'must not be hidden in a menu');
     const bounds = await button.boundingBox();
     assert.ok(bounds.height <= 28 && bounds.width <= 28 && bounds.height >= 23);

@@ -136,7 +136,10 @@ async function verifyViewport(page, screenshotName, nodeId, { automaticZoom = tr
   await page.locator(".focusLensActionsMenu > summary").click();
   await page.locator("[data-focus-lens-action='set-next']").click();
   await page.locator("[data-focus-lens-action='run-agent']").click();
-  assert.deepEqual(await codexRequest, { preset: "next" }, "lens run must use the saved Next node preset");
+  const request = await codexRequest;
+  assert.equal(request.nodeId, finalId, "lens run must execute the currently viewed node");
+  assert.equal(request.progress, true);
+  assert.equal(request.preset, undefined, "must not dispatch a global Next preset");
 }
 
 const browser = await chromium.launch({ headless: true, executablePath: browserExecutable });

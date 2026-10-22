@@ -1,10 +1,24 @@
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync, readdirSync, mkdirSync, writeFileSync, renameSync } from "node:fs";
+import os from 'node:os';
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
+import { promisify } from 'node:util';
+import { createHash } from 'node:crypto';
 import { localNetworkEnvironment } from './network-environment.js';
 
 const HOST = "127.0.0.1";
 const START_TIMEOUT_MS = 20000;
+const exec = promisify(execFile);
+
+async function refreshManagedProject(root, runtime, port) {
+  if (process.platform !== 'darwin' || !existsSync(path.join(runtime.kitDir, 'scripts/project-service-macos.mjs'))) return;
+  const label = 'local.task-tree.project-' + createHash('sha256').update(root).digest('hex').slice(0, 16);
+  // Never install a competing managed process over an unmanaged listener.
+  if (!await exec('launchctl', ['print', `gui/${process.getuid()}/${label}`]).then(()=>true,()=>false)) return;
+  await exec(process.execPath, [path.join(runtime.kitDir, 'scripts/project-service-macos.mjs'), 'start',
+    runtime.stubDir, root, String(port), HOST,
+    process.env.TASK_TREE_GLOBAL_ENV_FILE || path.resolve(runtime.kitDir, '..', '..', '.env')]);
+}
 
 // macOS exposes /var as a symlink to /private/var. Keep the path spelling that the
 // caller supplied for UI/config output, but use the physical path for identity and
@@ -23,7 +37,7 @@ function canonicalKey(value) {
  * others instead of making people hunt for each project's launcher.
  */
 export function registryFile(env = process.env) {
-  const base = env.LOCALAPPDATA || env.APPDATA || env.HOME || "";
+  const base = env.LOCALAPPDATA || env.APPDATA || env.HOME || os.homedir();
   return path.join(base, "LLMTaskTree", "projects.json");
 }
 
@@ -41,14 +55,22 @@ export function stablePortFor(projectRoot) {
 
 /** The registry is written by PowerShell, so it can carry a BOM and either shape. */
 export function readRegistry(file) {
-  if (!file || !existsSync(file)) return [];
-  try {
+  if (!file) return [];
+  const roots = [];
+  if (existsSync(file)) try {
     const parsed = JSON.parse(readFileSync(file, "utf8").replace(/^\uFEFF/, ""));
     const list = Array.isArray(parsed) ? parsed : parsed?.projects;
-    return Array.isArray(list) ? list.map((entry) => String(entry?.root || entry || "")).filter(Boolean) : [];
-  } catch {
-    return [];
+    if (Array.isArray(list)) roots.push(...list.map(entry=>String(entry?.root || entry || '')).filter(Boolean));
+  } catch { /* Read per-project records even when the legacy manifest is bad. */ }
+  const records = path.join(path.dirname(file),'projects');
+  for (const entry of directoryEntries(records)) {
+    if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+    try {
+      const record=JSON.parse(readFileSync(path.join(records,entry.name),'utf8'));
+      if(typeof record.root === 'string' && record.root)roots.push(record.root);
+    } catch { /* A stale/unreadable record does not hide other projects. */ }
   }
+  return roots;
 }
 
 /** A registry entry is only useful if the folder still exists and still holds a tree. */
@@ -74,10 +96,78 @@ function touchedAt(file) {
  * Dropping entries whose folder is gone is what quietly clears the mojibake ghosts an older
  * PowerShell console left in the registry — they point at paths that never existed.
  */
-export function describeProjects({ file = registryFile(), currentRoot = "" } = {}) {
+function directoryEntries(dir) {
+  try { return readdirSync(dir,{withFileTypes:true}); } catch { return []; }
+}
+
+function temporaryProject(root) {
+  const full = canonicalKey(root), temporary = canonicalKey(os.tmpdir());
+  return full === temporary || full.startsWith(temporary + '/');
+}
+
+// Durable benchmark fixtures are not necessarily under os.tmpdir(). Their
+// explicit marker (on the project or its container) survives restarts and works
+// across shared runtime copies. Do not guess from user project/folder names.
+function internalProject(root) {
+  for (const start of new Set([path.resolve(root),canonicalPath(root)])) {
+    let dir = start;
+    for (;;) {
+      if (existsSync(path.join(dir,'.task-tree-internal-project'))) return true;
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  return false;
+}
+
+export function registerProject(root, {file = registryFile()} = {}) {
+  if (!projectTreeFile(root) || temporaryProject(root) || internalProject(root)) return;
+  // Each project owns one record, so simultaneous server starts never replace
+  // one another's manifest. Keep reading the old Windows installer manifest.
+  const records=path.join(path.dirname(file),'projects');
+  const target=path.join(records,createHash('sha256').update(canonicalKey(root)).digest('hex')+'.json');
+  if(existsSync(target))return;
+  mkdirSync(records,{recursive:true});
+  const pending = `${target}.${process.pid}.tmp`;
+  writeFileSync(pending,JSON.stringify({root:path.resolve(root)})+'\n','utf8');
+  renameSync(pending,target);
+}
+
+/** Installed macOS services predate the cross-platform recent-project registry.
+ * Inspect only our own service records and bounded common workspace folders;
+ * never crawl project contents, Git worktrees or the whole disk. */
+function discoveredProjects({homeDir,searchRoots}) {
+  const roots = [];
+  const services = path.join(homeDir,'Library/LaunchAgents');
+  const decode = text => text.replace(/&(amp|lt|gt|quot|apos);/g,(_,key)=>({amp:'&',lt:'<',gt:'>',quot:'"',apos:"'"})[key]);
+  for (const entry of directoryEntries(services)) {
+    if (!entry.isFile() || !/^local\.task-tree\.project-.*\.plist$/.test(entry.name)) continue;
+    try {
+      const xml = readFileSync(path.join(services,entry.name),'utf8');
+      const root = xml.match(/<key>WorkingDirectory<\/key>\s*<string>([^<]+)<\/string>/)?.[1];
+      if (root) roots.push(decode(root));
+    } catch { /* Removed service record: try the remaining records. */ }
+  }
+  for (const folder of searchRoots) {
+    if (!folder) continue;
+    if (projectTreeFile(folder)) roots.push(folder);
+    for (const entry of directoryEntries(folder)) {
+      if (entry.name.startsWith('.') || ['node_modules','versions','llm-task-tree-kit','marketplace'].includes(entry.name)) continue;
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+      const root = path.join(folder,entry.name);
+      if (projectTreeFile(root)) roots.push(root);
+    }
+  }
+  return roots.filter(root => !temporaryProject(root) || canonicalKey(root).startsWith(canonicalKey(homeDir) + '/'));
+}
+
+export function describeProjects({ file = registryFile(), currentRoot = "", homeDir = os.homedir(),
+  searchRoots = [path.join(homeDir,'Desktop'),path.join(homeDir,'Documents'),...(currentRoot ? [path.dirname(currentRoot)] : [])] } = {}) {
   const seen = new Set();
   const projects = [];
-  const roots = [...readRegistry(file)];
+  const currentKey = currentRoot ? canonicalKey(currentRoot) : '';
+  const roots = [...readRegistry(file),...discoveredProjects({homeDir,searchRoots})];
   if (currentRoot) roots.unshift(currentRoot);
 
   for (const raw of roots) {
@@ -93,11 +183,14 @@ export function describeProjects({ file = registryFile(), currentRoot = "" } = {
     if (!existsSync(root)) continue;
     const treeFile = projectTreeFile(root);
     if (!treeFile) continue;
+    // Apply to every source, including legacy registry records and launchd
+    // discovery. An explicitly opened internal project remains usable locally.
+    if (key !== currentKey && internalProject(root)) continue;
     projects.push({
       root,
       name: path.basename(root),
       port: stablePortFor(root),
-      current: currentRoot ? key === canonicalKey(currentRoot) : false,
+      current: key === currentKey,
       touchedAt: touchedAt(treeFile)
     });
   }
@@ -153,6 +246,7 @@ export async function ensureProjectServer(root, {
   fallbackKitDir = "",
   spawnImpl = spawn,
   fetchImpl = fetch,
+  refreshImpl = refreshManagedProject,
   timeoutMs = START_TIMEOUT_MS,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 } = {}) {
@@ -160,11 +254,25 @@ export async function ensureProjectServer(root, {
   if (!existsSync(resolved)) throw new Error(`项目目录不在了：${resolved}`);
   if (!projectTreeFile(resolved)) throw new Error(`这个目录里没有任务树：${resolved}`);
 
-  const port = stablePortFor(resolved);
+  const preferredPort = stablePortFor(resolved);
+  let port = preferredPort;
+  try {
+    const marker = Number(readFileSync(path.join(resolved, '.task-tree-port'), 'utf8').trim());
+    if (Number.isInteger(marker) && marker > 0 && marker <= 65535
+      && await probeProject(resolved, marker, {fetchImpl})) port = marker;
+  } catch { /* An absent/stale marker cannot select another project's listener. */ }
   const url = `http://${HOST}:${port}`;
-  if (await probeProject(resolved, port, { fetchImpl })) return { url, port, started: false };
-
   const runtime = resolveRuntime(resolved, fallbackKitDir);
+  if (await probeProject(resolved, port, { fetchImpl })) {
+    if (runtime) await refreshImpl(resolved, runtime, port);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (await probeProject(resolved, port, {fetchImpl})) return {url, port, started:false};
+      await sleep(100);
+    }
+    throw new Error(`项目服务更新后没有恢复：${resolved}`);
+  }
+
   if (!runtime) throw new Error(`找不到能跑这个项目的 server.js：${resolved}`);
 
   const child = spawnImpl(process.execPath, ["server.js"], {

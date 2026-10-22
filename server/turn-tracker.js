@@ -10,8 +10,10 @@ function looksLikeProjectRoot(dir) {
     || (existsSync(path.join(dir, "AGENTS.md")) && existsSync(path.join(dir, "server.js")));
 }
 
-export function locateProjectRoot({ cwd = process.cwd(), fallbackDir = "" } = {}) {
-  const starts = [process.env.TASK_TREE_PROJECT_ROOT, cwd, process.cwd(), fallbackDir].filter(Boolean);
+export function locateProjectRoot({ cwd, fallbackDir = "" } = {}) {
+  // An explicit candidate/worktree is the consumer's authority. The inherited
+  // owner root supplies defaults only; it must not redirect candidate checks.
+  const starts = [cwd, process.env.TASK_TREE_PROJECT_ROOT, process.cwd(), fallbackDir].filter(Boolean);
   for (const start of starts) {
     let current = path.resolve(start);
     while (true) {

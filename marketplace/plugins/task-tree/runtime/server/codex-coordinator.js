@@ -11,23 +11,46 @@ import { nodeMaterialContext, branchMaterialNodeIds } from './node-materials.js'
 import { loadTreeRegistry } from './tree-registry.js';
 import { buildTreeSummary, readTreeSummary, TREE_CONTEXT_TOOLS, treeContextHandler, buildRunOutcomeSummary } from './tree-context.js';
 import { materializeParallelBranches, readParallelSource, recordParallelBranchResults } from './parallel-branch-tree.js';
+import { assertWorkspaceTreeFiles } from './tree-write-safety.js';
+import { createDirectNodeWorkspace } from './direct-node-workspace.js';
+import { createPeerMailbox, PEER_EXCHANGE_TOOL } from './peer-mailbox.js';
+import { recordAgentActivity } from './agent-activity.js';
+import { buildCompletionReviewPrompt, parseCompletionReview, completionReviewFailure, completionReviewInterruption, WORKER_RESULT_SCHEMA } from './node-completion-review.js';
+import {executionErrorDetails} from './execution-error.js';
+import {WORKER_SPLIT_TOOL} from './adaptive-node-execution.js';
+import {validateReviewScopeFiles} from './review-input-watch.js';
+import {JOB_DELIVERY_PROPERTIES,normalizeDeliveryContract,snapshotDeliverables,inspectDeliverables,recoveryDecision,coordinationEvidence,stageCoordinationEvidence} from './execution-coordination.js';
 
 // Planner context is supplied explicitly in the prompt. Reusing an ever-growing
-// conversation made the first response increasingly slow. Keep the turn short
-// and fail fast so a wedged app-server request cannot block the whole run.
-const PLANNER_TIMEOUT_MS = Math.max(30_000, Number(process.env.TASK_TREE_PLANNER_TIMEOUT_MS) || 90_000);
+// conversation made the first response increasingly slow. Keep context concise;
+// API liveness is enforced per request, never by an overall planning deadline.
 // Keep planning on the same high-quality model requested for implementation. Planning
 // still uses a separate effort because a small structured decomposition does not need
 // the xhigh setting that previously exhausted the whole completion timeout.
-const PLANNER_MODEL = String(process.env.TASK_TREE_PLANNER_MODEL || "deepseek-v4.1-flash").trim();
+const PLANNER_MODEL = String(process.env.TASK_TREE_PLANNER_MODEL || "gpt-6.1-sol").trim();
 const PLANNER_REASONING_EFFORT = String(process.env.TASK_TREE_PLANNER_REASONING_EFFORT || "low").trim();
-const ABANDONED_PLANNING_MS = PLANNER_TIMEOUT_MS + 5 * 1000;
 const WORKER_HANDOFF_PATH = ".task-tree-context/handoff.json";
 const CONTEXT_POLICIES = new Set(["reuse", "new", "selected"]);
+export const MAX_DYNAMIC_SPLIT_DEPTH = 1;
+
+export function canWorkerSplit(job, jobs = []) {
+  const byId = new Map(jobs.map((item) => [item.taskId, item]));
+  let depth = 0;
+  let parentTaskId = job?.parentTaskId || "";
+  const seen = new Set();
+  while (parentTaskId && !seen.has(parentTaskId)) {
+    seen.add(parentTaskId);
+    const parent = byId.get(parentTaskId);
+    if (!parent) break;
+    depth += 1;
+    parentTaskId = parent.parentTaskId || "";
+  }
+  return depth < MAX_DYNAMIC_SPLIT_DEPTH;
+}
 
 function assertTurnCompleted(result) {
   if (result.status && result.status !== 'completed') {
-    const error = new Error(result.error?.message || `模型执行${result.status === 'stopped' ? '已停止' : '失败'}：${result.status}`);
+    const error = Object.assign(new Error(result.error?.message || `模型执行${result.status === 'stopped' ? '已停止' : '失败'}：${result.status}`, {cause:result.error}), executionErrorDetails(result.error));
     error.threadId = result.threadId;
     throw error;
   }
@@ -41,30 +64,36 @@ async function deepSeekPlannerConfig(projectRoot) {
   }
 }
 
-export async function requestDeepSeekPlanner({ projectRoot, prompt, outputSchema, onNotification, contextMessages = [], sourceTree }) {
+export async function requestDeepSeekPlanner({ projectRoot, prompt, outputSchema, onNotification, contextMessages = [], historyMessages = [], dialogueContext = historyMessages, sourceTree }) {
   const config = await deepSeekPlannerConfig(projectRoot);
   if (!config) return null;
   const startedAt = Date.now();
     const result = await startDeepSeekTurn({
       cwd: projectRoot, prompt, model: config.model, contextMessages,
+      ...(historyMessages.length ? { messages: [...historyMessages, { role: 'user', content: prompt }] } : {}),
+      ...(dialogueContext.length ? { dialogueContext: [...dialogueContext, { role: 'user', content: prompt }] } : {}),
       environment: { MODEL_AGENT_MAIN_BASE_URL: config.baseUrl, MODEL_AGENT_MAIN_API_KEY: config.apiKey, MODEL_AGENT_MAIN_MODEL: config.model,
+        TASK_TREE_QUALITY_MODE: 'advisory',
         MODEL_AGENT_MAIN_FALLBACK_BASE_URLS: config.baseUrls.slice(1).join(','),
+        MODEL_AGENT_MAIN_FALLBACK_MODELS: config.fallbackModels.join(','),
+        MODEL_AGENT_MAIN_HEADERS_TIMEOUT_MS: String(config.headersTimeoutMs),
+        MODEL_AGENT_MAIN_STREAM_IDLE_TIMEOUT_MS: String(config.streamIdleTimeoutMs),
         ...(sourceTree ? { TASK_TREE_CONTEXT_TREE_FILE: sourceTree.path } : {}) },
       systemPrompt: '你是任务拆分器。遵守共享的全局规则、Hook 和适用技能。只规划，不执行工作或修改文件；最终只返回要求的 JSON。可读取必要的 Skill 和上下文。',
       runtimeToolNames: ['skills_list', 'skills_read', 'read_file', 'task_tree_focus', 'task_tree_node'],
       tools: TREE_CONTEXT_TOOLS, toolHandler: treeContextHandler(projectRoot, sourceTree),
-      responseFormat: { type: 'json_object' }, temperature: 0.1,
-      waitForCompletion: true, completionTimeoutMs: PLANNER_TIMEOUT_MS, onNotification
+      outputSchema, temperature: 0.1,
+      waitForCompletion: true, onNotification
     });
     assertTurnCompleted(result);
-    const output = String(result.messages?.at(-1)?.content || result.output || '').trim();
+    const output = String(result.structuredOutput || result.messages?.at(-1)?.content || result.output || '').trim();
     if (!output) throw new Error("DeepSeek 返回空计划");
     return {
       output,
       threadId: result.threadId,
       turnId: result.turnId,
       resumed: false,
-      timing: { ...result.timing, provider: "deepseek", model: config.model, completedMs: Date.now() - startedAt, outputChars: output.length },
+      timing: { ...result.timing, provider: "deepseek", model: result.timing?.model || config.model, completedMs: Date.now() - startedAt, outputChars: output.length },
       outputSchema
     };
 }
@@ -74,6 +103,8 @@ const PLANNER_OUTPUT_SCHEMA = {
   required: ["summary", "coverage", "jobs"],
   properties: {
     summary: { type: "string", minLength: 1 },
+    sharedContract: { type: 'string' },
+    acceptanceCriteria: JOB_DELIVERY_PROPERTIES.acceptanceCriteria,
     coverage: {
       type: "array",
       items: {
@@ -88,7 +119,7 @@ const PLANNER_OUTPUT_SCHEMA = {
     },
     jobs: {
       type: "array",
-      minItems: 2,
+      minItems: 1,
       items: {
         type: "object",
         additionalProperties: false,
@@ -98,6 +129,9 @@ const PLANNER_OUTPUT_SCHEMA = {
           nodeId: { type: "string", minLength: 1 },
           title: { type: "string", minLength: 1 },
           instruction: { type: "string", minLength: 1 },
+          workEstimate: { type: 'string' },
+          ...JOB_DELIVERY_PROPERTIES,
+          sharedContract: { type: 'string' },
           writeSet: { type: "array", items: { type: "string" } },
           dependsOn: { type: "array", items: { type: "string", minLength: 1 } }
         }
@@ -126,6 +160,16 @@ function cleanObjective(value) {
 
 function compactGoalText(value) {
   return String(value || "").trim();
+}
+
+export function compactWorkerOutput(value, parsed) {
+  if (parsed && typeof parsed === 'object') {
+    return JSON.stringify({
+      event: parsed.event,
+      evidence: String(parsed.evidence || '')
+    });
+  }
+  return String(value || '').trim();
 }
 
 function runtimeTree(run) {
@@ -452,6 +496,10 @@ export function validateParallelJobs(input, { minimum = 1, knownTaskIds = [], ex
       nodeId,
       title: humanizeTitle(job.title, conciseInstruction(instruction)),
       instruction,
+      ...normalizeDeliveryContract(job),
+      workEstimate: String(job.workEstimate || ''),
+      parentTaskId: String(job.parentTaskId || ''),
+      sharedContract: String(job.sharedContract || ''),
       branchContext: String(job.branchContext || ""),
       summary: conciseInstruction(job.summary || instruction),
       dependencyPrompt: compactGoalText(job.dependencyPrompt, 420),
@@ -697,13 +745,16 @@ export function buildPlannerPrompt(markdown, objective = "", history = [], treeS
   });
   return [
     "【Task Tree · Automatic Parallel Planner】",
-    "只做任务拆分，最终只输出一次完整 JSON；不要写测试命令。先使用所给摘要；只有需要更多信息时才调用只读工具。task_tree_read 可读完整主树，read_file 可读指定子树；折叠不等于丢失，勿无条件展开所有子树。",
+    "只做任务拆分，用 structured_result_submit 一次提交完整计划，JSON由宿主序列化；不要写测试命令。先使用所给摘要；只有需要更多信息时才调用只读工具。task_tree_read 可读完整主树，read_file 可读指定子树；折叠不等于丢失，勿无条件展开所有子树。",
     "覆盖：先把每个明确目标或验收条件写入 coverage，并映射到至少一个 taskId，不能漏项。",
-    "并行：最大化当前可运行前沿。每个能独立推进、上下文不同且有可观察结果的交付物单独成任务；真实强依赖才写 dependsOn。至少两个任务必须无依赖立即运行，不设 Worker 上限，也不制造重复或占位任务。",
-    "粒度：API、UI、文档等独立结果分开；六至八个独立结果就生成六至八个，十二或二十个也全部保留。看似单一的目标也必须拆成至少两个共同完成目标的实质分支。",
+    "并行：有两个以上分别需要分析、推导、实现或撰写的独立成果，默认主动并行；尽早发布共享接口并委派主要成果，最大化有用的就绪前沿。共享字段、术语或风格不等于强依赖，固定公共约定再委派；仅必须消费他支尚未产生的实际结果才写 dependsOn。能一次写完或规格具体不等于微小；只有短标签机械替换这类微小操作、确实不可拆的任务是单人例外。若只有一个不可再分的结果，保留一个任务；独立结果有多少就保留多少，不设 Worker 上限，不递归拆分微任务。",
+    "粒度：现有树是项目框架；本轮只丰富所选节点形成可验证交付物。每个任务有清楚输入、成果和负责节点；强耦合步骤放在同一个任务，低耦合结果分开。可跨文件，文件相同也不自动视为依赖。最终由 Worker 将真实成果写回自己的节点或必要子节点，逐步丰富整棵树。",
+    '负载均衡：除总体协调者外，以每个Agent约10–15分钟可交付的连贯成果为分工软目标，不是执行期限；不要把布局、画像、生成器、测试等多个模块全留给最长分支。同一份文档中需分别分析和论证的章节按统一提纲并行撰写；同一产物按模块或数据分片，约定输入输出后各自产出片段再组装。Worker在执行中继续拆分较大的独立剩余范围，不因估时超出而停止。',
     "冲突：writeSet 只是提示，可重叠，可包含 task-tree.md、项目元数据或明确要求的外部路径；最终合并处理真实冲突。",
     "边界：不要仅因任务图里存在相关节点就创建任务；只拆本轮目标直接需要的交付物。基线、测试、评审、文档只有在本轮明确要求它们成为交付物时才单独成 Worker。",
-    "字段：title 用简短中文；instruction 写完整可执行结果；dependsOn 只用 taskId。branchContext、依赖说明和验收说明由协调器补齐，Planner 不要生成。",
+    "字段：title 用简短中文；instruction 写完整可执行结果；dependsOn 只用 taskId。branchContext 和依赖说明由宿主补齐，不重复生成。为实际文件/树修改填写 deliverables（实际所属路径、update/present/delete，树再给nodeIds）和 acceptanceCriteria（可观察的业务完成依据）；只读论证不强造文件。宿主核对落盘，独立检查Agent判定语义质量。coverage只是目标分工映射，不是已完成证据。",
+    '接口与工作量：有跨分支接口时，在 sharedContract 一次约定调用形状、字段、失败语义、接口负责人；协调器把相同原文发给全部 Worker。instruction 明确输入、成果、边界、完成依据和回写节点。workEstimate 写相对工作量及理由，按工作量与耦合分组，合并多个小操作，复杂独立交付单列；不按文件数平均，不保证精确耗时。',
+    'one-shot 示例：最终只交付一份 docs/guide.md，不等于只建一个任务。sharedContract="沿用既有API；片段均用##章标题；最终检查在同一会话按接口章、运维章顺序组装为docs/guide.md"；接口章 instruction="分析兼容与错误边界，写api.md"、workEstimate="中：接口论证"；运维章 instruction="分析监控与回滚，写ops.md"、workEstimate="中：恢复论证"；二者无dependsOn，全部正文并行产出，片段不是最终交付。示例路径和约定须换为本轮实际值。',
     "当前相关任务图上下文：",
     JSON.stringify(context),
     '完整主树地图（摘要，不含折叠后代；可按需读取主树原文）：',
@@ -712,7 +763,7 @@ export function buildPlannerPrompt(markdown, objective = "", history = [], treeS
     formatGoalHistory(history),
     "",
     "严格按此形状返回 JSON：",
-    '{"summary":"覆盖和拆分理由","coverage":[{"goal":"目标或验收条件","taskIds":["short-id"]}],"jobs":[{"taskId":"short-id","nodeId":"N2","title":"中文结果名","instruction":"完整可执行结果","writeSet":["public/**"],"dependsOn":[]}]}'
+    '{"summary":"覆盖和拆分理由","sharedContract":"本轮共享接口约定，无则省略","coverage":[{"goal":"目标或验收条件","taskIds":["short-id"]}],"jobs":[{"taskId":"short-id","nodeId":"N2","title":"中文结果名","instruction":"输入、交付物、接口职责、边界、完成依据和回写节点","workEstimate":"相对工作量及理由","deliverables":[{"path":"subtrees/N2.md","mode":"update","nodeIds":["N2"]}],"acceptanceCriteria":["节点用大白话说明业务输入输出，内容直接保存在节点内"],"writeSet":["subtrees/N2.md"],"dependsOn":[]}]}'
   ].join("\n");
 }
 
@@ -723,9 +774,9 @@ export function buildBranchInputContext(job, { markdown = '', goal = {}, history
     `当前阶段（${goal.stageNodeId || 'ROOT'}）：${goal.stage || '(未记录)'}`,
     `本轮目标：${goal.immediate || '(未记录)'}`,
     `本分支来源节点：${job.nodeId}`,
-    `本分支任务：${job.instruction}`,
     '主树地图摘要（由最新文件生成；不含折叠后代）：', JSON.stringify(treeSummary),
-    '最近运行结果摘要：', formatGoalHistory(history),
+    '最近运行索引（完整结果按需从共享运行元数据读取，不重复投入历史正文）：',
+    JSON.stringify(history.slice(-3).map(item=>({runId:item.runId,status:item.status,goal:item.immediate}))),
     '按需展开：task_tree_read 读完整主树；task_tree_node(nodeId) 读指定节点；task_tree_subtree(action=read,path) 读指定子树。整文件写入前先读取最新原文，字段补丁无需读全部。',
     job.branchContext && !job.branchContext.startsWith('【任务树分支上下文：摘要优先】') ? `调用方额外分支要求：\n${job.branchContext}` : ''
   ].join('\n');
@@ -745,14 +796,19 @@ function enrichPlannedJobs(jobs, { markdown = "", goal = {}, history = [], treeS
       dependencyPrompt: dependencyNames.length
         ? `等待 ${dependencyNames.join("、")} 完成并由协调器合入后开始；只使用已经合入的真实结果。`
         : "无前置任务，可立即开始。",
-      acceptancePrompt: `完成“${job.instruction}”；最终返回实际 changedFiles、affectedNodes 和可核验证据，未完成则返回 blocked。`
+      acceptancePrompt: '完成上述 Task；简短提交实际验证证据，未完成则返回 blocked。'
     };
   });
 }
 
 export function buildWorkerPrompt(job, handoffPath = "", peerJobs = []) {
+  // Restored runs may still contain the old generated copies of the full task.
+  const branchContext=String(job.branchContext||'(none)').replace(`本分支任务：${job.instruction}\n`,'');
+  const acceptance=String(job.acceptancePrompt||'state the solved problem, evidence, and remaining gap')
+    .replaceAll(String(job.instruction||'\u0000'),'上述 Task');
   const peerRoster = peerJobs
     .filter((peer) => peer?.taskId && peer.taskId !== job.taskId)
+    .filter((peer) => (peer.parentTaskId || "") === (job.parentTaskId || ""))
     .map((peer) => `${peer.taskId}（${peer.title || peer.nodeId}）${peer.threadId ? ` · ${threadDeepLink(peer.threadId)}` : " · 会话尚未建立"}`)
     .join("\n");
   return [
@@ -762,27 +818,37 @@ export function buildWorkerPrompt(job, handoffPath = "", peerJobs = []) {
     ...(job.subtreeFile ? [
       `Execution node: ${job.executionNodeId}`,
       `Branch subtree: ${job.subtreeFile}`,
-      '本轮执行目标是上述分支节点，不是全局 GraphState.Next。修改分支树时用 task_tree_subtree(action=write,path=上述路径,markdown=最新完整子树,reason=原因)，保留已有子节点。来源树仅作背景，不要把不同分支的结果都写到同一个来源节点。'
+      `本轮按分配任务执行，不执行全局 GraphState.Next。分支子树已经建立，上述分支节点用于执行汇报，汇报不能替代业务交付；Task或交付合同要求改业务树时，修改隔离工作区中实际所属树文件和节点，不能只改汇报节点。完成后用 task_tree_write(nodeId=${job.executionNodeId},fields=需要更新的字段,reason=原因) 简要回写实际结果，不整份覆盖子树。多个分支可修改来源树，真实冲突由Git合并处理。`
     ] : []),
     `Task: ${job.instruction}`,
+    ...(job.deliverables?.length ? [`交付合同（必须实际落盘，不是仅在聊天展示）：${JSON.stringify(job.deliverables)}`] : []),
+    ...(job.acceptanceCriteria?.length ? [`完成依据：${JSON.stringify(job.acceptanceCriteria)}`] : []),
+    ...(job.recovery?.action==='complete-delivery' ? [`协调器定点补交：${job.retryReason}。保留已完成成果，只补当前缺口；不要再次仅输出完成旁白。`] : []),
+    `Planner shared contract（本轮各分支共同约定）：${job.sharedContract || '无跨分支接口约定；复用已有接口，不自行猜测其它分支接口。'}`,
+    `Work estimate（规划估计，不是完成证据）：${job.workEstimate || '未估计'}`,
     `Advisory file context (overlap is allowed): ${job.writeSet.join(", ") || "not specified"}`,
     `Dependency note: ${job.dependencyPrompt || "none recorded; verify prerequisites before coding"}`,
-    `Acceptance note: ${job.acceptancePrompt || "state the solved problem, evidence, and remaining gap"}`,
+    `Acceptance note: ${acceptance}`,
     job.dependsOn?.length ? `Dependencies already integrated: ${job.dependsOn.join(", ")}` : "Dependencies: none",
     `Prior branch description: ${job.contextPreview || "(none)"}`,
     'Prior branch result: use the summary above; complete saved output is available in the shared run metadata if needed.',
-    `Branch input context (summary first): ${job.branchContext || "(none)"}`,
+    `Branch input context (summary first): ${branchContext}`,
     `Shared run metadata directory (direct shared state, not Git-isolated): ${job.runtimeMetadataPath || "(not available)"}`,
     peerRoster ? `Peer branches that may be consulted by taskId:\n${peerRoster}` : "Peer branches: none have a visible conversation yet; use the taskId from this run if consultation is needed.",
     `Branch context generation: ${Number(job.contextGeneration) || 1}`,
     handoffPath ? `Previous generation handoff: ${handoffPath}` : "",
     handoffPath ? "Start by reading this short handoff and the current task-tree checkpoint. Treat the handoff as evidence, not as a replacement for the current tree." : "",
     "",
-    "You are working in an isolated Git worktree. Implement the assigned result completely. Do not run tests, linters, git diff checks, validation commands, code review, or approval stages.",
+    '你在独立 Git 工作区完整实现分配的交付物。可以运行任务相关测试和必要验证；复用已有测试，无需另建繁琐评审或用户确认。把实际命令、退出结果及证据文件提供给最后检查 Agent；未执行的验证不得声称通过。遵守 Planner 共享接口，不擅自更改其它分支依赖的约定。',
+    '生成器或测试需要但Git忽略的本地输入，用 task_tree_review_inputs({action:"register",paths:["corpus/normalized"]}) 登记实际项目相对路径；宿主交接时快照供最终检查原路径复用，无需登记已追踪代码、提交数据或再次调用检查模型。',
+    '树回写 one-shot：实际实现并验证后，一次 task_tree_write(nodeId=上述Execution node,fields={Completion:"已完成",CurrentResult:"附件保存已实现；成功与失败用例通过，证据见 docs/attachment-test.md，无本轮缺口。",NextIdea:"本轮已完成。"},reason="回写实际成果")；只按持久化 changes 报告，不把原始命令、数据或 Evidence 子字段写进状态，成功后不为措辞反复回读或重写。',
     "You may edit task-tree.md, task-trees.json, tracked flow JSON, versions, run metadata, and any project file required by the task. Project edits are merged like ordinary Git changes; shared run metadata edits are direct concurrent effects.",
-    "Do not delegate implementation. The advisory file context is not an enforcement boundary. Modify outside-worktree paths only when the task explicitly calls for those paths; report them as direct effects, since Git cannot merge them.",
-    "If a concrete fact from another branch is required, request one consultation in peerRequests using a target taskId; the coordinator will relay it after the initial turns. Do not invent a conversation link as evidence.",
-    "Your final answer must be concise and end with one JSON object: {\"event\":\"completed|blocked\",\"changedFiles\":[],\"affectedNodes\":[],\"evidence\":\"...\",\"peerRequests\":[{\"toTaskId\":\"other-task-id\",\"question\":\"...\",\"why\":\"...\",\"expect\":\"...\"}]}. Use an empty peerRequests array when no consultation is needed."
+    `剩余范围确实包含两个以上可独立交付的主要成果时，才调用 task_tree_split_work；本 worker 只允许再拆一层，子任务必须直接完成各自范围，禁止递归拆分微任务。不能仅因有多个子主题就拆分；先判断能否在当前会话用一次源码调查和一次树/文档写入完成。拆分后端到端任务数可能增长，优先保证每个分支能交付，不能为了并行度制造更小任务。共享字段、术语或风格不等于强依赖，固定公共约定再委派；仅必须消费他支尚未产生的实际结果才有依赖。以约10–15分钟可交付成果为分工软目标，不是停止期限；宿主保存已有成果，子分支沿用共享接口，最后统一验收一次。同文档各章节分别分析、统一提纲并行撰写，片段由最终检查同一会话组装为用户指定文件；同产物按模块分。只拆自己未完成的范围，不重复其他分支。独立搜索、读取和下载批量调用，脚本用并发池。`,
+    "The advisory file context is not an enforcement boundary. Modify outside-worktree paths only when the task explicitly calls for those paths; report them as direct effects, since Git cannot merge them.",
+    "执行中有真实的接口、边界或集成疑问时，尽早用 task_tree_peer_exchange 将同一接收分支的多个问题合成一条发送；实现中可批量通报接口决定和证据。发送时记录 resume（自己当前进度和下一动作），之后继续不依赖答案的工作；消息在现有轮次边界送达，不打断工具、不另开同会话回答。回复后回到自己的检查点，不接管对方任务，不把咨询当重复验收。",
+    job.singleFinalReview
+      ? '交付后用中文简要说明状态、关键验证和未完成项（如有）；无需复述任务背景。'
+      : '完成后单独调用 structured_result_submit 提交 event、简短 evidence 和必要 peerRequests；未完成时提交 blocked 与具体缺口。'
   ].filter(Boolean).join("\n");
 }
 
@@ -869,7 +935,7 @@ function nextBranchTaskId(nodeId, existingJobs = []) {
   return taskId;
 }
 
-export function buildBranchPlannerPrompt(markdown, nodeId, objective = "", existingJobs = [], treeSummary = buildTreeSummary(markdown)) {
+export function buildBranchPlannerPrompt(markdown, nodeId, objective = "", existingJobs = [], treeSummary = buildTreeSummary(markdown), sharedContract = '') {
   const nodes = parseTreeNodeFields(markdown);
   const node = nodes.find((item) => item.id === cleanId(nodeId)) || nodes.find((item) => item.id !== "ROOT");
   const existing = existingJobs.map((job) => `${job.taskId}: ${job.title || job.nodeId} [${(job.writeSet || []).join(", ")}]`).join("\n") || "(none)";
@@ -878,6 +944,8 @@ export function buildBranchPlannerPrompt(markdown, nodeId, objective = "", exist
     "最终只输出一个新增 Worker 的 JSON，不写测试命令。先使用摘要，需要更多信息再调用 task_tree_read 或其它只读工具；不要无条件展开折叠子树。",
     "从根目标、当前阶段和所选节点推导一个具体可执行结果；不要重复现有分支。writeSet 可与现有分支重叠。",
     "branchContext、依赖说明和验收说明由协调器补齐，Planner 不要生成。",
+    'instruction 必须包含输入、交付物、接口职责、边界、完成依据和回写节点；沿用现有分支共享接口，并写相对工作量及理由，不修改已经发布给其它分支的约定。',
+    `已发布公共接口原文：${sharedContract || existingJobs.find(job => job.sharedContract)?.sharedContract || '(无)'}`,
     "当前相关上下文：",
     JSON.stringify({
       ...buildPlannerContext(markdown, objective),
@@ -888,7 +956,7 @@ export function buildBranchPlannerPrompt(markdown, nodeId, objective = "", exist
     existing,
     "",
     "严格按此形状返回 JSON：",
-    '{"job":{"nodeId":"N3","title":"中文结果名","instruction":"完整可执行结果","writeSet":["public/**"],"dependsOn":[]}}'
+    '{"job":{"nodeId":"N3","title":"中文结果名","instruction":"完整可执行结果","workEstimate":"相对工作量及理由","writeSet":["public/**"],"dependsOn":[]}}'
   ].join("\n");
 }
 
@@ -905,16 +973,18 @@ function normalizeBranchPlan(output, markdown, nodeId, objective = "", existingJ
   return { summary: compactGoalText(parsed.summary || "已生成一个分支", 240), job };
 }
 
-function normalizePlan(output, markdown, objective = "", { minimum = 2 } = {}) {
+function normalizePlan(output, markdown, objective = "", { minimum = 1 } = {}) {
   const parsed = parseJsonObject(output);
   if (!parsed?.jobs) throw new Error("规划结果不是有效 JSON，缺少 jobs");
   const jobs = validateParallelJobs(parsed.jobs, { minimum });
   const readyJobs = jobs.filter((job) => job.dependsOn.length === 0);
-  if (readyJobs.length < 2) {
-    throw new Error("自动并行计划必须至少有 2 个无前置依赖的可立即并行 Worker");
+  if (!readyJobs.length) {
+    throw new Error("自动计划至少需要一个可立即执行的任务");
   }
   return {
     summary: String(parsed.summary || "自动生成的并行计划").trim(),
+    sharedContract: String(parsed.sharedContract || ''),
+    acceptanceCriteria: normalizeDeliveryContract({acceptanceCriteria:parsed.acceptanceCriteria}).acceptanceCriteria,
     jobs,
     coverage: Array.isArray(parsed.coverage) ? parsed.coverage : []
   };
@@ -922,13 +992,37 @@ function normalizePlan(output, markdown, objective = "", { minimum = 2 } = {}) {
 
 export { normalizePlan as normalizeParallelPlan };
 
-function publicRun(run) {
+function publicJob({ workerPath, commit, sourceCommit, ...job }) {
+  return {...job, reportChars: job.output?.length || 0, deepLink: job.threadId ? threadDeepLink(job.threadId) : ''};
+}
+
+// Progress is an explicit projection, built directly from the cached run before
+// serializing. Never spread a full run/job here: output and history grow without
+// bounds. The selected-job endpoint retains complete text and messages.
+function progressRun(run) {
+  const pick=(value,keys)=>Object.fromEntries(keys.filter(key=>value?.[key]!==undefined).map(key=>[key,value[key]]));
+  return {
+    ...pick(run,['id','status','objective','summary','createdAt','updatedAt','finishedAt','acceptedAt','completedAt','totalDurationMs','error','branchTree','coordination']),
+    goal:run.goal?pick(run.goal,['immediate','stageNodeId']):null,
+    result:run.result?{cleanup:run.result.cleanup?pick(run.result.cleanup,['status']):null}:null,
+    jobs:(run.jobs||[]).map(job=>({...pick(job,['taskId','nodeId','title','status','summary','error','activity','acceptingGuidance','startedAt','finishedAt','completedTools','activeTools','contextResumed','contextGeneration']),
+      summary:job.summary||job.instruction||'',reportChars:job.output?.length||0}))
+  };
+}
+
+function publicRun(run, {view} = {}) {
+  if(view==='progress')return progressRun(run);
   return {
     id: run.id,
     status: run.status,
     objective: run.objective || "",
     goal: run.goal || null,
     summary: run.summary || "",
+    sharedContract: run.sharedContract || '',
+    coordination: run.coordination || null,
+    acceptanceCriteria: run.acceptanceCriteria || [],
+    ...(run.reviewScopeFiles === undefined ? {} : {reviewScopeFiles:[...run.reviewScopeFiles]}),
+    workspacePath: run.workspacePath || '',
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
     finishedAt: run.finishedAt || "",
@@ -939,18 +1033,16 @@ function publicRun(run) {
     sourceTree: run.sourceTree || null,
     branchTree: run.branchTree || null,
     planner: run.planner || null,
-    jobs: (run.jobs || []).map(({ workerPath, commit, sourceCommit, ...job }) => ({
-      ...job,
-      reportChars: job.output?.length || 0,
-      deepLink: job.threadId ? threadDeepLink(job.threadId) : ""
-    })),
+    jobs: (run.jobs || []).map(publicJob),
     peerMessages: (run.peerMessages || []).map((message) => ({
       ...message,
       fromDeepLink: message.fromThreadId ? threadDeepLink(message.fromThreadId) : "",
       toDeepLink: message.toThreadId ? threadDeepLink(message.toThreadId) : ""
     })),
+    userMessages: run.userMessages || [],
     contextOptions: run.contextOptions || [],
     mergeConflicts: run.mergeConflicts || [],
+    review: run.review || null,
     coverage: run.coverage || [],
     workspaceTimings: run.workspaceTimings || {},
     gitCommandTimings: run.gitCommandTimings || null,
@@ -964,6 +1056,8 @@ function publicRun(run) {
 export function createParallelCodexCoordinator({
   projectRoot,
   startTurn = startCodexTurn,
+  reviewTurn,
+  repairTurn,
   archiveThread = archiveCodexThread,
   workspace = createGitWorkspaceManager({ projectRoot }),
 } = {}) {
@@ -974,10 +1068,17 @@ export function createParallelCodexCoordinator({
       ...options,
       environment: {
         ...(options.environment || {}),
-        TASK_TREE_PROJECT_ROOT: projectRoot
+        // Keep an explicitly supplied candidate/worktree root. Final checkers
+        // must not write into the live project and trigger their own recheck.
+        TASK_TREE_PROJECT_ROOT: options.environment?.TASK_TREE_PROJECT_ROOT || projectRoot,
+        TASK_TREE_QUALITY_MODE: 'advisory'
       }
     });
   }
+  // Test doubles for Worker turns do not constitute an independent reviewer.
+  // Production always starts a fresh review conversation; focused tests may
+  // inject reviewTurn explicitly to exercise this boundary.
+  const independentReview = reviewTurn === undefined ? (injectedStartTurn ? null : startTurn) : reviewTurn;
   // Keep per-run timings for every workspace operation.  This is deliberately
   // outside the Git manager: it measures the real coordinator boundary (the
   // part that can become a bottleneck) without changing Git semantics.
@@ -1047,10 +1148,30 @@ export function createParallelCodexCoordinator({
   workspace = workspaceTiming;
   const registerWorkspaceRun = (run) => workspaceRuns.set(run.id, run);
   const runs = new Map();
+  const executionOptions = new Map();
+  const incrementalWorkspace = createDirectNodeWorkspace({ projectRoot, workspace, startTurn, reviewTurn: independentReview });
+  const unreviewedWorkspace = createDirectNodeWorkspace({ projectRoot, workspace, startTurn, reviewTurn: null });
   const pending = new Map();
   const background = new Map();
   const additions = new Map();
   const wakeups = new Map();
+  const mailboxes = new Map();
+  const activityTimers = new Map();
+  const workerSplits = new Map();
+  function expandDependencies(run,ids){
+    const byId=new Map(run.jobs.map(job=>[job.taskId,job]));
+    const expand=id=>byId.get(id)?.splitChildren?.length?byId.get(id).splitChildren.flatMap(expand):[id];
+    return [...new Set(ids.flatMap(expand))];
+  }
+  function workerNotification(run, job, message) {
+    const trace=recordAgentActivity(job, message);
+    if(trace)event(run,'worker_execution',{taskId:job.taskId,...trace});
+    executionOptions.get(run.id)?.onProgress?.({id:run.id,taskId:job.taskId,notification:message,jobs:run.jobs});
+    if(!activityTimers.has(run.id))activityTimers.set(run.id,setTimeout(()=>{
+      activityTimers.delete(run.id);
+      void persist(run).catch(error=>{run.progressSaveWarning=error.message;});
+    },750));
+  }
   const runsDir = path.join(projectRoot, ".task-tree-runs");
   async function materialContext(run, nodeIds) {
     if (!run.materialTreeId) {
@@ -1068,9 +1189,19 @@ export function createParallelCodexCoordinator({
   let plannerQueue = Promise.resolve();
   let branchTreeQueue = Promise.resolve();
 
-  function stageBranches(run, appended) {
+  function stageBranches(run, appended, splitParent) {
     const next = branchTreeQueue.catch(() => {}).then(async () => {
-      await materializeParallelBranches(projectRoot, appended ? { ...run, jobs: [...run.jobs, ...appended] } : run, appended || run.jobs);
+      const childIds=appended?.map(job=>job.taskId)||[];
+      const nextJobs=appended?[...run.jobs,...appended]:run.jobs;
+      const candidateJobs=splitParent?nextJobs.map(job=>job.dependsOn.includes(splitParent.taskId)
+        ?{...job,dependsOn:[...new Set(job.dependsOn.flatMap(id=>id===splitParent.taskId?childIds:[id]))]}:job):nextJobs;
+      if(splitParent)assertAcyclic(candidateJobs);
+      const candidate=appended?{...run,jobs:candidateJobs}:run;
+      await materializeParallelBranches(projectRoot, candidate, appended || run.jobs);
+      // materialization assigns branchTree on its argument, and execution node
+      // identities on jobs. Keep those durable references on the running state.
+      run.branchTree=candidate.branchTree;
+      if(splitParent)for(const job of run.jobs)job.dependsOn=candidateJobs.find(candidate=>candidate.taskId===job.taskId).dependsOn;
       if (appended) run.jobs.push(...appended);
     });
     branchTreeQueue = next;
@@ -1121,6 +1252,8 @@ export function createParallelCodexCoordinator({
   }
 
   function event(run, type, data = {}) {
+    const options = executionOptions.get(run.id);
+    options?.onProgress?.({ id: run.id, status: run.status, jobs: run.jobs, coordination: run.coordination, event: type, detail: data });
     run.events ||= [];
     run.events.push({ id: randomUUID(), at: new Date().toISOString(), type, ...data });
   }
@@ -1209,17 +1342,120 @@ export function createParallelCodexCoordinator({
     }
   }
 
+  async function integrateWorkerOutput(run,job,integrate) {
+    if(workspace.captureReviewInputs)job.reviewInputs=await workspace.captureReviewInputs(job.workerPath);
+    const inspected = await workspace.inspectChanges(job.workerPath, job.sourceCommit, job.writeSet);
+    job.changedFiles = inspected.changedFiles;
+    if(job.deliverables?.length&&!job.splitChildren?.length&&!job.checkpointingSplit) {
+      const started=performance.now();
+      try {job.deliveryReceipt=await inspectDeliverables(job.workerPath,job,{projectRoot});}
+      finally {event(run,'coordination_delivery_timing',{taskId:job.taskId,operation:'inspectDeliverables',durationMs:performance.now()-started});}
+      const missing=job.deliveryReceipt.filter(item=>item.status!=='satisfied');
+      if(missing.length) {
+        job.workerCompleted=false;
+        throw Object.assign(new Error(`交付合同尚未满足：${missing.map(item=>`${item.path}：${item.reason}`).join('；')}`),{code:'DELIVERY_CONTRACT_UNSATISFIED'});
+      }
+    }
+    if(run.incremental && run.finalReviewOnly && !inspected.changedFiles.length){
+      // Read-only branches have no candidate to merge. The final checker still
+      // receives their reports; skip empty worktrees, commits and live snapshots.
+      job.appliedFiles=[];job.treeChanges=[];job.acceptanceStatus='pending';job.commit=job.sourceCommit;
+      return;
+    }
+    if (run.incremental) {
+      const finalReviewOnly=executionOptions.get(run.id)?.finalReviewOnly ?? run.finalReviewOnly;
+      if (finalReviewOnly) job.acceptanceStatus = 'pending';
+      const candidatePath = await workspace.createWorker(run.id, `candidate-${job.taskId}-${randomUUID()}`, job.sourceCommit);
+      try {
+        const receipt = await (finalReviewOnly ? unreviewedWorkspace : incrementalWorkspace).finish({ runId: run.id, workerPath: job.workerPath,
+          integrationPath: candidatePath, snapshotCommit: job.sourceCommit }, {
+          nodeId: job.executionNodeId || job.nodeId,
+          objective: `${job.instruction}\n宿主要求回写自己的分支执行节点及其自动备份；任务说明中不改树的限制仅针对来源树和其它分支，不禁止此执行汇报。`,
+          output: job.output, status: 'completed', sharedContract:job.sharedContract || run.sharedContract || '',
+          ...(job.reviewInputs?{reviewInputs:[job.reviewInputs]}:{}),
+          historyMessages:executionOptions.get(run.id)?.contextMessages || [],dialogueContext:executionOptions.get(run.id)?.historyMessages,
+          treeFile:job.subtreeFile || run.sourceTree?.path,threadId:job.threadId,signal:executionOptions.get(run.id)?.signal,keepWorkspace:true,
+          onTiming:sample=>event(run,'worker_integration_timing',{taskId:job.taskId,...sample}),
+          onPhase:(phase,message)=>event(run,'worker_phase',{taskId:job.taskId,phase,message})
+        });
+        job.appliedFiles=receipt.appliedFiles;job.treeChanges=receipt.treeChanges||[];job.changedFiles=receipt.changedFiles;job.review=receipt.review;
+      } finally {await workspace.removeWorker(candidatePath).catch(()=>{});}
+    }
+    job.commit=await workspace.commit(job.workerPath,`parallel ${job.taskId}`,job.sourceCommit);
+    await integrate(job.commit,job.sourceCommit);
+  }
+
+  function splitWorker(run,job,args,integrate) {
+    const key=`${run.id}:${job.taskId}`;
+    const completed=()=>({ok:true,taskIds:job.splitChildren,hostCompletion:{status:'completed',output:job.splitOutput}});
+    if(job.splitChildren?.length)return Promise.resolve(completed());
+    if(workerSplits.has(key))return workerSplits.get(key);
+    const pendingSplit=(async()=>{
+      const signal=executionOptions.get(run.id)?.signal;
+      signal?.throwIfAborted();
+      if(!run.incremental || !run.finalReviewOnly)throw new Error('继续拆分需要本轮统一整合及一次最终验收');
+      if(!canWorkerSplit(job, run.jobs))throw new Error(`动态拆分最多允许 ${MAX_DYNAMIC_SPLIT_DEPTH} 层；请在当前任务内完成剩余子主题`);
+      const input=args.jobs;
+      if(!Array.isArray(input)||input.length<2)throw new Error('请至少提供两个可独立交付的剩余任务');
+      const idMap=new Map(input.map(child=>[String(child.taskId),`${job.taskId}.${cleanId(child.taskId)}`]));
+      const jobs=validateParallelJobs(input.map(child=>({...child,taskId:idMap.get(String(child.taskId)),nodeId:job.nodeId,parentTaskId:job.taskId,
+        dependsOn:expandDependencies(run,(child.dependsOn||[]).filter(id=>id!==job.taskId).map(id=>idMap.get(id)||id)),
+        sharedContract:run.sharedContract,contextPolicy:'new'})),{minimum:2,knownTaskIds:run.jobs.map(item=>item.taskId),existingJobs:run.jobs});
+      const already=new Set(run.jobs.map(item=>item.taskId.toLowerCase()));
+      if(jobs.some(child=>already.has(child.taskId.toLowerCase())))throw new Error('剩余任务已经提交，请勿重复拆分');
+      const done=new Set(run.jobs.filter(item=>item.status==='completed').map(item=>item.taskId));
+      if(jobs.filter(child=>child.dependsOn.every(id=>done.has(id))).length<2)throw new Error('该拆分没有至少两个可立即执行的任务');
+      const childIds=jobs.map(child=>child.taskId);
+      const rewired=run.jobs.map(consumer=>({...consumer,dependsOn:consumer.dependsOn.flatMap(id=>id===job.taskId?childIds:[id])}));
+      assertAcyclic([...rewired,...jobs]);
+      event(run,'worker_subdivision_started',{taskId:job.taskId,reason:args.reason});
+      if(!job.splitCheckpoint){
+        job.output='已保存本分支已有成果，剩余工作交由子分支继续；整体尚待最终验收。';
+        job.checkpointingSplit=true;
+        try {await integrateWorkerOutput(run,job,integrate);} finally {delete job.checkpointingSplit;}
+        job.splitCheckpoint=true;await persist(run);
+      }
+      await api.append(run.id,{jobs,reason:args.reason},job);
+      return completed();
+    })().finally(()=>workerSplits.delete(key));
+    workerSplits.set(key,pendingSplit);return pendingSplit;
+  }
+
   async function runWorker(run, job, integrate) {
     let workerHandoffStaged = false;
     try {
+      if(job.splitChildren?.length){
+        job.status='completed';job.output=job.splitOutput;
+        event(run,'worker_handoff_recovered',{taskId:job.taskId,taskIds:job.splitChildren});return;
+      }
       job.status = "preparing";
+      job.finishedAt = '';
+      job.acceptingGuidance = true;
+      job.startedAt ||= new Date().toISOString();
+      executionOptions.get(run.id)?.signal?.throwIfAborted();
       event(run, "worker_preparing", { taskId: job.taskId, nodeId: job.nodeId });
       await persist(run);
-      job.sourceCommit = await workspace.head(run.workspace.integrationPath);
-      job.workerPath = await workspace.createWorker(run.id, job.taskId, job.sourceCommit, {
-        contextKey: job.contextKey,
-        persistentContext: true
-      });
+      if (job.resumeAfterRestart && job.workerPath && job.sourceCommit && workspace.resumeWorker) {
+        await workspace.resumeWorker(job.workerPath, { contextKey: job.contextKey });
+      } else {
+        const persistentPath = job.resumeAfterRestart && job.contextKey && workspace.resumePersistentWorker
+          ? await workspace.resumePersistentWorker(job.contextKey)
+          : "";
+        if (persistentPath) {
+          job.workerPath = persistentPath;
+          await workspace.resumeWorker?.(persistentPath, { contextKey: job.contextKey });
+        } else {
+          job.sourceCommit = await workspace.head(run.workspace.integrationPath);
+          job.workerPath = await workspace.createWorker(run.id, job.taskId, job.sourceCommit, {
+            contextKey: job.contextKey,
+            persistentContext: true
+          });
+        }
+      }
+      const inheritedInputs=[run.workspace.reviewInputs,run.initialReceipt?.reviewInputs,
+        run.jobs.find(parent=>parent.taskId===job.parentTaskId)?.reviewInputs].flat().filter(Boolean);
+      const inputMaterials=workspace.materializeReviewInputs&&inheritedInputs.length
+        ?await workspace.materializeReviewInputs(job.workerPath,inheritedInputs,{register:true}):null;
       // Appended tasks may not exist in the original snapshot. Seed only their
       // own branch file; never copy another worker's ongoing edits.
       for (const relative of [job.subtreeFile, job.taskFile].filter(Boolean)) {
@@ -1230,8 +1466,31 @@ export function createParallelCodexCoordinator({
           await writeFile(path.join(job.workerPath, relative), await readFile(path.join(projectRoot, relative)));
         }
       }
+      if(job.deliverables?.length&&!job.deliveryBaseline) {
+        const started=performance.now();
+        try {job.deliveryBaseline=await snapshotDeliverables(job.workerPath,job.deliverables,{projectRoot});}
+        finally {event(run,'coordination_delivery_timing',{taskId:job.taskId,operation:'snapshotDeliverables',durationMs:performance.now()-started});}
+        await persist(run);
+      }
+      // Delivery is a separate durable checkpoint from execution. A failed
+      // merge must not ask a successful worker to rediscover or rewrite work.
+      if (job.resumeAfterRestart && job.workerCompleted
+        && !run.userMessages?.some(message => message.taskId === job.taskId && message.status === 'queued')) {
+        job.acceptingGuidance = false;
+        job.activity = { label: '复用已完成成果，仅恢复整合', at: new Date().toISOString() };
+        event(run, 'worker_integration_resumed', { taskId: job.taskId });
+        await integrateWorkerOutput(run, job, integrate);
+        job.status = 'completed';
+        job.error = '';
+        delete job.retryReason;
+        delete job.resumeAfterRestart;
+        event(run, 'completed', { taskId: job.taskId, nodeId: job.nodeId, changedFiles: job.changedFiles });
+        return;
+      }
+      job.workerCompleted = false;
       job.contextPersistent = true;
-      const rotateContext = shouldRotateContext(job);
+      const recoveryRotation=job.recovery?.action==='fresh-context';
+      const rotateContext = recoveryRotation || shouldRotateContext(job);
       let handoffPath = "";
       if (rotateContext) {
         const handoff = await writeContextHandoff(runsDir, run, job);
@@ -1249,6 +1508,8 @@ export function createParallelCodexCoordinator({
         job.contextStatus = "rotating";
         job.contextThreadId = "";
         job.threadId = "";
+        delete job.contextUsage;
+        delete job.contextUsagePercent;
         event(run, "context_rotation_started", {
           taskId: job.taskId,
           generation: job.contextGeneration,
@@ -1260,13 +1521,27 @@ export function createParallelCodexCoordinator({
       job.status = "running";
       event(run, "worker_started", { taskId: job.taskId, nodeId: job.nodeId });
       await persist(run);
-
-      const result = await startTurn({
-        prompt: buildWorkerPrompt(job, handoffPath, run.jobs),
+      const workerPrompt=buildWorkerPrompt(job, handoffPath, run.jobs) + (inputMaterials?`\n${inputMaterials.prompt}`:'') + (job.resumeAfterRestart ? `\n【失败分支续跑】复用原隔离目录${recoveryRotation?'，使用新会话从任务、当前树和已保存检查点继续，不重新载入失败的超长历史':'和会话'}；先核对已落盘成果，不重放成功操作，只继续本分支剩余工作。${job.retryReason ? `\n此前失败原因：${job.retryReason}` : ''}` : '')
+        + (recoveryRotation ? `\n本分支运行中的用户指导（最新优先）：${JSON.stringify((run.userMessages||[]).filter(message=>message.taskId===job.taskId))}`:'');
+      const workerTurnOptions = {
+        signal: executionOptions.get(run.id)?.signal,
+        onNotification: message => workerNotification(run,job,message),
+        prompt: workerPrompt,
+        // A branch receives its scoped task prompt and node materials. Copying
+        // parent dialogue here multiplies every prior agent report by fan-out.
         contextMessages: await materialContext(run, [run.goal?.stageNodeId, job.nodeId]),
+        systemPrompt: '你是并行分支 Worker。用中文报告进度，只执行本次 Task id 对应的分支说明。父节点对话和资料是背景，不是再次执行整个父目标的指令；不要重复其他分支。完成实际交付后保存自己相关节点的结果。',
         cwd: job.workerPath,
-        ...(job.subtreeFile ? { environment: { TASK_TREE_CONTEXT_TREE_FILE: job.subtreeFile } } : {}),
-        tools: TREE_CONTEXT_TOOLS, toolHandler: treeContextHandler(job.workerPath, run.sourceTree),
+        environment: { TASK_TREE_PROJECT_ROOT: projectRoot, TASK_TREE_CONTEXT_NODE_ID: job.executionNodeId || job.nodeId, TASK_TREE_QUALITY_MODE: 'advisory',
+          ...(job.subtreeFile ? { TASK_TREE_CONTEXT_TREE_FILE: job.subtreeFile } : {}) },
+        tools: [...TREE_CONTEXT_TOOLS, PEER_EXCHANGE_TOOL,
+          ...(run.incremental && canWorkerSplit(job, run.jobs) ? [WORKER_SPLIT_TOOL] : [])],
+        toolHandler: (name,args) => name===WORKER_SPLIT_TOOL.function.name
+          ? splitWorker(run,job,args,integrate)
+          : name===PEER_EXCHANGE_TOOL.function.name
+          ? mailboxes.get(run.id).exchange(job.taskId,args)
+          : treeContextHandler(job.workerPath, run.sourceTree)(name,args),
+        beforeModelRequest: () => mailboxes.get(run.id).drain(job.taskId),
         initialToolCalls: [{ id: `host-node-${randomUUID()}`, type: 'function', function: { name: 'task_tree_node', arguments: JSON.stringify({ nodeId: job.executionNodeId || job.nodeId }) } }],
         threadId: job.contextSource === "codex" ? "" : (job.contextThreadId || ""),
         forkThreadId: job.contextSource === "codex" ? (job.contextThreadId || "") : "",
@@ -1274,9 +1549,13 @@ export function createParallelCodexCoordinator({
         threadName: `任务图 · 并行 ${String(run.jobs.indexOf(job) + 1).padStart(2, "0")} · ${humanizeTitle(job.title, job.taskId)}`,
         sandbox: "danger-full-access",
         approvalPolicy: "never",
-        developerInstructions: "Implement the assigned task. File scopes are advisory; task-tree, project metadata, and shared run metadata may be edited. Do not run tests, lint, diff checks, validation commands, or reviews. Changes outside the worktree are direct concurrent effects and are not Git-isolated.",
+        developerInstructions: "完成分配任务并运行相关测试。",
+        // Worker narration is an ordinary report. Host Git inspection supplies
+        // actual file receipts; there is no formatting-only inference round.
+        ...(executionOptions.get(run.id)?.finalReviewOnly ? {} : {outputSchema: WORKER_RESULT_SCHEMA}),
         waitForCompletion: true,
         onAccepted: async ({ threadId, turnId }) => {
+          job.hasStreamedOutput=false;
           job.threadId = threadId;
           job.contextThreadId = threadId;
           job.contextSource = "parallel";
@@ -1287,11 +1566,46 @@ export function createParallelCodexCoordinator({
           event(run, "worker_turn_started", { taskId: job.taskId, nodeId: job.nodeId, threadId });
           await persist(run);
         }
-      });
+      };
+      let result = await startTurn(workerTurnOptions);
+      if(job.splitChildren?.length)result={...result,status:'completed',output:job.splitOutput,error:undefined};
+      // A provider can end a turn with status=stopped without the user having
+      // pressed Stop (for example a transient worker/session interruption).
+      // That is recoverable execution state, not a completed task. Keep the
+      // same Git worktree and conversation, publish the state, and continue
+      // until the model actually completes or the user's signal is aborted.
+      while ((result?.status === 'stopped' || (['completed',undefined].includes(result?.status)
+        && run.userMessages?.some(message=>message.taskId===job.taskId&&message.status==='queued')))
+        && !executionOptions.get(run.id)?.signal?.aborted) {
+        const guidanceContinuation=result?.status!=='stopped';
+        job.output = compactWorkerOutput(result.output || job.output || '');
+        if(!guidanceContinuation) {
+        job.status = 'retrying';
+        job.error = '模型会话意外停止，正在使用同一工作区和会话续跑';
+        event(run, 'worker_stopped', { taskId: job.taskId, nodeId: job.nodeId, threadId: result.threadId || job.contextThreadId || job.threadId || '', output: job.output });
+        await persist(run);
+        executionOptions.get(run.id)?.signal?.throwIfAborted();
+        job.status = 'running';
+        job.retryCount = Number(job.retryCount || 0) + 1;
+        event(run, 'worker_retrying', { taskId: job.taskId, nodeId: job.nodeId, retryCount: job.retryCount, threadId: result.threadId || job.contextThreadId || job.threadId || '' });
+        } else event(run,'worker_guidance_continuing',{taskId:job.taskId});
+        await persist(run);
+        result = await startTurn({
+          ...workerTurnOptions,
+          prompt: guidanceContinuation ? '用户在本分支收尾时发来了新指导，请读取本轮用户消息，落实或回答后再交付；保留已有成果，不重放已完成操作。'
+            : `【自动续跑】上一轮模型会话意外停止，未完成本分支任务。保留已落盘的工作区和已有会话上下文；先检查当前成果和未完成项，不重放已成功的工具调用，继续完成原 Task id ${job.taskId}，完成后提交完整结果。${job.output ? `上一轮已输出片段：\n${job.output}` : ''}`,
+          threadId: result.threadId || job.contextThreadId || job.threadId || '',
+          forkThreadId: '',
+          forceNewThread: false
+        });
+      }
       if (result.timing) event(run, "worker_turn_timing", { taskId: job.taskId, nodeId: job.nodeId, timing: result.timing });
+      job.acceptingGuidance=false;
+      job.activeTools={};
+      job.activity={label:'正在整合分支成果',at:new Date().toISOString()};
       try { assertTurnCompleted(result); }
       catch (error) {
-        job.output = String(result.output || '');
+        job.output = compactWorkerOutput(result.output || '');
         throw error;
       }
       job.threadId = result.threadId;
@@ -1308,7 +1622,7 @@ export function createParallelCodexCoordinator({
         }
       }
       job.contextCompactions = Number(job.contextCompactions || 0) + Number(result.contextCompactions || 0);
-      if (rotateContext && job.parentThreadId) {
+      if (rotateContext && !recoveryRotation && job.parentThreadId) {
         try {
           await archiveThread(job.parentThreadId);
           job.contextArchivedAt = new Date().toISOString();
@@ -1320,10 +1634,14 @@ export function createParallelCodexCoordinator({
       }
       rememberRunContext(run, job);
       job.turnId = result.turnId;
-      job.output = String(result.output || "");
-      if (parseJsonObject(job.output)?.event === "blocked") throw new Error(job.output);
-      job.evidence = compactGoalText(parseJsonObject(job.output)?.evidence || job.output, 600);
-      job.peerRequests = normalizePeerRequests(job.output, run.jobs, job.taskId);
+      const rawOutput = String(result.structuredOutput || result.messages?.at(-1)?.content || result.output || "");
+      const parsedOutput = parseJsonObject(rawOutput);
+      job.output = compactWorkerOutput(rawOutput, parsedOutput);
+      if (parsedOutput?.event === "blocked") throw new Error(job.output);
+      job.evidence = compactGoalText(parsedOutput?.evidence || rawOutput);
+      delete job.retryReason;
+      delete job.resumeAfterRestart;
+      job.peerRequests = normalizePeerRequests(rawOutput, run.jobs, job.taskId);
       if (job.peerRequests.length) {
         for (const request of job.peerRequests) {
           event(run, "peer_requested", {
@@ -1339,22 +1657,37 @@ export function createParallelCodexCoordinator({
         workerHandoffStaged = false;
       }
 
-      const inspected = await workspace.inspectChanges(job.workerPath, job.sourceCommit, job.writeSet);
-      job.changedFiles = inspected.changedFiles;
-      job.commit = await workspace.commit(job.workerPath, `parallel ${job.taskId}`, job.sourceCommit);
-      await integrate(job.commit, job.sourceCommit);
+      job.workerCompleted = true;
+      await persist(run);
+      if(!job.splitChildren?.length)await integrateWorkerOutput(run,job,integrate);
       job.status = "completed";
+      job.error = '';
+      delete job.recovery;
+      if(run.coordination?.taskId===job.taskId)run.coordination={phase:'executing',message:'该分支已恢复并整合，继续推进其余任务',updatedAt:new Date().toISOString()};
       event(run, "completed", { taskId: job.taskId, nodeId: job.nodeId, changedFiles: job.changedFiles });
     } catch (error) {
-      job.status = "failed";
+      job.status = executionOptions.get(run.id)?.signal?.aborted ? 'stopped' : 'failed';
       job.error = error.message;
+      if (error.code === 'COMPLETION_REVIEW_FAILED') { job.reviewFailed = true; job.review = error.review || null; }
+      if (error.workspacePath) job.workspacePath = error.workspacePath;
       if (error.threadId) {
         job.threadId = error.threadId;
         job.contextThreadId = error.threadId;
         rememberRunContext(run, job);
       }
-      event(run, "blocked", { taskId: job.taskId, nodeId: job.nodeId, error: error.message });
+      job.failure={message:error.message,...executionErrorDetails(error)};
+      const recovery=recoveryDecision(job,error,{aborted:executionOptions.get(run.id)?.signal?.aborted});
+      if(recovery&&workspace.resumePersistentWorker) {
+        job.recovery=recovery;job.recoveryHistory=[...(job.recoveryHistory||[]),recovery];
+        job.retryReason=error.message;job.resumeAfterRestart=true;job.status='queued';
+        if(recovery.action!=='integrate-only')job.workerCompleted=false;
+        run.coordination={phase:'recovering',taskId:job.taskId,action:recovery.action,message:recovery.action==='fresh-context'?'保留工作区，从任务树和检查点换新上下文继续':recovery.action==='integrate-only'?'复用已完成成果，仅重试整合':'交付物未落盘，已定点回派原分支补交',updatedAt:recovery.at};
+        event(run,'coordination_recovery_scheduled',{taskId:job.taskId,...run.coordination,reason:recovery.reason});
+      } else event(run, "blocked", { taskId: job.taskId, nodeId: job.nodeId, error: error.message });
     } finally {
+      job.acceptingGuidance=false;
+      job.activeTools={};
+      job.finishedAt=new Date().toISOString();
       if (workerHandoffStaged && job.workerPath) await removeWorkerHandoff(job.workerPath).catch(() => {});
       if (job.workerPath) await workspace.removeWorker(job.workerPath, { preserveContext: true, contextKey: job.contextKey }).catch(() => {});
       delete job.workerPath;
@@ -1439,8 +1772,7 @@ export function createParallelCodexCoordinator({
         sandbox: "workspace-write",
         approvalPolicy: "never",
         developerInstructions: "Resolve only the active Git conflict in the integration worktree. Preserve both worker intents and do not edit outside this Git project.",
-        waitForCompletion: true,
-        completionTimeoutMs: PLANNER_TIMEOUT_MS
+        waitForCompletion: true
       });
       assertTurnCompleted(result);
       conflict.resolverTiming = result.timing || null;
@@ -1476,15 +1808,18 @@ export function createParallelCodexCoordinator({
 
   async function execute(run) {
     try {
+      mailboxes.set(run.id,createPeerMailbox(run,{persist,onEvent:(type,detail)=>event(run,type,detail)}));
       registerWorkspaceRun(run);
       run.status = run.workspace?.integrationPath ? "running" : "preparing";
       run.error = "";
+      run.projectRoot = projectRoot;
+      run.coordination={phase:'executing',message:'就绪分支并行执行；完成即整合，最后统一验收',updatedAt:new Date().toISOString()};
       run.result = null;
       run.finishedAt = "";
       if (!run.workspace?.integrationPath) {
         event(run, "snapshot_started");
         await persist(run);
-        run.workspace = await workspace.prepare(run.id);
+        run.workspace = await workspace.prepare(run.id,{captureInputs:true});
         run.status = "running";
         event(run, "run_started", { snapshotCommit: run.workspace.snapshotCommit });
       } else {
@@ -1493,8 +1828,15 @@ export function createParallelCodexCoordinator({
       await persist(run);
 
       let integrationQueue = Promise.resolve();
+      let peerRelayQueue = Promise.resolve();
+      let peerRelayError = null;
       const integrate = (commit, sourceCommit, job) => {
         const next = integrationQueue.then(async () => {
+          if (run.incremental) {
+            const live = await workspace.prepare(`sync-${randomUUID()}`);
+            try { return await workspace.syncIntegration(run.workspace.integrationPath, live.snapshotCommit); }
+            finally { await workspace.cleanup({ ...live, runId: path.basename(live.runDir) }); }
+          }
           try {
             return await workspace.integrate(run.workspace.integrationPath, commit, sourceCommit);
           } catch (error) {
@@ -1507,10 +1849,12 @@ export function createParallelCodexCoordinator({
       };
 
       async function relayPeerRequests() {
+        if (run.incremental) return;
         const jobsById = new Map(run.jobs.map((job) => [job.taskId, job]));
         const handled = new Set((run.peerMessages || []).map((message) => message.id));
         const requests = run.jobs.flatMap((job) => (job.peerRequests || [])
-          .filter((request) => !handled.has(request.id))
+          .filter((request) => !handled.has(request.id) && job.status === 'completed'
+            && jobsById.get(request.toTaskId)?.status === 'completed')
           .map((request) => ({ source: job, request })));
         if (!requests.length) return;
         run.peerMessages ||= [];
@@ -1557,8 +1901,7 @@ export function createParallelCodexCoordinator({
               sandbox: "read-only",
               approvalPolicy: "never",
               developerInstructions: "Answer one peer consultation from the existing branch context. Do not edit files or delegate.",
-              waitForCompletion: true,
-              completionTimeoutMs: PLANNER_TIMEOUT_MS
+              waitForCompletion: true
             });
             assertTurnCompleted(answer);
             target.threadId = answer.threadId;
@@ -1604,8 +1947,7 @@ export function createParallelCodexCoordinator({
                 sandbox: "danger-full-access",
                 approvalPolicy: "never",
                 developerInstructions: "Continue the assigned worker task using the peer answer. The write set is only a planning hint: you may edit task-tree.md, task-trees.json, project metadata, and any path required by the explicit task. Do not ask another peer during this continuation.",
-                waitForCompletion: true,
-                completionTimeoutMs: PLANNER_TIMEOUT_MS
+                waitForCompletion: true
               });
               assertTurnCompleted(continuation);
               source.threadId = continuation.threadId;
@@ -1644,6 +1986,14 @@ export function createParallelCodexCoordinator({
           await persist(run);
         }
       }
+      const schedulePeerRelay = () => {
+        const next = peerRelayQueue.catch(() => {}).then(relayPeerRequests).catch(error => {
+          peerRelayError ||= error;
+          event(run, 'peer_relay_failed', { error: error.message });
+        });
+        peerRelayQueue = next;
+        return next;
+      };
       const queued = new Set(run.jobs
         .filter((job) => ["queued", "planned"].includes(job.status))
         .map((job) => job.taskId));
@@ -1665,7 +2015,7 @@ export function createParallelCodexCoordinator({
             queued.delete(taskId);
             continue;
           }
-          if (job.dependsOn.some((id) => ["failed", "blocked"].includes(byId.get(id)?.status))) {
+          if (job.dependsOn.some((id) => ["failed", "blocked", "stopped"].includes(byId.get(id)?.status))) {
             job.status = "blocked";
             job.error = "依赖任务失败";
             queued.delete(taskId);
@@ -1677,7 +2027,8 @@ export function createParallelCodexCoordinator({
           const taskId = ready.shift();
           queued.delete(taskId);
           const job = byId.get(taskId);
-          const promise = runWorker(run, job, (commit, sourceCommit) => integrate(commit, sourceCommit, job)).then(() => taskId);
+          const promise = runWorker(run, job, (commit, sourceCommit) => integrate(commit, sourceCommit, job))
+            .then(() => { void schedulePeerRelay().catch(() => {}); return taskId; });
           active.set(taskId, promise);
         }
         if (!active.size && queued.size) {
@@ -1696,7 +2047,9 @@ export function createParallelCodexCoordinator({
         wakeups.delete(run.id);
       }
       await integrationQueue;
-      await relayPeerRequests();
+      await schedulePeerRelay();
+      await peerRelayQueue;
+      if (peerRelayError) throw peerRelayError;
       await integrationQueue;
 
       run.status = "applying";
@@ -1710,20 +2063,67 @@ export function createParallelCodexCoordinator({
         failedTasks,
         warnings: failedTasks.length ? [`${failedTasks.length} 个分支未完成`] : []
       };
+      if (run.incremental) run.result.appliedFiles = [...new Set([...(run.initialReceipt?.appliedFiles||[]),...run.jobs.flatMap(job => job.appliedFiles || [])])];
+      if (run.incremental) run.result.treeChanges = [...(run.initialReceipt?.treeChanges||[]),...run.jobs.flatMap(job => job.treeChanges || [])];
       run.summary = run.result.summary;
-      run.finishedAt = new Date().toISOString();
       if (run.jobs.some((job) => ["queued", "planned"].includes(job.status))) return execute(run);
       if (failedTasks.length) {
         run.status = "failed";
         run.error = run.jobs.filter((job) => job.status !== "completed").map((job) => `${job.taskId}: ${job.error || job.status}`).join("\n");
+      } else if (run.incremental) {
+        if ((executionOptions.get(run.id)?.finalReviewOnly ?? run.finalReviewOnly) && independentReview) {
+          run.status = 'checking';
+          run.coordination={phase:'checking',message:'分支已整合，独立检查Agent按完整交付清单最终验收',updatedAt:new Date().toISOString()};
+          if(run.branchTree)await recordParallelBranchResults(projectRoot,run);
+          event(run, 'final_review_started');
+          const receipt = await incrementalWorkspace.reviewIntegrated({ ...run.workspace, snapshotCommit:run.reviewBaselineCommit || run.workspace.snapshotCommit, runId: run.id }, {
+            nodeId: run.sourceSelection?.nodeId || run.goal?.stageNodeId,
+            objective: run.objective,
+            onPhase: (phase,message) => event(run,'final_review_phase',{phase,message}),
+            onNotification: notification => event(run,'final_review_progress',{notification}),
+            userGuidance: run.userMessages || [],
+            sharedContract: run.sharedContract,
+            delegationReceipt: coordinationEvidence(run),
+            ...(run.reviewScopeFiles === undefined ? {} : {reviewScopeFiles:run.reviewScopeFiles}),
+            // These are host-created copies of the complete tasks and their
+            // execution bookkeeping, not the user's source/business trees.
+            // The jobs above already carry instructions and reports verbatim.
+            executionFiles:[run.branchTree?.path,run.branchTree?.planPath,...run.jobs.flatMap(job=>[job.taskFile,job.subtreeFile])].filter(Boolean),
+            reviewInputs:[run.workspace.reviewInputs,run.initialReceipt?.reviewInputs,...run.jobs.map(job=>job.reviewInputs)].flat().filter(Boolean),
+            historyMessages: executionOptions.get(run.id)?.contextMessages || [],
+            dialogueContext: executionOptions.get(run.id)?.historyMessages,
+            treeFile: run.sourceTree?.path,
+            signal: executionOptions.get(run.id)?.signal,
+            onTiming: sample => event(run, 'final_review_timing', sample),
+          });
+          run.review = { status:'passed', ...receipt.review };
+          run.result.appliedFiles = [...new Set([...run.result.appliedFiles, ...receipt.appliedFiles])];
+          run.result.treeChanges = [...(run.result.treeChanges || []), ...(receipt.treeChanges || [])];
+          for (const job of run.jobs) job.acceptanceStatus = 'passed';
+          event(run, 'final_review_completed', { review: run.review });
+        }
+        run.result.appliedFiles ||= [...new Set(run.jobs.flatMap(job => job.appliedFiles || []))];
+        run.result.cleanup = { status: 'queued', error: '' };
+        run.status = 'accepted';
+        run.acceptedAt = new Date().toISOString();
+        event(run, 'accepted', { appliedFiles: run.result.appliedFiles, automatic: true, incremental: true });
+        scheduleBackground(run.id, () => finalizeAcceptedRun(run));
       } else {
         await applyRun(run);
       }
     } catch (error) {
       run.status = "failed";
       run.error = error.message;
+      if (error.review) run.review = { status:'failed', ...error.review };
+      if (run.finalReviewOnly) for (const job of run.jobs) job.acceptanceStatus = 'failed';
+      if (error.workspacePath) run.workspacePath = error.workspacePath;
       event(run, "run_failed", { error: error.message });
     }
+    run.finishedAt = new Date().toISOString();
+    run.coordination={phase:run.status==='accepted'?'completed':'blocked',message:run.status==='accepted'?'真实成果已整合，最终独立验收通过':run.error||'尚未通过最终验收',updatedAt:run.finishedAt};
+    clearTimeout(activityTimers.get(run.id));
+    activityTimers.delete(run.id);
+    mailboxes.delete(run.id);
     await refreshRunSummary(run);
     await persist(run);
     return publicRun(run);
@@ -1782,10 +2182,12 @@ export function createParallelCodexCoordinator({
       let result;
       try {
       const contextMessages = await plannerMaterialContext(run, nodeId);
-      result = injectedStartTurn ? null : await requestDeepSeekPlanner({ projectRoot, prompt: plannerPrompt, outputSchema, onNotification: markPlannerItem, contextMessages, sourceTree: run.sourceTree });
+      const historyMessages = executionOptions.get(run.id)?.contextMessages || [];
+      result = injectedStartTurn ? null : await requestDeepSeekPlanner({ projectRoot, prompt: plannerPrompt, outputSchema, onNotification: markPlannerItem, contextMessages, historyMessages, dialogueContext: executionOptions.get(run.id)?.historyMessages || historyMessages, sourceTree: run.sourceTree });
       // Tests may inject a deterministic startTurn; production has no Codex fallback.
       if (!result && injectedStartTurn) result = await startTurn({
         prompt: plannerPrompt,
+        ...(historyMessages.length ? { messages: [...historyMessages, { role: 'user', content: plannerPrompt }] } : {}),
         contextMessages,
         cwd: projectRoot,
         threadId: "",
@@ -1796,8 +2198,6 @@ export function createParallelCodexCoordinator({
         sandbox: "read-only", approvalPolicy: "never",
         developerInstructions: "Start with the supplied tree summary. Read full task-tree.md or a specific subtree only if needed. Return a JSON plan; never edit files.",
         waitForCompletion: true,
-        completionTimeoutMs: PLANNER_TIMEOUT_MS,
-        totalTimeoutMs: PLANNER_TIMEOUT_MS,
         forceNewThread: true,
           onAccepted: async ({ threadId, turnId }) => {
           plannerTiming.acceptedMs = Date.now() - plannerStartedAt;
@@ -1873,20 +2273,22 @@ export function createParallelCodexCoordinator({
       ]);
       const { plan, result } = await requestPlan(run,
         buildPlannerPrompt(markdown, objective, run.goal.history, treeSummary),
-        (output) => normalizePlan(output, markdown, objective, { minimum: 2 }), run.goal.stageNodeId);
+        (output) => normalizePlan(output, markdown, objective, { minimum: 1 }), run.goal.stageNodeId);
       run.summary = plan.summary;
       const enrichedJobs = enrichPlannedJobs(plan.jobs, {
         markdown,
         goal: run.goal,
         history: run.goal.history, treeSummary
       });
-      const jobs = assignParallelDraftContexts(enrichedJobs, run.contextOptions);
+      run.sharedContract = plan.sharedContract;
+      const jobs = assignParallelDraftContexts(enrichedJobs.map(job => ({ ...job, sharedContract: plan.sharedContract || job.sharedContract })), run.contextOptions);
       run.jobs = executionContexts(jobs, [], run.contextOptions).map((job) => ({
         ...job,
         runtimeMetadataPath: runsDir,
         status: "queued", threadId: job.contextThreadId || "", turnId: "", changedFiles: [], error: ""
       }));
       run.coverage = plan.coverage || [];
+      run.acceptanceCriteria = plan.acceptanceCriteria || [];
       run.planner = { status: "completed", threadId: result.threadId, turnId: result.turnId,
         contextResumed: Boolean(result.resumed), error: "", output: String(result.output || ""),
         timing: result.plannerTiming || run.planner?.timing || null };
@@ -1896,7 +2298,7 @@ export function createParallelCodexCoordinator({
       event(run, "plan_started", {
         jobs: run.jobs.map((job) => job.taskId),
         automatic: true,
-        parallelRequired: true,
+        parallelRequired: run.jobs.length > 1,
         workerCount: run.jobs.length
       });
       await persist(run);
@@ -1914,8 +2316,8 @@ export function createParallelCodexCoordinator({
 
   async function recoverAbandonedPlan(run) {
     if (run.status !== "planning" || pending.has(run.id)) return run;
-    const lastUpdate = Date.parse(run.updatedAt || run.createdAt || "");
-    if (Number.isFinite(lastUpdate) && Date.now() - lastUpdate < ABANDONED_PLANNING_MS) return run;
+    // Missing local execution ownership (after restart), not elapsed wall time,
+    // identifies abandoned planning. An active planner is protected by pending.
     event(run, "planning_recovered");
     const promise = Promise.resolve().then(() => generatePlan(run, run.objective)).finally(() => pending.delete(run.id));
     pending.set(run.id, promise);
@@ -1923,26 +2325,19 @@ export function createParallelCodexCoordinator({
   }
 
   async function recoverAbandonedExecution(run) {
-    if (pending.has(run.id) || !["queued", "preparing", "running", "applying"].includes(run.status)) return run;
-    // An interrupted model turn may have made direct external edits. Resume only
-    // preparation or application automatically; don't replay a worker's side effects.
-    if (!run.workspace?.integrationPath || run.jobs.every((job) => job.status === "completed")) {
-      run.jobs = run.jobs.map((job) => job.status === "completed" ? job : { ...job, status: "queued" });
+    if (pending.has(run.id) || !["queued", "preparing", "running", "applying", "checking"].includes(run.status)) return run;
+    {
+      // Completed branches keep their receipts. Interrupted branches continue
+      // in their existing dirty worktrees; createWorker would reset those edits.
+      run.jobs = run.jobs.map((job) => job.status === "completed" || ["failed","blocked","stopped"].includes(job.status) ? job : { ...job, status: "queued", resumeAfterRestart: true });
       run.status = "queued";
       event(run, "execution_requeued_after_restart");
-      await persist(run);
-      const promise = Promise.resolve().then(() => execute(run)).finally(() => pending.delete(run.id));
+      // Claim ownership before awaiting disk I/O; concurrent status polling or
+      // a direct-node recovery cannot schedule the same branches twice.
+      const promise = Promise.resolve().then(async () => { await persist(run); return execute(run); }).finally(() => pending.delete(run.id));
       pending.set(run.id, promise);
       return run;
     }
-    run.jobs = run.jobs.map((job) => job.status === "completed" ? job : {
-      ...job, status: "failed", error: "运行服务中断；已保留分支上下文与隔离结果"
-    });
-    run.status = "failed";
-    run.error = "运行服务中断；重新规划时会带上本轮失败记录";
-    event(run, "execution_recovered");
-    await persist(run);
-    return run;
   }
 
   async function ensureGoalState(run) {
@@ -1972,17 +2367,64 @@ export function createParallelCodexCoordinator({
   async function applyRun(run) {
     registerWorkspaceRun(run);
     if (run.status === "accepted") return publicRun(run);
-    const applied = await workspace.accept({
+    const validateCandidate = independentReview ? async (candidatePath, liveBaseCommit, { attempt = 0, candidateId } = {}) => {
+      run.review = { status: 'running', candidateCommit: await workspace.head(candidatePath), error: '' };
+      event(run, 'review_started', { candidateCommit: run.review.candidateCommit, attempt, candidateId });
+      await persist(run);
+      const reviewPrompt = buildCompletionReviewPrompt([
+          '【功能验收】直接在当前候选工作区验证用户要求的行为。',
+          `用户目标：${run.objective || run.goal?.immediate || ''}`,
+          ...(run.userMessages?.length ? [`用户补充要求：\n${run.userMessages.slice(-8).map(message => String(message.content || '').trim().slice(0,500)).filter(Boolean).join('\n').slice(0,2400)}`] : []),
+          ...(run.sharedContract ? [`共享接口约定：${run.sharedContract}`] : []),
+          await stageCoordinationEvidence(candidatePath,coordinationEvidence(run))
+        ].join('\n\n'));
+      const response = await independentReview({
+        completionReview:true,
+        cwd: candidatePath, prompt: reviewPrompt,
+        // The review prompt already contains the objective, worker instructions,
+        // shared contract and candidate evidence. Do not copy planner/chat
+        // history into this one-shot checker or persist its internal exchange.
+        persistDialogue: false,
+        environment: { TASK_TREE_PROJECT_ROOT: candidatePath, TASK_TREE_CONTEXT_NODE_ID: run.sourceSelection?.nodeId || run.goal?.stageNodeId || '', TASK_TREE_QUALITY_MODE: 'advisory',
+          ...(run.sourceTree?.path ? { TASK_TREE_CONTEXT_TREE_FILE: run.sourceTree.path } : {}) },
+        stopHookPolicy: 'fail',
+        forceNewThread: true, waitForCompletion: true
+      });
+      event(run, 'integration_review_turn_timing', { role: 'review', attempt, candidateId, timing: response.timing || null, status: response.status });
+      assertTurnCompleted(response);
+      const verdict = parseCompletionReview(response.messages?.at(-1)?.content || response.output);
+      run.review = { ...verdict, status: verdict.verdict === 'pass' ? 'passed' : 'failed', candidateCommit: run.review.candidateCommit };
+      event(run, verdict.verdict === 'pass' ? 'review_passed' : 'review_failed', { reason: run.review.reason });
+      await persist(run);
+      if (verdict.verdict === 'failed') throw completionReviewFailure(verdict);
+      await assertWorkspaceTreeFiles(candidatePath, (await workspace.inspectChanges(candidatePath, liveBaseCommit)).changedFiles);
+      await workspace.commitCandidateRepairs(candidatePath);
+    } : undefined;
+    let applied;
+    try { applied = await workspace.accept({
       integrationPath: run.workspace.integrationPath,
       snapshotCommit: run.workspace.snapshotCommit,
       changedFiles: run.result?.changedFiles || [],
+      onInvalidated: sample => event(run, 'candidate_invalidated', sample),
       resolveConflict: (integrationPath, files) => {
         const source = [...run.jobs].reverse().find((job) => job.changedFiles?.some((file) => files.includes(file))) || run.jobs.at(-1);
         return resolveMergeConflict(run, source, files, integrationPath, true);
+      },
+      validateCandidate: validateCandidate ? async (...args) => {
+        try { await validateCandidate(...args); }
+        catch (error) { throw completionReviewInterruption(error); }
+      } : undefined
+    }); } catch (error) {
+      if (error.code === 'COMPLETION_REVIEW_FAILED') {
+        run.review = { ...error.review, status: 'failed', workspacePath: error.workspacePath || '' };
+        run.workspacePath = error.workspacePath || '';
+        await persist(run);
       }
-    });
+      throw error;
+    }
     run.result ||= {};
     run.result.appliedFiles = applied.appliedFiles;
+    run.result.treeChanges = applied.treeChanges || [];
     run.result.cleanup = { status: "queued", error: "" };
     run.status = "accepted";
     run.acceptedAt = new Date().toISOString();
@@ -2021,7 +2463,7 @@ export function createParallelCodexCoordinator({
     return run;
   }
 
-  return {
+  const api = {
     async plan({ objective = "", treeId, subtree, nodeId } = {}) {
       const now = new Date().toISOString();
       const run = {
@@ -2062,7 +2504,7 @@ export function createParallelCodexCoordinator({
       const submittedJobs = run.jobs || [];
       const selectedNodeId = cleanId(nodeId || run.goal?.stageNodeId);
       const { plan, result } = await requestPlan(run,
-        buildBranchPlannerPrompt(markdown, selectedNodeId, objective || run.objective, submittedJobs, treeSummary),
+        buildBranchPlannerPrompt(markdown, selectedNodeId, objective || run.objective, submittedJobs, treeSummary, run.sharedContract),
         (output) => normalizeBranchPlan(output, markdown, selectedNodeId, objective || run.objective, submittedJobs),
         selectedNodeId,
         BRANCH_OUTPUT_SCHEMA);
@@ -2078,7 +2520,7 @@ export function createParallelCodexCoordinator({
       }
     },
 
-    async append(id, changes = {}) {
+    async append(id, changes = {}, splitParent) {
       const run = await load(id);
       if (!run) throw new Error("找不到这次并行运行");
       if (!["queued", "preparing", "running", "failed"].includes(run.status)) {
@@ -2090,7 +2532,7 @@ export function createParallelCodexCoordinator({
       try {
       const { markdown } = await readParallelSource(projectRoot, run.sourceSelection);
       const treeSummary = await readTreeSummary({ projectRoot, tree: run.sourceTree, markdown });
-      const jobsInput = Array.isArray(changes.jobs) ? changes.jobs : [];
+      const jobsInput = Array.isArray(changes.jobs) ? changes.jobs.map(job=>({...job,dependsOn:expandDependencies(run,job.dependsOn||[])})) : [];
       run.contextOptions = mergeContextOptions(await readContextOptions(runsDir, run.id), run.contextOptions || []);
       const existingIds = new Set(run.jobs.map((job) => job.taskId.toLowerCase()));
       const duplicate = jobsInput.find((job) => existingIds.has(cleanId(job?.taskId || job?.id).toLowerCase()));
@@ -2101,6 +2543,8 @@ export function createParallelCodexCoordinator({
         knownTaskIds: run.jobs.map((job) => job.taskId), existingJobs: run.jobs
       }).map((job) => ({
         ...job,
+        singleFinalReview:run.finalReviewOnly,
+        sharedContract: run.sharedContract || job.sharedContract || '',
         runtimeMetadataPath: runsDir,
         branchContext: buildBranchInputContext(job, { markdown, goal: run.goal || {}, history: run.goal?.history || [], treeSummary }),
         status: "queued", threadId: job.contextThreadId || "", turnId: "", changedFiles: [], error: ""
@@ -2109,8 +2553,21 @@ export function createParallelCodexCoordinator({
       if (!["queued", "preparing", "running", "failed"].includes(run.status)) {
         throw new Error("本轮已在收尾，请在下一轮添加任务");
       }
-      if (run.branchTree) await stageBranches(run, appended);
+      if (run.branchTree) await stageBranches(run, appended, splitParent);
       else run.jobs.push(...appended);
+      if(splitParent){
+        // Persist subdivision and dependency replacement with the appended jobs
+        // before waking the scheduler. Restart never sees a half-handoff.
+        const childIds=appended.map(job=>job.taskId);
+        for(const consumer of run.jobs){
+          if(!childIds.includes(consumer.taskId)&&consumer.dependsOn.includes(splitParent.taskId)){
+            consumer.dependsOn=[...new Set(consumer.dependsOn.flatMap(id=>id===splitParent.taskId?childIds:[id]))];
+          }
+        }
+        splitParent.splitChildren=childIds;
+        splitParent.splitOutput=`已有成果已保存；剩余任务已加入当前流水线：${childIds.join('、')}。子分支继续执行，整体最后统一验收。`;
+        event(run,'worker_subdivided',{taskId:splitParent.taskId,taskIds:childIds,reason:changes.reason});
+      }
       wakeups.get(run.id)?.();
       event(run, "branches_appended", { taskIds: appended.map((job) => job.taskId) });
       await persist(run);
@@ -2125,40 +2582,142 @@ export function createParallelCodexCoordinator({
       }
     },
 
-    async start(input) {
+    async start(input, options = {}) {
+      if (options.reviewScopeFiles !== undefined) validateReviewScopeFiles(options.reviewScopeFiles);
+      options = { ...options, finalReviewOnly: options.finalReviewOnly ?? options.incremental === true };
       const now = new Date().toISOString();
-      const markdown = await readFile(path.join(projectRoot, "task-tree.md"), "utf8");
-      const treeSummary = await readTreeSummary({ projectRoot, markdown });
+      const source = await readParallelSource(projectRoot, options);
+      let markdown = source.markdown;
+      if (source.nodeId) markdown = markdown.replace(/(^- (?:Current|Next):)[^\r\n]*/gm, `$1 ${source.nodeId}`);
+      const treeSummary = await readTreeSummary({ projectRoot, tree: source.tree, markdown });
       const contextOptions = await readContextOptions(runsDir);
       const history = await readGoalHistory(runsDir);
-      const jobs = executionContexts(assignParallelDraftContexts(validateParallelJobs(input), contextOptions), [], contextOptions);
+      const sharedContract = String(options.sharedContract || '');
+      const jobs = executionContexts(assignParallelDraftContexts(validateParallelJobs(input).map(job => ({ ...job, sharedContract: sharedContract || job.sharedContract })), contextOptions), [], contextOptions);
+      const availableNodes = new Set(parseTreeNodeFields(markdown).map(node => node.id));
+      if (options.incremental && jobs.some(job => !availableNodes.has(job.nodeId))) throw new Error('拆分任务引用了当前分支中不存在的节点，请使用当前节点或已有子节点 ID。');
       const run = {
-        id: randomUUID(), status: "queued", objective: "", summary: "直接执行的并行计划",
+        id: randomUUID(), status: "queued", objective: options.objective || "", summary: "按需拆分执行",
+        sourceTree: source.tree, sourceSelection: { treeId: options.treeId, subtree: options.subtree, nodeId: options.nodeId },
+        incremental: options.incremental === true,
+        finalReviewOnly: options.finalReviewOnly === true,
+        reviewBaselineCommit: options.reviewBaselineCommit || '', initialReceipt:options.initialReceipt,
+        ...(options.reviewScopeFiles === undefined ? {} : {reviewScopeFiles:options.reviewScopeFiles}),
+        sharedContract,
+        acceptanceCriteria: normalizeDeliveryContract({acceptanceCriteria:options.acceptanceCriteria}).acceptanceCriteria,
+        coverage: options.coverage || [],
         createdAt: now, updatedAt: now, error: "",
-        goal: { ...deriveParallelGoal(markdown), history },
+        goal: { ...deriveParallelGoal(markdown, options.objective || ''), history },
         planner: { status: "manual", threadId: "", turnId: "", error: "" },
         contextOptions,
         jobs: jobs.map((job) => ({
-          ...job, branchContext: buildBranchInputContext(job, { markdown, goal: deriveParallelGoal(markdown), history, treeSummary }),
+          ...job, singleFinalReview: options.finalReviewOnly,
+          branchContext: buildBranchInputContext(job, { markdown, goal: deriveParallelGoal(markdown), history, treeSummary }),
           runtimeMetadataPath: runsDir,
           status: "queued", threadId: job.contextThreadId || "", turnId: "", changedFiles: [], error: ""
         })),
         events: [], peerMessages: []
       };
       runs.set(run.id, run);
+    executionOptions.set(run.id, options);
+      if (options.incremental) await stageBranches(run);
       await persist(run);
       const promise = Promise.resolve().then(() => execute(run)).finally(() => pending.delete(run.id));
       pending.set(run.id, promise);
       return publicRun(run);
     },
 
-    async get(id) {
+    async get(id, options = {}) {
       const run = await load(id);
       if (!run) return null;
       await recoverAbandonedPlan(run);
       await recoverAbandonedExecution(run);
       await ensureGoalState(run);
       await recoverAcceptedFinalization(run);
+      return publicRun(run, options);
+    },
+
+    async snapshot(id, options = {}) { const run=await load(id);return run?publicRun(run, options):null; },
+    async getJob(id, taskId) {
+      const run=await load(id),job=run?.jobs?.find(job=>job.taskId===taskId);
+      if(!job)return null;
+      return {runId:run.id,job:publicJob(job),
+        userMessages:(run.userMessages||[]).filter(message=>message.taskId===taskId),
+        peerMessages:(run.peerMessages||[]).filter(message=>message.fromTaskId===taskId||message.toTaskId===taskId)};
+    },
+    async sendAgentMessage(id, body) {
+      const run=await load(id);
+      if(!run)throw Object.assign(new Error('找不到这次并行运行'),{code:'RUN_NOT_FOUND',statusCode:404});
+      // Use the same durable mailbox even while workers are being prepared.
+      const mailbox=mailboxes.get(id)||createPeerMailbox(run,{persist,onEvent:(type,detail)=>event(run,type,detail)});
+      const message=await mailbox.sendUserMessage(body);
+      return {message,run:publicRun(run)};
+    },
+    async resume(id, options = {}) {
+      const run = await load(id);
+      if(!run)throw new Error('找不到需要续跑的并行任务');
+      if (options.reviewScopeFiles !== undefined) {
+        run.reviewScopeFiles = validateReviewScopeFiles(options.reviewScopeFiles);
+        await persist(run);
+      }
+      // Migrate only old records with evidence of successful model completion
+      // followed by delivery failure. A partial or timed-out model response is
+      // never a completed checkpoint, even if it contains reassuring prose.
+      for (const job of run.jobs.filter(job => job.status === 'failed' && !job.workerCompleted
+        && job.evidence && /^独立合并失败：/.test(job.error || ''))) {
+        const lastTurn = run.events?.filter(event => event.type === 'worker_turn_timing' && event.taskId === job.taskId).at(-1);
+        const lastRound = lastTurn?.timing?.rounds?.at(-1);
+        if (lastRound?.finishReason === 'stop' && !lastRound.error) job.workerCompleted = true;
+      }
+      const previousOptions = executionOptions.get(id) || {};
+      executionOptions.set(id,{...previousOptions,...options,finalReviewOnly:run.finalReviewOnly,incremental:run.incremental});
+      // An explicit user retry also revives failed siblings while unaffected
+      // workers are running. Do not start a second scheduler or replay them.
+      if (pending.has(id)) {
+        const retryable = run.jobs.filter(job => ['failed', 'blocked', 'stopped'].includes(job.status));
+        for (const job of retryable) {
+          job.retryReason = job.error || job.retryReason || '上次运行未完成';
+          job.status = 'queued'; job.error = ''; job.finishedAt = ''; job.resumeAfterRestart = true;
+        }
+        if (retryable.length) {
+          event(run, 'run_retry_requested', { taskIds: retryable.map(job => job.taskId) });
+          await persist(run);
+          wakeups.get(id)?.();
+        }
+        return publicRun(run);
+      }
+      if (["queued", "preparing", "running", "applying", "checking"].includes(run.status)) {
+        // After restart, some siblings can already be failed while others
+        // were interrupted. An explicit retry revives both in one scheduler.
+        const retryable = run.jobs.filter(job => ['failed', 'blocked', 'stopped'].includes(job.status));
+        for (const job of retryable) {
+          job.retryReason = job.error || job.retryReason || '上次运行未完成';
+          job.status = 'queued'; job.error = ''; job.finishedAt = ''; job.resumeAfterRestart = true;
+        }
+        if (retryable.length) {
+          run.error = ''; run.finishedAt = '';
+          event(run, 'run_retry_requested', { taskIds: retryable.map(job => job.taskId) });
+        }
+        await recoverAbandonedExecution(run);
+        return publicRun(run);
+      }
+      if (run.status !== "failed") throw new Error(`当前运行状态 ${run.status} 不支持续跑`);
+
+      const retryable = run.jobs.filter(job => job.status !== "completed");
+      for (const job of retryable) {
+        job.retryReason = job.error || job.retryReason || "上次运行未完成";
+        job.status = "queued";
+        job.error = "";
+        job.finishedAt = "";
+        job.resumeAfterRestart = true;
+      }
+      run.status = "queued";
+      run.error = "";
+      run.result = null;
+      run.finishedAt = "";
+      event(run, "run_retry_requested", { taskIds: retryable.map(job => job.taskId) });
+      const promise = Promise.resolve().then(async () => { await persist(run); return execute(run); }).finally(() => pending.delete(id));
+      pending.set(id, promise);
       return publicRun(run);
     },
 
@@ -2180,12 +2739,11 @@ export function createParallelCodexCoordinator({
     },
 
     async drain() {
-      let rounds = 0;
-      while ((pending.size || background.size) && rounds < 20) {
-        rounds += 1;
+      while (pending.size || background.size) {
         await Promise.allSettled([...pending.values(), ...background.values()]);
       }
       await persistQueue.catch(() => {});
     }
   };
+  return api;
 }

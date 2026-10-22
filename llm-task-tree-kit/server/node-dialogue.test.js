@@ -48,3 +48,23 @@ test('old single-tree records without a tree ID are visible under the method tre
   assert.equal(normalized.runs[0].treeId, 'method');
   assert.equal(normalized.conversations[0].id, nodeConversationId('method', 'N12'));
 });
+
+test('reopened run exposes full saved conversation instead of its stale execution snapshot', () => {
+  const history = [{role:'user',content:'第一轮'}, {role:'assistant',content:'第一轮回复'},
+    {role:'user',content:'甲与乙有矛盾，按关系分类'}, {role:'assistant',content:'已记录用户提供的关系'}];
+  const state = {runs:[{id:'r',treeId:'people',nodeId:'ROOT',conversationId:'c',status:'completed',messages:history.slice(0,2)}],
+    conversations:[{id:'c',treeId:'people',nodeId:'ROOT',messages:history}]};
+  const restored = normalizeNodeDialogues(state);
+  assert.deepEqual(restored.runs[0].messages, history);
+  assert.deepEqual(normalizeNodeDialogues(serializeDialogueState(restored)),restored);
+});
+
+test('restart keeps newer execution text at the pre-review persistence boundary without undoing edited history', () => {
+  const history = [{role:'user',content:'任务'}, {role:'assistant',content:'已完成的执行回复'}];
+  const state = {runs:[{id:'r',treeId:'a',nodeId:'ROOT',conversationId:'c',status:'completed',messages:history}],
+    conversations:[{id:'c',treeId:'a',nodeId:'ROOT',messages:history.slice(0,1)}]};
+  const restored = normalizeNodeDialogues(state);
+  assert.deepEqual(restored.conversations[0].messages,history);
+  state.conversations[0].messages=[{role:'user',content:'编辑后的任务'}];
+  assert.deepEqual(normalizeNodeDialogues(state).runs[0].messages,state.conversations[0].messages);
+});

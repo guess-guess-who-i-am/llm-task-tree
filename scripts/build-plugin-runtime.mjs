@@ -20,9 +20,10 @@ import { fileURLToPath } from "node:url";
 
 /**
  * Everything `scripts/mcp-server.mjs` and the local server it starts need, and nothing else:
- * installers, templates, tests and docs stay out so the package carries only what runs.
+ * The SSH launcher also needs the POSIX project installer, protocols and templates on the
+ * destination host; these travel with the plugin so remote deployment is self-contained.
  */
-export const RUNTIME_SOURCES = ["package.json", "package-lock.json", "server.js", "scripts/mcp-server.mjs", "scripts/ocr-image.swift", "scripts/prewarm-chat-attachments.mjs", "server", "public"];
+export const RUNTIME_SOURCES = ["package.json", "package-lock.json", "server.js", "scripts/mcp-server.mjs", "scripts/ocr-image.swift", "scripts/prewarm-chat-attachments.mjs", "scripts/install-linux-project.mjs", "scripts/remote-workspace-bootstrap.mjs", "AGENTS.task-tree.md", "AGENTS.node-writing.md", "start-task-tree.sh", "templates", "skills", "server", "public"];
 
 /** The entry the plugin's mcp.json names, relative to the plugin root. */
 export const RUNTIME_ENTRY = "./runtime/scripts/mcp-server.mjs";
@@ -40,8 +41,16 @@ async function collect(root, rel, found = []) {
 
 async function runtimeFiles(sourceRoot) {
   const found = [];
-  for (const source of RUNTIME_SOURCES) await collect(sourceRoot, source, found);
+  for (const source of RUNTIME_SOURCES) await collect(await sourceDirectory(sourceRoot, source), source, found);
   return found.sort();
+}
+
+// The development checkout keeps portable protocols/templates in its kit directory.
+async function sourceDirectory(sourceRoot, rel) {
+  if (existsSync(path.join(sourceRoot, rel))) return sourceRoot;
+  const kit = path.join(sourceRoot, 'llm-task-tree-kit');
+  if (existsSync(path.join(kit, rel))) return kit;
+  return sourceRoot;
 }
 
 const digest = (buffer) => createHash("sha256").update(buffer).digest("hex");
@@ -99,7 +108,7 @@ export async function buildPluginRuntime({ sourceRoot, pluginRoot, write = true 
   const stale = [];
   let bytes = 0;
   for (const rel of files) {
-    const from = path.join(sourceRoot, rel);
+    const from = path.join(await sourceDirectory(sourceRoot, rel), rel);
     const to = path.join(runtimeDir, rel);
     const source = await readFile(from);
     bytes += source.length;

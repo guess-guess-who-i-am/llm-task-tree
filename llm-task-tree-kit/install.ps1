@@ -48,7 +48,13 @@ if (-not (Test-Path -LiteralPath $treeRegistry)) {
   try {
     $registry = Get-Content -LiteralPath $treeRegistry -Raw -Encoding UTF8 | ConvertFrom-Json
     $expectedRegistry = Get-Content -LiteralPath $treeRegistryTemplate -Raw -Encoding UTF8 | ConvertFrom-Json
-    $trees = @($registry.trees)
+    $originalTrees = @($registry.trees)
+    $trees = @($originalTrees | Where-Object {
+      $treePath = ([string]$_.path).Replace('\', '/')
+      $isBundledBackground = ([string]$_.id -eq 'background' -and $treePath -eq 'trees/background.md' -and [string]$_.title -eq '项目背景支撑')
+      $isBundledArchitecture = ([string]$_.id -eq 'architecture' -and $treePath -eq 'trees/architecture.md' -and [string]$_.title -eq '任务图系统架构')
+      -not ($isBundledBackground -or $isBundledArchitecture)
+    })
     $ids = @($trees | ForEach-Object { [string]$_.id })
     $added = @()
     foreach ($expected in @($expectedRegistry.trees)) {
@@ -58,27 +64,19 @@ if (-not (Test-Path -LiteralPath $treeRegistry)) {
         $added += [string]$expected.id
       }
     }
-    if ($added.Count -gt 0) {
+    $removed = $originalTrees.Count - $trees.Count
+    if ($added.Count -gt 0 -or $removed -gt 0) {
       $registry.trees = $trees
+      if ($ids -notcontains [string]$registry.activeMethod) {
+        $activeMethodTree = @($trees | Where-Object { [string]$_.role -eq 'method' } | Select-Object -First 1)
+        if ($activeMethodTree.Count -gt 0) { $registry.activeMethod = [string]$activeMethodTree[0].id }
+      }
       $json = $registry | ConvertTo-Json -Depth 10
       [System.IO.File]::WriteAllText($treeRegistry, ($json -replace "`r`n", "`n") + "`n", (New-Object System.Text.UTF8Encoding($false)))
-      Write-Step "Updated multi-tree registry (+$($added -join ','))"
+      Write-Step "Updated multi-tree registry (+$($added -join ','); removed $removed bundled optional entries; tree files kept)"
     }
   } catch {
     throw "Cannot update task-trees.json safely: $($_.Exception.Message)"
-  }
-}
-
-New-Item -ItemType Directory -Force -Path (Join-Path $ProjectRoot "trees") | Out-Null
-foreach ($asset in @(
-  @{ Source = "background-tree.md"; Target = "background.md" },
-  @{ Source = "architecture-tree.md"; Target = "architecture.md" }
-)) {
-  $source = Join-Path $KitDir ("templates\" + $asset.Source)
-  $target = Join-Path $ProjectRoot ("trees\" + $asset.Target)
-  if ((Test-Path -LiteralPath $source) -and -not (Test-Path -LiteralPath $target)) {
-    Copy-Item -LiteralPath $source -Destination $target -Force
-    Write-Step "Created trees/$($asset.Target)"
   }
 }
 

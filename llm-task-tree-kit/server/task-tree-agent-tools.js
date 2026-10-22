@@ -5,14 +5,14 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const protocols = ['2025-06-18', '2025-03-26', '2024-11-05'];
 
-export async function createTaskTreeAgentTools({ cwd, environment = {}, signal, timeoutMs = 90_000 } = {}) {
+export async function createTaskTreeAgentTools({ cwd, environment = {}, signal } = {}) {
   const child = spawn(process.execPath, [path.join(root, 'scripts', 'mcp-server.mjs'), '--project-root', path.resolve(cwd || process.cwd())], {
     cwd: root, env: { ...process.env, ...environment }, stdio: ['pipe', 'pipe', 'pipe']
   });
   let id = 0;
   let buffer = '', stderr = '', closed = false;
   const pending = new Map();
-  function rejectAll(error) { for (const item of pending.values()) { clearTimeout(item.timer); item.reject(error); } pending.clear(); }
+  function rejectAll(error) { for (const item of pending.values()) item.reject(error); pending.clear(); }
   const close = async () => { closed = true; signal?.removeEventListener('abort', abort); rejectAll(new Error('任务树 MCP 已关闭')); try { child.stdin.end(); child.kill('SIGTERM'); } catch {} };
   const abort = () => { void close(); };
   signal?.addEventListener('abort', abort, { once: true });
@@ -27,7 +27,7 @@ export async function createTaskTreeAgentTools({ cwd, environment = {}, signal, 
       try { message = JSON.parse(line); } catch { continue; }
       const item = pending.get(message.id);
       if (!item) continue;
-      clearTimeout(item.timer); pending.delete(message.id);
+      pending.delete(message.id);
       if (message.error) item.reject(new Error(message.error.message || JSON.stringify(message.error)));
       else item.resolve(message.result);
     }
@@ -38,8 +38,7 @@ export async function createTaskTreeAgentTools({ cwd, environment = {}, signal, 
   const request = (method, params = {}) => new Promise((resolve, reject) => {
     if (closed || signal?.aborted) return reject(new Error('任务树 MCP 已关闭'));
     const requestId = ++id;
-    const timer = setTimeout(() => { pending.delete(requestId); reject(new Error(`任务树 MCP ${method} 超时（${timeoutMs}ms）`)); void close(); }, timeoutMs);
-    pending.set(requestId, { resolve, reject, timer });
+    pending.set(requestId, { resolve, reject });
     child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: requestId, method, params })}\n`);
   });
   try {
@@ -55,6 +54,9 @@ export async function createTaskTreeAgentTools({ cwd, environment = {}, signal, 
         const result = await request('tools/call', { name, arguments: args });
         const text = result?.content?.filter(item => item.type === 'text').map(item => item.text).join('\n');
         if (result?.isError) throw new Error(text || `任务树工具失败：${name}`);
+        // A JSON caption does not replace companion images/resources. The model
+        // transport owns native multimodal projection of the complete envelope.
+        if(result?.content?.some(item=>item.type!=='text'))return result;
         try { return text ? JSON.parse(text) : result; } catch { return result; }
       },
       close

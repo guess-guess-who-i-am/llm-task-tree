@@ -17,6 +17,8 @@ import "../public/tree-layout.js";
 import { existsSync, realpathSync } from "node:fs";
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import net from "node:net";
+import { request as httpRequest } from 'node:http';
+import { Readable } from 'node:stream';
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { localNetworkEnvironment } from '../server/network-environment.js';
@@ -26,6 +28,7 @@ import { readTreeSummary } from '../server/tree-context.js';
 import { fileURLToPath } from "node:url";
 import { locateProjectRoot } from "../server/turn-tracker.js";
 import { findTree, loadTreeRegistry, resolveTreeFile } from "../server/tree-registry.js";
+import { TREE_CATALOG_TOOL } from '../server/tree-catalog-tool.js';
 import { ACTIVE_METHOD_TREE_MAX_BYTES, inspectTreeFile, inspectTreeMarkdown, isTreeMarkdownPath, parseTreeNodeFields } from "../server/tree-quality.js";
 import { buildExecutionCatalog, computeFlowDrift, getFlowScript } from "../server/flow-script.js";
 import { renderGraphPng } from "../server/graph-render.js";
@@ -38,7 +41,6 @@ const SERVER_VERSION = "0.2.0";
 const SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const NEXT_PLAN_WARNING = "GraphState.NextPlan 是用户备忘，可能过期，禁止执行；唯一执行依据是 Next 节点的 NextIdea。";
 const HOST = "127.0.0.1";
-const START_TIMEOUT_MS = 40000;
 const DEFAULT_EXECUTION_SCOPE = String(process.env.TASK_TREE_EXECUTION_SCOPE || "").trim();
 const QUALITY_ADVISORY = process.env.TASK_TREE_QUALITY_MODE === 'advisory';
 
@@ -66,18 +68,19 @@ const knownPortsFile = path.join(projectRoot, ".task-tree-ports");
 
 // ---------------------------------------------------------------- tree reading
 
-async function activeTree() {
+async function activeTree(treeId) {
   const registryFile = path.join(projectRoot, "task-trees.json");
   const registry = await loadTreeRegistry({ projectRoot, registryFile, create: false });
   const contextFile = String(process.env.TASK_TREE_CONTEXT_TREE_FILE || '').trim();
-  if (contextFile) {
+  if (contextFile && !treeId) {
     if (!isTreeMarkdownPath(contextFile)) throw new Error('模型任务树上下文路径不合法');
     const file = path.resolve(projectRoot, contextFile);
     if (!file.startsWith(projectRoot + path.sep)) throw new Error('模型任务树上下文越出工具工作区');
     const registered = registry.trees.find(item => item.path === contextFile);
     return { id: registered?.id || '', title: registered?.title || '当前执行分支', file, relative: contextFile };
   }
-  const tree = findTree(registry, registry.activeMethod);
+  const tree = findTree(registry, treeId || registry.activeMethod);
+  if (treeId && !tree) throw new Error(`任务树不存在：${treeId}；先用 task_tree_registry(action=list) 查看`);
   const file = tree ? resolveTreeFile(projectRoot, tree) : path.join(projectRoot, "task-tree.md");
   return {
     id: tree?.id || "",
@@ -109,10 +112,21 @@ function fieldsOf(nodes, nodeId) {
   return nodes.find((node) => node.id === nodeId) || null;
 }
 
-async function treeMarkdownFiles() {
+async function treeMarkdownFiles(treeId) {
   const files = [];
-  const active = await activeTree();
+  const active = await activeTree(treeId);
   files.push(active.relative);
+  if (treeId) {
+    for (let i=0;i<files.length;i++) {
+      const markdown = await readFile(path.join(projectRoot,files[i]),'utf8');
+      for (const node of parseTreeNodeFields(markdown)) {
+        const rel=String(node.fields.SubtreeFile || '').trim().replace(/\\/g,'/');
+        const full=path.resolve(projectRoot,rel);
+        if (rel && isTreeMarkdownPath(rel) && full.startsWith(projectRoot+path.sep) && existsSync(full) && !files.includes(rel)) files.push(rel);
+      }
+    }
+    return files;
+  }
   for (const dir of ["subtrees", "trees"]) {
     const full = path.join(projectRoot, dir);
     if (!existsSync(full)) continue;
@@ -256,9 +270,11 @@ async function startServer() {
     stdio: "ignore"
   });
   child.unref();
-
-  const deadline = Date.now() + START_TIMEOUT_MS;
-  while (Date.now() < deadline) {
+  let startupError;
+  child.once('error',error=>{startupError=error;});
+  child.once('exit',(code,signal)=>{startupError ||= new Error(`任务图服务启动失败（${code ?? signal}，端口 ${port}）`);});
+  for (;;) {
+    if (startupError) throw startupError;
     const live = await probePort(port, { timeoutMs: 800 });
     if (live) {
       await rememberPort(port);
@@ -266,7 +282,6 @@ async function startServer() {
     }
     await new Promise((resolve) => setTimeout(resolve, 400));
   }
-  throw new Error(`任务图服务在 ${START_TIMEOUT_MS / 1000}s 内没有起来（端口 ${port}，运行时 ${kit}）`);
 }
 
 /** The https listener only exists once a local certificate has been installed and trusted. */
@@ -298,13 +313,29 @@ async function ensureServer() {
 }
 
 /** One retry: a just-started server can drop the first request while it warms up. */
+function localApiFetch(url, init) {
+  // Node fetch has an implicit ~300s header/body timeout. A local tool may
+  // legitimately compute longer, so use the HTTP client with no task deadline.
+  return new Promise((resolve,reject)=>{
+    const request=httpRequest(url,{method:init.method,headers:init.headers},response=>{
+      const headers=new Headers();
+      for(const [name,value] of Object.entries(response.headers))if(value!==undefined)headers.set(name,Array.isArray(value)?value.join(', '):value);
+      const empty=[204,205,304].includes(response.statusCode);
+      if(empty)response.resume();
+      resolve(new Response(empty?null:Readable.toWeb(response),{status:response.statusCode,headers}));
+    });
+    request.once('error',reject);
+    request.end(init.body);
+  });
+}
+
 async function fetchWithRetry(url, init) {
   try {
-    return await fetch(url, init);
+    return await localApiFetch(url, init);
   } catch (error) {
     await new Promise((resolve) => setTimeout(resolve, 800));
     try {
-      return await fetch(url, init);
+      return await localApiFetch(url, init);
     } catch {
       throw error;
     }
@@ -317,7 +348,6 @@ async function api(method, endpoint, body) {
     method,
     headers: body === undefined ? undefined : { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(300000)
   });
   const text = await response.text();
   let payload = text;
@@ -383,7 +413,6 @@ async function toolApi(args) {
     method,
     headers: body === undefined ? undefined : { "content-type": "application/json" },
     body,
-    signal: AbortSignal.timeout(300000)
   });
   return {
     status: response.status,
@@ -444,18 +473,18 @@ function patchNodeFields(markdown, nodeId, fields) {
 
 // -------------------------------------------------------------------- tools
 
-async function toolTreeSummary() {
-  const tree = await activeTree();
+async function toolTreeSummary(args = {}) {
+  const tree = await activeTree(args.treeId);
   return readTreeSummary({ projectRoot, tree: { id: tree.id, path: tree.relative } });
 }
 
-async function toolTreeRead() {
-  const tree = await activeTree();
+async function toolTreeRead(args = {}) {
+  const tree = await activeTree(args.treeId);
   return { treeId: tree.id, treePath: tree.relative, markdown: await readFile(tree.file, 'utf8') };
 }
 
 async function toolFocus(args) {
-  const tree = await activeTree();
+  const tree = await activeTree(args?.treeId);
   if (!existsSync(tree.file)) {
     return { error: `没有找到任务树：${tree.relative}。当前工作区可能不是任务图项目。`, projectRoot };
   }
@@ -505,7 +534,7 @@ async function toolNode(args) {
     }
     return { projectRoot, file, id: node.id, title: node.title, fields };
   };
-  for (const rel of await treeMarkdownFiles()) {
+  for (const rel of await treeMarkdownFiles(args.treeId)) {
     const full = path.join(projectRoot, rel);
     if (!existsSync(full)) continue;
     const node = fieldsOf(parseTreeNodeFields(await readFile(full, "utf8")), nodeId);
@@ -532,7 +561,7 @@ async function toolNode(args) {
     }
     return index;
   }
-  return { error: `任务树里没有节点 ${nodeId}。`, searched: await treeMarkdownFiles() };
+  return { error: `任务树里没有节点 ${nodeId}。`, searched: await treeMarkdownFiles(args.treeId) };
 }
 
 async function toolCheckCompact(args) {
@@ -731,7 +760,7 @@ async function toolRender(args) {
     // Image first: older Codex builds only picked up the image when no text preceded it.
     // No structuredContent either — Codex drops content[] when it is present (openai/codex#10334).
     mcpContent: [
-      { type: "image", data: shot.png.toString("base64"), mimeType: "image/png" },
+      { type: "image", data: shot.png.toString("base64"), mimeType: "image/png", annotations: { audience: ["user"] } },
       { type: "text", text: `${caption}\n${shot.width}x${shot.height}px，与界面同一份渲染。要交互（拖拽/编辑/知识库）用 task_tree_server action=open。` }
     ]
   };
@@ -746,7 +775,7 @@ function clampNumber(value, min, max, fallback) {
 async function toolWrite(args) {
   const reason = String(args?.reason || "").trim();
   if (!reason) return { error: "缺少 reason：写树必须说明原因，会写进 versions/ 备份名。" };
-  const tree = await activeTree();
+  const tree = await activeTree(args.treeId);
   const scopeId = requestedScopeId(args);
   if (scopeId && typeof args?.markdown === "string" && args.markdown.trim()) {
     return { error: "带执行范围的 Agent 禁止整棵树覆盖；请用 {nodeId, fields} 写入获授权节点。" };
@@ -770,11 +799,22 @@ async function toolWrite(args) {
         return { error: `${key} 属于 GraphState，不能通过节点字段写入；焦点由用户在 UI 指定。` };
       }
     }
+    const patchSubtreeNode = async () => {
+      const { payload, startedServer } = await api("POST", "/api/tree/agent-subtree-node-patch", {
+        nodeId, fields, reason,
+        ...(scopeId ? { scopeId } : {}),
+        ...(tree.id ? { treeId: tree.id } : {})
+      });
+      return { ...payload, startedServer };
+    };
+    const index = parseTreeNodeFields(current).find(node => node.id === nodeId);
+    if (index?.fields.SubtreeFile?.trim()) return patchSubtreeNode();
     try {
       const patched = patchNodeFields(current, nodeId, fields);
       next = patched.markdown;
       applied = patched.applied;
     } catch (error) {
+      if (/^任务树里没有节点 /.test(error.message)) return patchSubtreeNode();
       return { error: error.message };
     }
   }
@@ -884,21 +924,27 @@ async function toolSubtree(args) {
   }
   if (action === "write") {
     if (!target || typeof args?.markdown !== "string") return { error: "write 需要 path 与 markdown。" };
+    const tree = await activeTree(args.treeId);
     const gate = inspectTreeMarkdown(args.markdown, { file: target });
     if (!QUALITY_ADVISORY && (gate.violations.length || gate.longLines.length)) {
       return { error: "子树未过精炼门禁，已拒绝写入。", violations: gate.violations, longLines: gate.longLines };
     }
-    const { payload } = await api("POST", "/api/subtree-file", {
+    const { payload } = await api("POST", "/api/subtree-file/fold", {
       path: target,
       markdown: args.markdown,
+      ...(args.foldRoot ? { foldRoot: args.foldRoot } : {}),
+      ...(args.mode!==undefined ? { mode: args.mode } : {}),
+      ...((args.treeId || tree.id) ? { treeId: args.treeId || tree.id } : {}),
       reason: args?.reason || `将保存子树${target}`
     });
     return {...payload,...(QUALITY_ADVISORY ? {advisory:true,warnings:{violations:gate.violations,longLines:gate.longLines}} : {})};
   }
   if (action === "sync_stub") {
     if (!target) return { error: "sync_stub 需要 path。" };
+    const tree = await activeTree(args.treeId);
     const { payload } = await api("POST", "/api/subtree-file/sync-stub", {
       path: target,
+      ...(tree.id ? {treeId:tree.id} : {}),
       foldRoot: args?.foldRoot || undefined,
       reason: args?.reason || `将同步子树${target}摘要到主树stub`
     });
@@ -935,6 +981,10 @@ async function toolKnowledge(args) {
     const { payload } = await api("GET", "/api/knowledge/config");
     return { index: payload.index, webSearch: payload.webSearch, openWebSearch: payload.openWebSearch };
   }
+  if (action === "web_batch") {
+    const {payload}=await api("POST","/api/web-search/batch",{queries:args.queries,topK:args.topK,concurrency:args.concurrency,refresh:args.refresh});
+    return payload;
+  }
   if (!query) return { error: "需要 query（或 question）。" };
   if (action === "search") {
     const { payload } = await api("POST", "/api/knowledge/search", {
@@ -956,7 +1006,7 @@ async function toolKnowledge(args) {
     return payload;
   }
   if (action === "web") {
-    const { payload } = await api("POST", "/api/web-search/search", { query, topK: args?.topK });
+    const { payload } = await api("POST", "/api/web-search/search", { query, topK: args?.topK, refresh:args?.refresh });
     return payload;
   }
   if (action === "reindex") {
@@ -1144,7 +1194,18 @@ async function toolFlowWrite(args) {
   return { error: `未知 action：${action}（可用 sync_status/rebuild/write_step/drift）` };
 }
 
+async function toolTreeRegistry(args) {
+  if (args.action === 'list') return (await api('GET','/api/trees')).payload;
+  if (!args.id || !args.title) throw new Error('新建/接入独立树需要 id 和 title');
+  if (args.action === 'register' && !args.path) throw new Error('接入已有树需要 path');
+  if (args.action === 'register' && args.markdown !== undefined) throw new Error('register 不写正文；用 create 新建或 task_tree_write 修改');
+  const {action,...input} = args;
+  const {payload} = await api('POST','/api/trees',{...input,...(action === 'register' ? {registerExisting:true} : {})});
+  return {...payload,treeId:payload.tree.id,path:payload.tree.path,url:`/?tree=${encodeURIComponent(payload.tree.id)}`};
+}
+
 const TOOLS = [
+  {name:TREE_CATALOG_TOOL.name,description:TREE_CATALOG_TOOL.description,inputSchema:TREE_CATALOG_TOOL.parameters,handler:toolTreeRegistry},
   {
     name: "task_tree_scope",
     description: "多 Agent 执行范围：create 为一个会话分配目标节点和可写节点，get 查看，close 关闭。把返回的 scopeId 传给 task_tree_focus/task_tree_write；内置 coordinator 会自动注入。",
@@ -1167,7 +1228,7 @@ const TOOLS = [
   {
     name: "task_tree_focus",
     description: "读取当前任务图焦点；若提供 scopeId 或环境中有 TASK_TREE_EXECUTION_SCOPE，则优先返回本 Agent 的 assignedNodes，全球 GraphState.Next 只作项目背景。",
-    inputSchema: { type: "object", properties: { scopeId: { type: "string", description: "当前 Agent 的执行范围 ID；内置并行运行会自动注入" } }, additionalProperties: false },
+    inputSchema: { type: "object", properties: { treeId:{type:'string'}, scopeId: { type: "string", description: "当前 Agent 的执行范围 ID；内置并行运行会自动注入" } }, additionalProperties: false },
     handler: toolFocus
   },
   {
@@ -1175,7 +1236,7 @@ const TOOLS = [
     description: "按节点 ID 读取任务图节点的全部字段（Problem/Approach/Input/Output/Metrics/CurrentResult/RootCauseAnalysis/NextIdea 等）。会自动在主树、subtrees/ 和 trees/ 中查找；折叠节点按 SubtreeFile 返回真实子树根字段及主树索引。只读。",
     inputSchema: {
       type: "object",
-      properties: { nodeId: { type: "string", description: "节点 ID，例如 ROOT、N2、N11、ST-P1" } },
+      properties: { treeId:{type:'string',description:'指定独立树，避免同名 ROOT 歧义'}, nodeId: { type: "string", description: "节点 ID，例如 ROOT、N2、N11、ST-P1" } },
       required: ["nodeId"],
       additionalProperties: false
     },
@@ -1184,13 +1245,13 @@ const TOOLS = [
   {
     name: 'task_tree_summary',
     description: '读取新鲜主树地图和折叠根当前状态，不展开折叠子树后代；需要更多内容再读完整主树或指定子树。',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    inputSchema: { type: 'object', properties: {treeId:{type:'string'}}, additionalProperties: false },
     handler: toolTreeSummary
   },
   {
     name: 'task_tree_read',
     description: '按需读取完整活动主树 Markdown，不自动展开折叠子树。',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    inputSchema: { type: 'object', properties: {treeId:{type:'string'}}, additionalProperties: false },
     handler: toolTreeRead
   },
   {
@@ -1222,6 +1283,7 @@ const TOOLS = [
       type: "object",
       properties: {
         nodeId: { type: "string", description: "要改的节点 ID" },
+        treeId:{type:'string',description:'指定独立树 ID；省略使用当前执行树'},
         fields: { type: "object", description: "字段名到新值的映射，值可用 \\n 分行写多个 bullet" },
         markdown: { type: "string", description: "整棵树的新 markdown（与 nodeId/fields 二选一）" },
         scopeId: { type: "string", description: "当前 Agent 的执行范围 ID；存在时只能写获授权节点且禁止整树覆盖" },
@@ -1250,14 +1312,16 @@ const TOOLS = [
   },
   {
     name: "task_tree_subtree",
-    description: QUALITY_ADVISORY ? '子树读写：read 读取、context 取上下文、write 写入、sync_stub 同步主树索引、unfold 删除子树文件。篇幅格式只返回建议，不阻塞。changes 是实际落盘差异，据此报告旧值 → 新值；折叠先 write 再 sync_stub。' : "子树读写与折叠：read 读子树、context 取子树 Agent 上下文、write 写子树（同样过门禁）、sync_stub 把子树摘要同步回主树 stub（这是折叠的收尾）、unfold 删除子树文件。写入响应的 changes 是实际差异，必须据此向用户报告节点、字段、旧值 → 新值。折叠一个节点 = 先 write 子树文件，再 sync_stub。",
+    description: `子树读写与接入：接入新生成的独立子树用 write mode=attach，保留全部主树阶段与业务关系；mode=fold（省略时旧行为）折叠现有画布后代，不能用于阶段主干接入。read 读子树、context 取上下文；write 同时保存子树并链接指定 treeId 的父节点索引，无需再 sync_stub；sync_stub 重新同步已有索引；unfold 删除子树文件。正文含 Fold root、根节点、子节点、GraphState、连通二元 Edges。内部节点 ID 仅用 ASCII 英文字母、数字、下划线或横线，边 ID 还须以 E 开头；中文用于标题和字段正文。changes 是实际落盘差异，据此报告旧值 → 新值。${QUALITY_ADVISORY ? '篇幅格式只返回建议，不阻塞。' : '写入通过精炼门禁。'}`,
     inputSchema: {
       type: "object",
       properties: {
         action: { type: "string", enum: ["read", "context", "write", "sync_stub", "unfold"] },
+        treeId:{type:'string',description:'子树所属独立树 ID；省略使用当前执行树'},
         path: { type: "string", description: "子树相对路径，例如 subtrees/N6-subtree.md" },
         markdown: { type: "string" },
         foldRoot: { type: "string", description: "折叠根节点 ID，留空则从子树内容推断" },
+        mode: {type:'string',enum:['attach','fold'],description:'attach 接入独立子树并保留主干；fold 折叠现有画布后代（省略时兼容旧行为）'},
         reason: { type: "string" }
       },
       additionalProperties: false
@@ -1280,11 +1344,14 @@ const TOOLS = [
   },
   {
     name: "task_tree_knowledge",
-    description: "本地 Markdown 知识库与联网检索：search 向量+词法检索、ask 带引用问答（用配置的 chat 模型）、web 只联网搜、status 看索引状态、reindex 重建索引。",
+    description: "本地 Markdown 知识库与联网检索：search 向量+词法检索、ask 带引用问答（用配置的 chat 模型）、web 单查询联网搜、web_batch 多方向并发联网并去重、status 看索引状态、reindex 重建索引。",
     inputSchema: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["search", "ask", "web", "status", "reindex"] },
+        action: { type: "string", enum: ["search", "ask", "web", "web_batch", "status", "reindex"] },
+        queries: {type:"array",items:{oneOf:[{type:"string"},{type:"object",properties:{query:{type:"string"},direction:{type:"string"}},required:["query"],additionalProperties:false}]},minItems:1},
+        concurrency: {type:"integer",minimum:1},
+        refresh: {type:"boolean"},
         query: { type: "string" },
         question: { type: "string" },
         topK: { type: "number" },

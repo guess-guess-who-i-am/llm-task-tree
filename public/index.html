@@ -22,47 +22,61 @@
     <div id="app">
       <header class="topbar">
         <div class="topbarLead">
-          <button id="chainAutoAdvanceBtn" type="button" class="chainAutoAdvanceBtn" title="Next 节点完成后自动沿执行链推进" aria-pressed="false">自动推进</button>
-          <div>
-            <h1>LLM Task Tree</h1>
+          <div class="topbarBrand">
+            <h1>Task Tree</h1>
             <p id="subtitle">Markdown-backed shared task memory</p>
           </div>
           <div class="projectSwitch">
-            <button id="projectSwitchBtn" type="button" class="projectSwitchBtn" title="切到本机其它装过任务图的项目；每个项目有自己固定的地址和自己的 DeepSeek 会话" aria-haspopup="menu" aria-expanded="false">
+            <button id="projectSwitchBtn" type="button" class="projectSwitchBtn" title="切换使用本 IDE 的项目与对话" aria-haspopup="menu" aria-controls="projectMenu" aria-expanded="false">
               <span id="projectSwitchName">项目</span><span class="projectSwitchCaret">▾</span>
             </button>
-            <div id="projectMenu" class="projectMenu hidden" role="menu" aria-label="切换项目"></div>
+            <div id="projectMenu" class="projectMenu hidden" role="menu" aria-label="切换项目与对话"></div>
           </div>
-          <div class="treeSwitcher" aria-label="任务树选择">
-            <label for="treeSelect">当前树</label>
-            <select id="treeSelect" title="切换背景树、方法树或其它独立任务树"></select>
-            <span id="activeMethodBadge" class="activeMethodBadge" title="执行流程只读取当前活动方法树">方法树</span>
-            <button id="setActiveMethodBtn" type="button" class="treeActionBtn" hidden>设为活动方法树</button>
-            <button id="createTreeBtn" type="button" class="treeActionBtn" title="创建一棵独立任务树">＋ 新树</button>
-            <span id="maintenanceState" class="maintenanceState" title="活动方法树、步骤证据与执行流程的维护状态">维护检查中…</span>
+          <div class="treeSwitcher" aria-label="当前项目任务树选择">
+            <label class="topbarSrOnly" for="treeSelect">当前树</label>
+            <select id="treeSelect" aria-label="当前项目的树" title="切换当前项目里的背景树、方法树或其它独立任务树"></select>
+            <button id="createTreeQuickBtn" type="button" class="treeQuickCreateBtn" title="在当前项目中新建一棵树" aria-label="在当前项目中新建一棵树">＋</button>
           </div>
         </div>
-        <div class="toolbar">
-          <button id="addChildBtn" title="Add child node">＋</button>
-          <label class="toolbarEdgeOpacity" title="选中节点时，非连接边的透明度">
-            <span>边透明</span>
-            <input id="edgeDimOpacity" type="range" min="10" max="90" value="35">
-          </label>
-          <button id="nodeCardCompactBtn" type="button" class="nodeCardCompactBtn" title="节点卡片摘要模式：默认只显示问题与一行结果，详情点开" aria-pressed="true">摘要</button>
-          <button id="projectOverviewBtn" type="button" class="projectOverviewBtn" title="查看项目决策总览">总览</button>
-          <button id="focusLensOpenBtn" type="button" class="focusLensToolbarBtn" title="对选中节点打开焦点透镜" aria-pressed="false"><span aria-hidden="true">◎</span><span class="focusLensToolbarLabel">透镜</span></button>
-          <button id="layoutTreeBtn" title="Layout as tree">⇲</button>
-          <button id="fitViewBtn" title="Fit view">⛶</button>
-          <button id="embedExpandBtn" type="button" class="embedExpandBtn" title="在对话里铺开" aria-pressed="false" hidden>⤢</button>
-          <button id="saveBtn" title="Save to task-tree.md">💾</button>
-          <button id="reloadBtn" title="Reload Markdown">↻</button>
-          <button id="codexParallelBtn" type="button" class="codexParallelToolbarBtn" title="自动规划、并行执行并应用结果"><span aria-hidden="true">⇉</span><span class="codexParallelToolbarLabel">自动并行</span></button>
+        <div class="toolbar" aria-label="常用操作">
+          <div class="topbarGroup" aria-label="视图操作">
+            <button id="projectOverviewBtn" type="button" class="projectOverviewBtn" title="查看项目决策总览">总览</button>
+            <button id="focusLensOpenBtn" type="button" class="focusLensToolbarBtn" title="对选中节点打开焦点透镜" aria-pressed="false"><span class="focusLensToolbarLabel">透镜</span></button>
+            <button id="fitViewBtn" type="button" class="topbarIconBtn" title="适应画布" aria-label="适应画布"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4H4v4m12-4h4v4M4 16v4h4m12-4v4h-4"/></svg></button>
+          </div>
+          <button id="saveBtn" type="button" class="topbarIconBtn" title="保存当前任务树" aria-label="保存当前任务树"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h12l4 4v14H3V3h2Zm2 0v7h10V3M7 21v-7h10v7"/></svg></button>
+          <button id="embedExpandBtn" type="button" class="embedExpandBtn topbarIconBtn" title="在对话里铺开" aria-label="在对话里铺开" aria-pressed="false" hidden>⤢</button>
           <span class="codexLaunch">
-            <button id="openInCodexBtn" type="button" class="openInCodexBtn" title="让 DeepSeek 执行 Next 节点的 NextIdea，自动跑一轮">DeepSeek</button>
-            <button id="codexThreadsBtn" type="button" class="codexThreadsBtn" title="换一条会话，或新开一条" aria-haspopup="menu" aria-expanded="false">▾</button>
+            <button id="openInCodexBtn" type="button" class="openInCodexBtn" title="执行当前节点，由模型按任务需要直接执行或拆分并行"><span aria-hidden="true">▶</span> 执行</button>
+            <button id="codexThreadsBtn" type="button" class="codexThreadsBtn" title="选择节点对话" aria-label="选择节点对话" aria-haspopup="menu" aria-expanded="false">▾</button>
             <div id="codexThreadMenu" class="codexThreadMenu hidden" role="menu" aria-label="选择 Codex 会话"></div>
           </span>
-          <button id="shutdownBtn" title="关闭后台服务">⏻</button>
+          <details id="topbarMore" class="topbarMore">
+            <summary id="topbarMoreBtn" title="更多操作" aria-label="更多操作" aria-expanded="false" aria-controls="topbarMorePanel"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></summary>
+            <div id="topbarMorePanel" class="topbarMorePanel" aria-label="更多操作">
+              <section class="topbarMenuSection" aria-labelledby="topbarTreeHeading">
+                <h2 id="topbarTreeHeading">任务树</h2>
+                <button id="addChildBtn" type="button" title="为当前节点添加子节点">添加子节点<span aria-hidden="true">＋</span></button>
+                <button id="createTreeBtn" type="button" class="treeActionBtn" title="创建一棵独立任务树">新建任务树<span aria-hidden="true">＋</span></button>
+                <button id="setActiveMethodBtn" type="button" class="treeActionBtn" hidden>设为活动方法树</button>
+              </section>
+              <section class="topbarMenuSection" aria-labelledby="topbarViewHeading">
+                <h2 id="topbarViewHeading">显示与排版</h2>
+                <button id="nodeCardCompactBtn" type="button" class="nodeCardCompactBtn" title="切换节点摘要与详文" aria-pressed="true">摘要</button>
+                <button id="layoutTreeBtn" type="button" title="自动整理树的排版">自动排版<span aria-hidden="true">⇲</span></button>
+                <label class="toolbarEdgeOpacity" for="edgeDimOpacity"><span>非连接边透明度</span><input id="edgeDimOpacity" type="range" min="10" max="90" value="35"></label>
+              </section>
+              <section class="topbarMenuSection" aria-labelledby="topbarSettingsHeading">
+                <h2 id="topbarSettingsHeading">设置与维护</h2>
+                <button id="apiConnectionsBtn" type="button" title="配置节点执行、一起想和知识库的 API">API 配置<span aria-hidden="true">↗</span></button>
+                <button id="remoteSshBtn" type="button" title="本机操作界面，在服务器读写代码和运行命令">SSH 远程工作区<span aria-hidden="true">↗</span></button>
+                <button id="chainAutoAdvanceBtn" type="button" class="chainAutoAdvanceBtn" title="Next 节点完成后自动沿执行链推进" aria-pressed="false">自动推进</button>
+                <button id="reloadBtn" type="button" title="重新读取当前树">重新加载<span aria-hidden="true">↻</span></button>
+                <div class="topbarMenuStatus"><span id="activeMethodBadge" class="activeMethodBadge" title="执行流程只读取当前活动方法树">方法树</span><span id="maintenanceState" class="maintenanceState" title="活动方法树、步骤证据与执行流程的维护状态">维护检查中…</span></div>
+              </section>
+              <section class="topbarMenuSection topbarMenuDanger"><button id="shutdownBtn" type="button" title="关闭后台服务">关闭后台<span aria-hidden="true">⏻</span></button></section>
+            </div>
+          </details>
         </div>
       </header>
 
@@ -197,7 +211,7 @@
           <button id="directRunReopenBtn" class="directRunReopenBtn" type="button" hidden>打开执行会话</button>
           <dialog id="nodeMaterialsDialog" class="nodeMaterialsDialog" aria-labelledby="nodeMaterialsTitle">
             <header><strong id="nodeMaterialsTitle">节点资料</strong><button id="nodeMaterialsClose" type="button" aria-label="关闭节点资料">×</button></header>
-            <p>资料保存在当前节点。勾选后，直接执行和并行执行会使用；也可单次加入对话。</p>
+            <p>资料保存在当前节点。勾选后，执行时自动使用；拆分的任务也会收到这些资料。</p>
             <button id="nodeMaterialsAdd" type="button">＋ 添加图片或文档</button>
             <input id="nodeMaterialsFileInput" type="file" hidden multiple accept=".png,.jpg,.jpeg,.webp,.pdf,.docx,.doc,.rtf,.txt,.md,.csv,.json,.yaml,.yml,.log,.js,.ts,.py,.go,.html,.css,.xml">
             <p id="nodeMaterialsStatus" role="status" aria-live="polite"></p>
@@ -336,7 +350,7 @@
     </dialog>
     <dialog id="codexParallelDialog" class="codexParallelDialog" aria-label="并行运行">
       <div class="codexParallelHeader">
-        <strong>自动并行</strong>
+        <strong>并行运行进度</strong>
         <button type="button" id="parallelOpenTree" hidden>查看分支树</button>
         <button type="button" id="codexParallelClose" title="关闭">×</button>
       </div>
@@ -349,6 +363,7 @@
         <div class="codexParallelObjective" id="codexParallelObjectiveBar">
           <label for="codexParallelObjective">本轮目标</label>
           <input id="codexParallelObjective" type="text" placeholder="留空则按当前任务树规划">
+          <button type="button" id="codexParallelResume" title="保留已完成分支，只继续失败和被依赖阻塞的任务" hidden>继续未完成</button>
           <button type="button" id="codexParallelRegenerate" title="按本轮目标重新规划并自动执行">重新规划</button>
         </div>
         <section id="codexParallelGoalReview" class="codexParallelGoalReview" hidden>
@@ -377,6 +392,27 @@
         <div class="codexParallelActions">
           <span id="codexParallelState" class="codexParallelState" role="status"></span>
         </div>
+      </div>
+    </dialog>
+    <dialog id="parallelAgentDialog" class="parallelAgentDialog" aria-labelledby="parallelAgentHeading">
+      <header class="parallelAgentHeader"><div><strong id="parallelAgentHeading">Agent 工作台</strong><span id="parallelAgentSummary"></span></div><button id="parallelAgentClose" type="button" aria-label="关闭 Agent 工作台">×</button></header>
+      <div class="parallelAgentWorkspace">
+        <nav id="parallelAgentList" aria-label="选择 Agent"></nav>
+        <section class="parallelAgentDetail" aria-label="当前 Agent">
+          <div class="parallelAgentIdentity"><strong id="parallelAgentTitle">Agent</strong><div id="parallelAgentActivity" role="status"></div></div>
+          <div id="parallelAgentContent" class="parallelAgentContent">
+            <details><summary>完整任务说明</summary><div id="parallelAgentTask"></div></details>
+            <p id="parallelAgentError" role="alert" hidden></p>
+            <div id="parallelAgentOutput" class="directRunMarkdown"></div>
+            <section id="parallelAgentMessages" aria-label="用户指导与分支通信"></section>
+          </div>
+          <form id="parallelAgentForm">
+            <label for="parallelAgentInput">给当前 Agent 发消息</label>
+            <div class="parallelAgentComposer"><textarea id="parallelAgentInput" rows="3" placeholder="补充要求、纠正方向，或询问当前情况…"></textarea><button id="parallelAgentSend" type="submit" disabled>发送指导</button></div>
+            <small id="parallelAgentHint">其他分支继续正常运行。</small>
+            <div id="parallelAgentNotice" role="status"></div>
+          </form>
+        </section>
       </div>
     </dialog>
     <dialog id="filePreviewDialog" class="filePreviewDialog" aria-label="File preview">

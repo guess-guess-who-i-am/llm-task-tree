@@ -28,6 +28,7 @@ If the answer can be discovered from files, inspect the files instead of asking.
 2. If the tree was restored or conflicts with files, follow [rollback-drift.md](references/rollback-drift.md).
 3. If the user is starting or reframing a broad task, follow [interview-playbook.md](references/interview-playbook.md).
 4. Write or update the smallest useful graph using [schema-template.md](references/schema-template.md).
+   When creating an independent tree, folding/linking a subtree, or repairing a tree missing from the UI, read [tree-connections.md](references/tree-connections.md). Ordinary node-field edits do not need it.
 5. Check the result against [graph-quality.md](references/graph-quality.md).
 6. Set `GraphState.Current`, `GraphState.Next`, and an executable one-sentence `GraphState.NextPlan`.
 7. Tell the user which node or edge changed.

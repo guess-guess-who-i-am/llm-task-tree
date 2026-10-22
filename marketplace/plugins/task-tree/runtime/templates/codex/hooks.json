@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .codex/hooks/turn-start.mjs",
+            "commandWindows": "node .codex/hooks/turn-start.mjs",
+            "parallelSafe": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .codex/hooks/stop-postflight.mjs",
+            "commandWindows": "node .codex/hooks/stop-postflight.mjs",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

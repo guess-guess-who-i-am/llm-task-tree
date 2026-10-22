@@ -15,13 +15,13 @@ if [[ -z "$NODE_BIN" && -x "$KIT_DIR/../macos/IDE/runtime/current/bin/node" ]]; 
   NODE_BIN="$KIT_DIR/../macos/IDE/runtime/current/bin/node"
 fi
 if [[ -z "$NODE_BIN" ]]; then
-  echo "Node.js 20.11+ is required. Install Node.js before running this installer." >&2
+  echo "Node.js 20.19+ is required. Install Node.js before running this installer." >&2
   exit 1
 fi
 "$NODE_BIN" --input-type=module - <<'NODE'
 const [major, minor] = process.versions.node.split(".").map(Number);
-if (major < 20 || (major === 20 && minor < 11)) {
-  console.error(`Node.js 20.11+ is required; found ${process.versions.node}`);
+if (major < 20 || (major === 20 && minor < 19)) {
+  console.error(`Node.js 20.19+ is required; found ${process.versions.node}`);
   process.exit(1);
 }
 NODE
@@ -50,12 +50,15 @@ if [[ ! -f "$PROJECT_ROOT/.env" && -f "$KIT_DIR/templates/.env.example" ]]; then
   echo ">> Copied .env.example -> .env"
 fi
 
-if command -v npm >/dev/null 2>&1; then
-  echo ">> Running npm install in kit"
-  (cd "$KIT_DIR" && npm install --ignore-scripts --no-audit --no-fund)
-else
-  echo ">> npm not found; skipped dependency install (the kit has no runtime dependencies)"
+NPM_BIN="$(dirname "$NODE_BIN")/npm"
+if [[ ! -x "$NPM_BIN" ]]; then NPM_BIN="$(command -v npm || true)"; fi
+if [[ -z "$NPM_BIN" ]]; then
+  echo "npm is required to install PDF/Word attachment readers; install the complete Node runtime." >&2
+  exit 1
 fi
+echo ">> Installing locked PDF/Word readers in shared kit"
+(cd "$KIT_DIR" && PATH="$(dirname "$NODE_BIN"):$PATH" "$NPM_BIN" ci --ignore-scripts --no-audit --no-fund)
+"$NODE_BIN" "$KIT_DIR/scripts/prewarm-chat-attachments.mjs"
 
 "$NODE_BIN" "$KIT_DIR/scripts/install-codex-hooks.mjs" "$PROJECT_ROOT" "$KIT_DIR/templates/codex"
 

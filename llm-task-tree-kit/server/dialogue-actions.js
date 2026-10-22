@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import { dialogueMessages } from './dialogue-state.js';
+import { dialogueMessages, dialogueHasRunOutput } from './dialogue-state.js';
 
 export function reviseUserMessage(messages, index, content, attachments) {
   const history = dialogueMessages(messages);
@@ -18,16 +18,23 @@ export function reviseUserMessage(messages, index, content, attachments) {
 export function dialogueSnapshot(conversation, run) {
   const messages = dialogueMessages(conversation?.messages || run?.messages);
   const partial = String(run?.streams?.agentMessage?.text || run?.output || '');
-  if (['starting', 'running', 'stopping'].includes(run?.status) && partial.trim()) messages.push({ role: 'assistant', content: partial });
+  if (['starting', 'running', 'stopping'].includes(run?.status) && partial.trim() && !dialogueHasRunOutput(messages,{...run,output:partial}))
+    messages.push({ role: 'assistant', content: partial,...(run.presentation?{presentation:run.presentation}:{}) });
   return messages;
 }
 
-export function dialogueMarkdown({ treeId, nodeId, title, status, messages, baseUrl = '' }) {
+export function dialogueMarkdown({ treeId, nodeId, title, status, messages, baseUrl = '', projectRoot = '', treePath = '', workspacePath = '' }) {
   const labels = { starting: '启动中', running: '运行中（当前快照）', stopping: '停止中（当前快照）', stopped: '已停止', completed: '已完成', failed: '已失败' };
   return [`# ${String(title || nodeId).replace(/\r?\n/g, ' ')} · 对话记录`, '',
     `树：${treeId} · 节点：${nodeId} · 状态：${labels[status] || status || '已保存'}`, '',
+    ...(projectRoot ? [`主项目：${projectRoot}`, ''] : []),
+    ...(treePath ? [`来源树文件：${treePath}`, ''] : []),
+    ...(workspacePath && ['failed','stopped'].includes(status) ? [`未合入候选：${workspacePath}`, ''] : []),
     ...dialogueMessages(messages).flatMap(message => [
-      `## ${message.role === 'user' ? '你' : '模型'}`, '', message.content, '',
+      `## ${message.role === 'user' ? '你' : '模型'}`, '',
+      ...(message.presentation?.process && !message.content.startsWith(message.presentation.process)
+        ? ['### 执行过程','',message.presentation.process,'','### 正式回答',''] : []),
+      message.content, '',
       ...(message.attachments || []).map(a => {
         const name = String(a.name || '附件').replace(/[\[\]\r\n]/g, '_');
         const url = baseUrl && a.url ? new URL(a.url, baseUrl).href : a.url || '';

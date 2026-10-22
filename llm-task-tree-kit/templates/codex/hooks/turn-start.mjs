@@ -62,7 +62,9 @@ const baseline = await snapshotWorkspace(root);
 let activeTree = { id: "method", title: "方法迭代", path: "task-tree.md" };
 try {
   const registry = JSON.parse(await readFile(path.join(root, "task-trees.json"), "utf8"));
-  activeTree = registry.trees?.find((tree) => tree.id === registry.activeMethod) || activeTree;
+  const contextTreeFile = String(input.execution_tree_file || '').replace(/\\/g, '/').replace(/^\.\//, '');
+  activeTree = registry.trees?.find((tree) => contextTreeFile && tree.path === contextTreeFile)
+    || registry.trees?.find((tree) => tree.id === registry.activeMethod) || activeTree;
 } catch {
   // Single-tree projects use task-tree.md.
 }
@@ -78,6 +80,7 @@ const marker = {
   startedAtMs: Date.now(),
   baseline,
   activeTreePath,
+  activeTreeId: activeTree.id,
   activeTreeMarkdown
 };
 await writeFile(path.join(dir, `${safe(input.session_id)}-${safe(input.turn_id)}.json`), `${JSON.stringify(marker, null, 2)}\n`, "utf8");

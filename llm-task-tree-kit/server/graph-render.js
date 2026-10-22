@@ -53,19 +53,23 @@ export function findChromium() {
   return candidates.find((candidate) => candidate && existsSync(candidate)) || "";
 }
 
-function runHeadless(browser, args, timeoutMs) {
+function runHeadless(browser, args, output) {
   return new Promise((resolve, reject) => {
     const child = spawn(browser, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stderr = "";
-    const timer = setTimeout(() => {
-      child.kill();
-      reject(new Error(`headless browser timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
+    let screenshotWritten = false;
 
-    child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
-    child.on("error", (error) => { clearTimeout(timer); reject(error); });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+      // Current macOS Chrome can keep background processes alive after writing the screenshot.
+      // The file is the output contract, so stop the browser once it reports completion.
+      if (output && !screenshotWritten && /\d+ bytes written to file /.test(stderr) && existsSync(output)) {
+        screenshotWritten = true;
+        child.kill();
+      }
+    });
+    child.on("error", reject);
     child.on("exit", (code) => {
-      clearTimeout(timer);
       resolve({ code, stderr });
     });
   });
@@ -81,7 +85,6 @@ export async function renderGraphPng({
   width = DEFAULT_WIDTH,
   height = DEFAULT_HEIGHT,
   scale = 1,
-  timeoutMs = 90000,
   tree = ""
 } = {}) {
   const browser = findChromium();
@@ -113,7 +116,7 @@ export async function renderGraphPng({
       `--virtual-time-budget=${budget}`,
       `--screenshot=${output}`,
       target.toString()
-    ], timeoutMs);
+    ], output);
 
     if (!existsSync(output)) {
       throw new Error(`截图失败（exit ${result.code}）：${(result.stderr || "").slice(0, 400)}`);
@@ -146,6 +149,6 @@ export async function renderGraphPng({
       browser
     };
   } finally {
-    await rm(profile, { recursive: true, force: true });
+    await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }

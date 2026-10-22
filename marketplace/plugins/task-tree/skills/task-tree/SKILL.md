@@ -37,7 +37,8 @@ description: 用 task_tree_* 工具读写项目任务图：把整张图画进对
 
 - `task_tree_write`：改节点字段，或整树覆盖。`reason` 必填；有执行范围时只允许字段补丁并校验节点权限。
 - `task_tree_chain`：`step` 取当前该做的一步；`advance` 沿 `Chain` 推进一步；`force_next` 强制下一节点。**每轮只推进一步。**
-- `task_tree_subtree`：`read` / `context` / `write` / `sync_stub` / `unfold`。折叠一个节点 = 先 `write` 子树文件，再 `sync_stub` 把摘要同步回主树。
+- `task_tree_registry`：`list` 列出当前项目的独立树；`create` 新建并登记、`register` 接入已有独立树，返回 `treeId` 和入口；后续读写指定 `treeId`，不改变用户活动树。
+- `task_tree_subtree`：`read` / `context` / `write` / `sync_stub` / `unfold`。`write` 同时保存子树和指定 `treeId` 的父节点索引，无需重复 `sync_stub`。子树不另登记为独立树。
 - `task_tree_layout`：用界面同一份轮廓算法重排 `Position`（`dryRun` 只算不写）。写完提醒用户刷新界面。
 - `task_tree_versions`：`list` / `restore` 版本回退。
 - `task_tree_flow_write`：`sync_status` / `rebuild` / `write_step` / `drift`。

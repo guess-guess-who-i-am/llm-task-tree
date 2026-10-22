@@ -18,7 +18,7 @@ import path from "node:path";
 
 /** Loaded up front by index.html, in this order. */
 const STYLES = ["styles.css", "flow-view.css", "scratch-blocks.css", "vendor/katex/katex.min.css"];
-const SCRIPTS = ["page-boot.js", "vendor/katex/katex.min.js", "tree-layout.js", "app.js"];
+const SCRIPTS = ["page-boot.js", "vendor/katex/katex.min.js", "tree-layout.js", "parallel-agents.js", "app.js"];
 /** Pulled in later by `import()`, keyed by the path the page asks for. */
 const LAZY_MODULES = ["flow-view.js", "graph-export.js"];
 

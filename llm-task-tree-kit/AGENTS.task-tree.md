@@ -267,6 +267,8 @@ Building or repairing graphs: use skill **`task-tree-grill`** and `skills/task-t
 
 ## 5. Markdown Schema
 
+Creating an independent tree, folding/linking a subtree, or repairing a missing UI entry: use `task_tree_registry` / `task_tree_subtree` and load `skills/task-tree-grill/references/tree-connections.md` for the matching operation. A Markdown file alone is not proof of UI integration.
+
 When creating `task-tree.md` from scratch, use this structure:
 
 ```markdown

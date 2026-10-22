@@ -17,19 +17,30 @@ test('production planner request runs the shared global Hook and includes its fu
   const server=http.createServer(async(req,res)=>{
     let raw='';for await(const c of req)raw+=c;captured=JSON.parse(raw);
     res.writeHead(200,{'content-type':'application/json'});
-    res.end(JSON.stringify({choices:[{finish_reason:'stop',message:{content:'{"summary":"test","coverage":[],"jobs":[]}'}}]}));
+    res.end(JSON.stringify({choices:[{finish_reason:'tool_calls',message:{content:'计划已生成',tool_calls:[{id:'plan-submit',type:'function',function:{name:'structured_result_submit',arguments:'{"summary":"test","coverage":[],"jobs":[]}'}}]}}]}));
   });
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   const environment={CODEX_HOME:codexHome,TASK_TREE_PLANNER_BASE_URL:`http://127.0.0.1:${server.address().port}`,TASK_TREE_PLANNER_API_KEY:'fixture',TASK_TREE_PLANNER_MODEL:'fixture'};
+  environment.TASK_TREE_GLOBAL_ENV_FILE = path.join(projectRoot, '.env');
+  environment.TASK_TREE_API_CONNECTIONS_FILE = path.join(projectRoot, 'api-connections.json');
   const previous=Object.fromEntries(Object.keys(environment).map(k=>[k,process.env[k]]));
   Object.assign(process.env,environment);
   t.after(async()=>{for(const [key,value]of Object.entries(previous)){if(value===undefined)delete process.env[key];else process.env[key]=value;}await new Promise(r=>server.close(r));});
   const notifications=[];
-  const result=await requestDeepSeekPlanner({projectRoot,prompt:'return JSON plan',onNotification:m=>notifications.push(m)});
+  const result=await requestDeepSeekPlanner({projectRoot,prompt:'return JSON plan',
+    outputSchema:{type:'object',required:['summary','coverage','jobs'],properties:{summary:{type:'string'},coverage:{type:'array'},jobs:{type:'array'}}},
+    historyMessages:[{role:'user',content:'PLANNER_USER_ACCEPTANCE'},{role:'assistant',content:'OLD_PLANNER_NARRATION'},{role:'user',content:'计划只覆盖本节点'}],
+    onNotification:m=>notifications.push(m)});
   assert.equal(JSON.parse(result.output).summary,'test');
+  assert.match(JSON.stringify(captured.messages),/PLANNER_USER_ACCEPTANCE/);
+  // The latest reply may survive, but unrelated earlier narration may not.
+  assert.equal(result.timing.historyProjection.policy,'tree-user-history/v1');
   assert.match(captured.messages[0].content,/PLANNER_GLOBAL_RULE/);
   assert.match(captured.messages[0].content,/PLANNER_HOOK_UserPromptSubmit/);
-  assert.equal(captured.response_format.type,'json_object');
+  assert.equal(captured.response_format,undefined);
+  assert.ok(captured.tools.some(t=>t.function.name==='structured_result_submit'));
+  assert.ok(captured.tools.some(t=>t.function.name==='history_search'));
+  assert.ok(captured.tools.some(t=>t.function.name==='history_read'));
   assert.ok(!captured.tools.some(t=>t.function.name==='exec_command'||t.function.name==='task_tree_write'));
   assert.ok(notifications.some(m=>m.method==='hook/completed'&&m.params.event==='UserPromptSubmit'));
 });
@@ -53,6 +64,8 @@ test('production planner can opt into full main-tree and subtree reads after the
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const environment = { CODEX_HOME: codexHome, TASK_TREE_PLANNER_BASE_URL: `http://127.0.0.1:${server.address().port}`, TASK_TREE_PLANNER_API_KEY: 'fixture', TASK_TREE_PLANNER_MODEL: 'fixture' };
+  environment.TASK_TREE_GLOBAL_ENV_FILE = path.join(projectRoot, '.env');
+  environment.TASK_TREE_API_CONNECTIONS_FILE = path.join(projectRoot, 'api-connections.json');
   const previous = Object.fromEntries(Object.keys(environment).map(k => [k, process.env[k]]));
   Object.assign(process.env, environment);
   t.after(async () => { for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } await new Promise(r => server.close(r)); });

@@ -2,10 +2,1807 @@
   "schema": "flow-step/v1",
   "nodeId": "N3",
   "blockId": "",
-  "updatedAt": "2026-09-22T09:38:02.679Z",
+  "updatedAt": "2026-10-22T04:01:48.000Z",
   "title": "自动并行执行与任务树合并",
   "reportZh": "report.zh.md",
   "substeps": [
+    {
+      "title": "协调器交付合同、定点恢复、检查模式一致和大命令输出完整外置",
+      "functions": [
+        {"path":"server/execution-coordination.js","name":"inspectDeliverables / recoveryDecision / startCoordinatedNodeTurn"},
+        {"path":"server/direct-node-workspace.js","name":"check / resolve"},
+        {"path":"server/codex-coordinator.js","name":"runWorker / applyRun"},
+        {"path":"server/tool-output-store.js","name":"projectCommandOutput"}
+      ],
+      "inputs": [
+        {"path":"server/direct-node-workspace.test.js"},
+        {"path":"server/deepseek-run.test.js"},
+        {"path":"server/tool-output-store.test.js"},
+        {"path":"server/execution-recovery-http.test.js"}
+      ],
+      "outputs": [{"path":"docs/execution-coordination.zh.md"}]
+    },
+    {
+      "title": "修复派生运行记录合并、完成检查点续跑、流结束及混合状态恢复，并恢复194原任务",
+      "functions": [
+        {"path":"server/parallel-worktree.js","name":"projectChanges / integrate"},
+        {"path":"server/codex-coordinator.js","name":"runWorker / resume / integrateWorkerOutput"},
+        {"path":"server/deepseek-run.js","name":"readResponse"}
+      ],
+      "inputs": [
+        {"path":"server/parallel-runtime-state.test.js"},
+        {"path":"server/codex-coordinator.test.js"},
+        {"path":"server/execution-recovery-http.test.js"},
+        {"path":"server/deepseek-run.test.js"}
+      ],
+      "outputs": [{"path":"docs/parallel-recovery-20261021.zh.md"}]
+    },
+    {
+      "title": "只读诊断最终检查关键路径、分工长尾与并行核验方案",
+      "functions": [
+        {
+          "path": "server/direct-node-workspace.js",
+          "name": "check / reviewIntegrated"
+        },
+        {
+          "path": "server/codex-coordinator.js",
+          "name": "execute / runWorker / buildWorkerPrompt"
+        },
+        {
+          "path": "server/deepseek-context.js",
+          "name": "inputTokens / observeUsage / prepare"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "docs/parallel-adoption-isolated-v4-same_file-2026-10-19T09-50-57-016Z.json"
+        },
+        {
+          "path": "docs/parallel-adoption-isolated-v4-code-2026-10-19T09-50-57-015Z.json"
+        },
+        {
+          "path": "docs/parallel-adoption-isolated-final-document-2026-10-19T09-32-34-508Z.json"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/review-critical-path-20261019/README.zh.md"
+        },
+        {
+          "path": "docs/review-critical-path-20261019/metrics.json"
+        },
+        {
+          "path": "docs/review-critical-path-20261019/search.json"
+        },
+        {
+          "path": "scripts/analyze-review-critical-path.mjs"
+        },
+        {
+          "path": "scripts/research-review-bottlenecks.mjs"
+        }
+      ]
+    },
+    {
+      "title": "从具备并发能力改为普通独立成果默认主动分工",
+      "functions": [
+        {
+          "path": "server/adaptive-node-execution.js",
+          "name": "ADAPTIVE_NODE_INSTRUCTIONS / NODE_EXECUTION_TOOL / WORKER_SPLIT_TOOL"
+        },
+        {
+          "path": "server/execution-reassessment.js",
+          "name": "initialExecutionDecision"
+        },
+        {
+          "path": "server/codex-coordinator.js",
+          "name": "buildPlannerPrompt / buildWorkerPrompt"
+        },
+        {
+          "path": "server/deepseek-context.js",
+          "name": "compressPart"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/adaptive-node-execution.test.js"
+        },
+        {
+          "path": "server/execution-reassessment.test.js"
+        },
+        {
+          "path": "server/codex-coordinator.test.js"
+        },
+        {
+          "path": "server/single-final-review-http.test.js"
+        },
+        {
+          "path": "server/deepseek-context.test.js"
+        },
+        {
+          "path": "scripts/test-parallel-adoption-live.mjs"
+        },
+        {
+          "path": "scripts/test-summary-repair-target-live.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/parallel-default-adoption.zh.md"
+        },
+        {
+          "path": "docs/parallel-adoption-analysis-20261019.json"
+        },
+        {
+          "path": "docs/parallel-adoption-v4-verification-20261019.json"
+        },
+        {
+          "path": "docs/summary-repair-target-20261019/README.zh.md"
+        },
+        {
+          "path": "docs/parallel-adoption-tree-receipts-20261019.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "自动摘要持续恢复、端点窗口自适应与总历史不设长度门槛",
+      "functions": [
+        {
+          "path": "server/deepseek-context.js",
+          "name": "prepare / summarizeAll / compressPart / splitSummaryInput"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "summarize"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/deepseek-context.test.js"
+        },
+        {
+          "path": "server/deepseek-run.test.js"
+        },
+        {
+          "path": "scripts/test-context-adaptive-recovery-live.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/context-adaptive-recovery.zh.md"
+        },
+        {
+          "path": "docs/context-adaptive-recovery-live-2026-10-18T13-57-59-915Z.json"
+        },
+        {
+          "path": "docs/context-compression-capacity.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "任务图展示隔离、图片单次投送与摘要草稿修复续跑",
+      "functions": [
+        {
+          "path": "server/agent-runtime.js",
+          "name": "createAgentRuntime / call"
+        },
+        {
+          "path": "server/tool-image-context.js",
+          "name": "extract / consumed / project / recall"
+        },
+        {
+          "path": "server/deepseek-context.js",
+          "name": "summarizeAll / consume"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "executeCalls / summarize"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/tool-image-context.test.js"
+        },
+        {
+          "path": "server/agent-runtime.test.js"
+        },
+        {
+          "path": "server/deepseek-context.test.js"
+        },
+        {
+          "path": "server/deepseek-run.test.js"
+        },
+        {
+          "path": "scripts/test-context-handoff-live.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/context-image-lifecycle-followup.zh.md"
+        },
+        {
+          "path": "docs/context-image-lifecycle-live.json"
+        }
+      ]
+    },
+    {
+      "title": "修复MCP截图文字化导致百万token与HTTP400未恢复",
+      "functions": [
+        {
+          "path": "server/tool-image-context.js",
+          "name": "extract"
+        },
+        {
+          "path": "server/task-tree-agent-tools.js",
+          "name": "call"
+        },
+        {
+          "path": "server/model-context-error.js",
+          "name": "contextLimitDetails / modelHttpError"
+        },
+        {
+          "path": "server/deepseek-context.js",
+          "name": "prepare"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "executeTool / requestModel / readResponse"
+        },
+        {
+          "path": "server/execution-progress.js",
+          "name": "readableExecutionError"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/deepseek-run.test.js"
+        },
+        {
+          "path": "server/deepseek-context.test.js"
+        },
+        {
+          "path": "server/tool-image-context.test.js"
+        },
+        {
+          "path": "server/model-context-error.test.js"
+        },
+        {
+          "path": "scripts/test-mcp-image-context-live.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/mcp-image-context-400.zh.md"
+        },
+        {
+          "path": "docs/mcp-image-context-live.json"
+        },
+        {
+          "path": "docs/mcp-image-context-tree-receipts.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "高并发同题矩阵、宿主缓存假冲突修复及检查运行日志按需读取",
+      "functions": [
+        {
+          "path": "server/parallel-worktree.js",
+          "name": "prepare / inspectChanges / commit / summarize"
+        },
+        {
+          "path": "server/review-evidence.js",
+          "name": "reviewEvidence"
+        },
+        {
+          "path": "scripts/parallel-token-accounting.mjs",
+          "name": "collectParallelTurnTimings / accountParallelTokens"
+        },
+        {
+          "path": "scripts/analyze-worker-width.mjs",
+          "name": "analyzeWorkerWidth"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/thread-cache-integration.test.js"
+        },
+        {
+          "path": "server/direct-node-workspace.test.js"
+        },
+        {
+          "path": "server/review-recheck-regression.test.js"
+        },
+        {
+          "path": "scripts/parallel-token-accounting.test.mjs"
+        },
+        {
+          "path": "scripts/analyze-worker-width.test.mjs"
+        },
+        {
+          "path": "scripts/verify-worker-width-heldout.test.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/worker-width-20261018.zh.md"
+        },
+        {
+          "path": "docs/worker-width-20261018.json"
+        },
+        {
+          "path": "docs/worker-width-20261018.corrected.analysis.json"
+        },
+        {
+          "path": "docs/worker-width-20261018.heldout.json"
+        },
+        {
+          "path": "docs/worker-width-cachefix-20261018.json"
+        },
+        {
+          "path": "docs/worker-width-cachefix-20261018.corrected.analysis.json"
+        },
+        {
+          "path": "docs/worker-width-cachefix-20261018.heldout.json"
+        },
+        {
+          "path": "docs/worker-width-cachefix-20261018.stages.json"
+        },
+        {
+          "path": "docs/worker-width-cachefix-20261018.conditions.json"
+        },
+        {
+          "path": "docs/worker-width-tree-receipts-20261018.zh.md"
+        },
+        {
+          "path": "docs/execution-routing-resumed-review-20261018.json"
+        }
+      ]
+    },
+    {
+      "title": "早期执行方式判断、复杂度边界与真实模型分配和交付验收",
+      "functions": [
+        {
+          "path": "server/execution-reassessment.js",
+          "name": "initialExecutionDecision / createExecutionReassessment"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "startDeepSeekTurn / executeCalls"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/execution-reassessment.test.js"
+        },
+        {
+          "path": "server/deepseek-run.test.js"
+        },
+        {
+          "path": "server/single-final-review-http.test.js"
+        },
+        {
+          "path": "scripts/experiment-execution-routing.mjs"
+        },
+        {
+          "path": "scripts/test-execution-routing-live.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/adaptive-routing-diagnosis-20261018.zh.md"
+        },
+        {
+          "path": "docs/execution-routing-20261018.json"
+        },
+        {
+          "path": "docs/execution-routing-checkpoint-20261018.json"
+        },
+        {
+          "path": "docs/execution-routing-prepared-20261018.json"
+        },
+        {
+          "path": "docs/execution-routing-recovery-20261018.json"
+        },
+        {
+          "path": "docs/execution-routing-live-20261018.json"
+        },
+        {
+          "path": "docs/adaptive-routing-tree-receipts-20261018.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "全局外部技能接入、隔离目录定位与长任务复评",
+      "functions": [
+        {
+          "path": "server/external-skill-catalog.js",
+          "name": "externalSkillCatalog"
+        },
+        {
+          "path": "server/agent-runtime.js",
+          "name": "createAgentRuntime / call"
+        },
+        {
+          "path": "server/turn-tracker.js",
+          "name": "locateProjectRoot"
+        },
+        {
+          "path": "server/execution-reassessment.js",
+          "name": "createExecutionReassessment"
+        },
+        {
+          "path": "server/tool-image-context.js",
+          "name": "createToolImageContext"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "requestModel / executeTool"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/agent-runtime.test.js"
+        },
+        {
+          "path": "server/turn-tracker.test.js"
+        },
+        {
+          "path": "server/execution-reassessment.test.js"
+        },
+        {
+          "path": "server/deepseek-run.test.js"
+        },
+        {
+          "path": "server/single-final-review-http.test.js"
+        },
+        {
+          "path": "scripts/probe-runtime-acceleration.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/long-node-execution-acceleration.zh.md"
+        },
+        {
+          "path": "docs/runtime-acceleration-probe-20261018.json"
+        }
+      ]
+    },
+    {
+      "title": "修复真实计数未复用及流式零统计引发的误摘要",
+      "functions": [
+        {
+          "path": "server/deepseek-context.js",
+          "name": "observeUsage / prepare / measure"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "readResponse / startDeepSeekTurn"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/deepseek-context.test.js"
+        },
+        {
+          "path": "server/deepseek-run.test.js"
+        },
+        {
+          "path": "scripts/test-context-accounting-live.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/context-accounting-stall.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "独立树子树接入和本机工作区发现",
+      "functions": [
+        {
+          "path": "server/tree-registry.js",
+          "name": "loadTreeRegistry / addTree"
+        },
+        {
+          "path": "server/projects.js",
+          "name": "describeProjects / registerProject"
+        },
+        {
+          "path": "scripts/mcp-server.mjs",
+          "name": "toolTreeRegistry / activeTree / toolSubtree"
+        },
+        {
+          "path": "public/app.js",
+          "name": "refreshTreeChoices / renderTreeSwitcher"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/tree-discovery.test.js"
+        },
+        {
+          "path": "server/tree-catalog-integration.test.js"
+        },
+        {
+          "path": "server/task-tree-write.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/tree-connections-repair.zh.md"
+        },
+        {
+          "path": "docs/tree-connections-receipt.zh.md"
+        },
+        {
+          "path": "llm-task-tree/skills/task-tree-grill/references/tree-connections.md"
+        }
+      ]
+    },
+    {
+      "title": "执行中动态拆分与百任务并发",
+      "functions": [
+        {
+          "path": "server/adaptive-node-execution.js",
+          "name": "createAdaptiveNodeExecution"
+        },
+        {
+          "path": "server/direct-node-workspace.js",
+          "name": "checkpoint"
+        },
+        {
+          "path": "server/codex-coordinator.js",
+          "name": "splitWorker / integrateWorkerOutput / append"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "executeTool"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/adaptive-expansion.test.js"
+        },
+        {
+          "path": "server/single-final-review-http.test.js"
+        },
+        {
+          "path": "server/adaptive-node-execution.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/adaptive-node-execution.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "写树交付路径、原子节点差异回执与后台错树刷新修复",
+      "functions": [
+        {
+          "path": "server/parallel-worktree.js",
+          "name": "accept"
+        },
+        {
+          "path": "server/dialogue-state.js",
+          "name": "dialogueWithCompletionReceipt"
+        },
+        {
+          "path": "public/app.js",
+          "name": "pollTreeChanges / directRunTranscriptHtml"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/tree-refresh-receipt.test.js"
+        },
+        {
+          "path": "server/direct-node-workspace.test.js"
+        },
+        {
+          "path": "server/tree-context-ide.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/tree-delivery-visibility.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "修复交接摘要误结束及无改动误成功",
+      "functions": [
+        {
+          "path": "server/deepseek-run.js",
+          "name": "startDeepSeekTurn"
+        },
+        {
+          "path": "server/direct-node-workspace.js",
+          "name": "finish / reviewIntegrated"
+        },
+        {
+          "path": "server/dialogue-state.js",
+          "name": "dialogueWithCompletionReceipt"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/deepseek-run.test.js"
+        },
+        {
+          "path": "server/direct-node-workspace.test.js"
+        },
+        {
+          "path": "server/deepseek-dialogue.test.js"
+        },
+        {
+          "path": "server/dialogue-state.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/execution-text-without-delivery.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "工具滚动并发与独立资料下载加速",
+      "functions": [
+        {
+          "path": "server/read-wave.js",
+          "name": "runReadWaves"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "executeCalls / independentDownloadTarget"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/rolling-read-pool.test.js"
+        },
+        {
+          "path": "server/read-wave.test.js"
+        },
+        {
+          "path": "server/deepseek-run.test.js"
+        },
+        {
+          "path": "server/agent-runtime.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/web-search-research/tool-pool-experiment/report.zh.md"
+        },
+        {
+          "path": "docs/web-search-research/tool-pool-experiment/results.json"
+        },
+        {
+          "path": "docs/web-search-research/tool-pool-experiment/io-heavy-results.json"
+        },
+        {
+          "path": "docs/web-search-research/tool-pool-experiment/download-scheduler.json"
+        },
+        {
+          "path": "docs/web-search-research/tool-pool-experiment/deployed.json"
+        }
+      ]
+    },
+    {
+      "title": "三场景389候选同池排名实验与广度优先部署",
+      "functions": [
+        {
+          "path": "server/web-research-batch.js",
+          "name": "searchWebBatch"
+        },
+        {
+          "path": "scripts/web-ranking-experiment-methods.mjs",
+          "name": "rankMethods / measures"
+        },
+        {
+          "path": "scripts/probe-duckduckgo-functions.mjs",
+          "name": "HTTP interceptors"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/web-research-batch.test.js"
+        },
+        {
+          "path": "scripts/web-ranking-experiment-methods.test.mjs"
+        },
+        {
+          "path": "server/shared-agent-worker.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/web-search-research/ranking-experiment/report.zh.md"
+        },
+        {
+          "path": "docs/web-search-research/ranking-experiment/summary.json"
+        },
+        {
+          "path": "docs/web-search-research/ranking-experiment/breadth-default-live.json"
+        },
+        {
+          "path": "docs/web-search-research/ranking-experiment/deployed-default-live.json"
+        },
+        {
+          "path": "skills/parallel-web-research/SKILL.md"
+        }
+      ]
+    },
+    {
+      "title": "按原问题复查正文适用性并补充联网研究技能",
+      "inputs": [
+        {
+          "path": "docs/web-search-research/batch-quality-final.json"
+        },
+        {
+          "path": "docs/web-search-research/hundred-pages-live.json"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/web-search-research/relevance-audit.zh.md"
+        },
+        {
+          "path": "skills/parallel-web-research/SKILL.md"
+        }
+      ]
+    },
+    {
+      "title": "多方向批量联网、引擎质量识别与百URL正文实测",
+      "functions": [
+        {
+          "path": "server/web-research-batch.js",
+          "name": "searchWebBatch / searchQuality / createSearchMemo"
+        },
+        {
+          "path": "server.js",
+          "name": "searchWeb / searchOpenWebSearch"
+        },
+        {
+          "path": "server/agent-web-tools.js",
+          "name": "web_search_batch"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/web-research-batch.test.js"
+        },
+        {
+          "path": "server/agent-web-tools.test.js"
+        },
+        {
+          "path": "server/web-search-http.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/web-search-research/report.zh.md"
+        },
+        {
+          "path": "docs/web-search-research/batch-quality-final.json"
+        },
+        {
+          "path": "docs/web-search-research/model-live.json"
+        },
+        {
+          "path": "docs/web-search-research/hundred-documents-live.json"
+        }
+      ]
+    },
+    {
+      "title": "执行Agent共享联网搜索、公开论文下载与全文读取",
+      "functions": [
+        {
+          "path": "server/agent-web-tools.js",
+          "name": "createAgentWebTools"
+        },
+        {
+          "path": "server/open-websearch-installation.js",
+          "name": "resolveSearchInstallation / searchDaemonEnvironment"
+        },
+        {
+          "path": "server/web-search-config.js",
+          "name": "resolveWebSearchConfig"
+        },
+        {
+          "path": "server.js",
+          "name": "ensureOpenWebSearchDaemon"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/agent-web-tools.test.js"
+        },
+        {
+          "path": "server/web-search-config.test.js"
+        },
+        {
+          "path": "server/web-search-http.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/agent-web-research.zh.md"
+        },
+        {
+          "path": "scripts/test-agent-web-live.mjs"
+        },
+        {
+          "path": "scripts/test-agent-web-model.mjs"
+        }
+      ]
+    },
+    {
+      "title": "完整分工可见与执行者、最终验收阶段隔离",
+      "functions": [
+        {
+          "path": "public/app.js",
+          "name": "nodeTaskDetailBox / directRunCompletionNotice"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "runHook"
+        },
+        {
+          "path": "server/direct-node-workspace.js",
+          "name": "check"
+        },
+        {
+          "path": "server/execution-progress.js",
+          "name": "recordIntegrationProgress"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/node-task-detail.test.js"
+        },
+        {
+          "path": "server/parallel-pipeline.test.js"
+        },
+        {
+          "path": "server/execution-progress.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/task-instructions-completion.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "业务树旧运行版本识别、空闲升级与项目切换端口复用",
+      "functions": [
+        {
+          "path": "server/runtime-revision.js",
+          "name": "runtimeRevision / projectServiceIdle"
+        },
+        {
+          "path": "scripts/project-service-macos.mjs",
+          "name": "start"
+        },
+        {
+          "path": "server/projects.js",
+          "name": "ensureProjectServer"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/runtime-revision.test.js"
+        },
+        {
+          "path": "server/project-runtime-refresh.test.js"
+        },
+        {
+          "path": "scripts/test-project-service-macos.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/context-runtime-deployment.zh.md"
+        },
+        {
+          "path": "docs/latest-tool-context-recovery-live.json"
+        }
+      ]
+    },
+    {
+      "title": "协议异常自动续接、一次补偿压缩及原工作区重启恢复",
+      "functions": [
+        {
+          "path": "server/deepseek-run.js",
+          "name": "readResponse / startDeepSeekTurn / saveDialogue"
+        },
+        {
+          "path": "server/deepseek-context.js",
+          "name": "prepare / summarizeAll"
+        },
+        {
+          "path": "server/codex-coordinator.js",
+          "name": "recoverAbandonedExecution / runWorker"
+        },
+        {
+          "path": "server/direct-node-workspace.js",
+          "name": "reviewIntegrated"
+        },
+        {
+          "path": "server.js",
+          "name": "POST api/codex/run / startup recovery"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/execution-recovery-http.test.js"
+        },
+        {
+          "path": "server/single-final-review.test.js"
+        },
+        {
+          "path": "server/deepseek-run.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/execution-recovery-policy.zh.md"
+        },
+        {
+          "path": "docs/execution-recovery-verification.json"
+        }
+      ]
+    },
+    {
+      "title": "上下文估算不误停及最新工具大结果自动交接",
+      "functions": [
+        {
+          "path": "server/deepseek-context.js",
+          "name": "createDeepSeekContext / prepare"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "startDeepSeekTurn / summarize / readResponse"
+        },
+        {
+          "path": "server/execution-progress.js",
+          "name": "recordCompactionProgress"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/deepseek-context.test.js"
+        },
+        {
+          "path": "server/deepseek-run.test.js"
+        },
+        {
+          "path": "scripts/test-latest-tool-context-recovery.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/context-capacity-recovery.zh.md"
+        },
+        {
+          "path": "docs/latest-tool-context-recovery-live.json"
+        }
+      ]
+    },
+    {
+      "title": "单最终验收、原会话批量咨询与输入变更立即重查",
+      "functions": [
+        {
+          "path": "server/codex-coordinator.js",
+          "name": "execute / runWorker"
+        },
+        {
+          "path": "server/direct-node-workspace.js",
+          "name": "reviewIntegrated / check"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "executeCalls"
+        },
+        {
+          "path": "server/peer-mailbox.js",
+          "name": "createPeerMailbox"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/single-final-review-http.test.js"
+        },
+        {
+          "path": "server/single-final-review.test.js"
+        },
+        {
+          "path": "server/review-recheck-regression.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/single-final-review.zh.md"
+        },
+        {
+          "path": "docs/single-final-review-tree-receipts.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "节点入口规则、树摘要与预读去重",
+      "functions": [
+        {
+          "path": "server.js",
+          "name": "buildIsolatedNodeSystemPrompt / POST api/codex/run"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/tree-context-ide.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/node-entry-context-dedup.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "统一角色结构化提交、共享接口传给最终检查及难度—粒度真实矩阵",
+      "functions": [
+        {
+          "path": "server/deepseek-run.js",
+          "name": "startDeepSeekTurn"
+        },
+        {
+          "path": "server/codex-coordinator.js",
+          "name": "requestDeepSeekPlanner / runWorker"
+        },
+        {
+          "path": "server/direct-node-workspace.js",
+          "name": "check"
+        },
+        {
+          "path": "scripts/analyze-capability-granularity.mjs",
+          "name": "analyzeCapability"
+        },
+        {
+          "path": "server/adaptive-node-execution.js",
+          "name": "ADAPTIVE_NODE_INSTRUCTIONS"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/deepseek-run.test.js"
+        },
+        {
+          "path": "server/direct-node-review-http.test.js"
+        },
+        {
+          "path": "scripts/fixture-interface-regression.test.mjs"
+        },
+        {
+          "path": "scripts/analyze-capability-granularity.test.mjs"
+        },
+        {
+          "path": "server/adaptive-node-execution.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/format-contract-capability-20261013.zh.md"
+        },
+        {
+          "path": "docs/capability-granularity-20261013.json"
+        },
+        {
+          "path": "docs/capability-granularity-20261013.analysis.json"
+        },
+        {
+          "path": "docs/capability-granularity-20261013.stages.json"
+        },
+        {
+          "path": "docs/capability-autoplanner-20261013.json"
+        },
+        {
+          "path": "docs/capability-autoplanner-workload-20261013.json"
+        },
+        {
+          "path": "docs/format-contract-regression-20261013.log"
+        },
+        {
+          "path": "docs/format-contract-kit-regression-20261013.log"
+        },
+        {
+          "path": "docs/capability-analysis-regression-20261013.log"
+        },
+        {
+          "path": "docs/capability-routing-regression-20261013.log"
+        },
+        {
+          "path": "docs/format-contract-tree-receipts-20261013.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "多Worker失败根因修复、父只读范围与新通道真实校准",
+      "functions": [
+        {
+          "path": "server/direct-node-workspace.js",
+          "name": "check"
+        },
+        {
+          "path": "server/parent-review-scope.js",
+          "name": "parentReportScope"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "runHook"
+        },
+        {
+          "path": "server/node-completion-review.js",
+          "name": "buildCompletionReviewPrompt"
+        },
+        {
+          "path": "scripts/benchmark-node-granularity.mjs",
+          "name": "verifyFixture"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/deepseek-run.test.js"
+        },
+        {
+          "path": "server/parent-review-scope.test.js"
+        },
+        {
+          "path": "scripts/fixture-interface-regression.test.mjs"
+        },
+        {
+          "path": "docs/tree-history-parallel-smallcheck-20261013.json"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/review-root-cause-20261013.zh.md"
+        },
+        {
+          "path": "docs/review-root-cause-20261013.json"
+        },
+        {
+          "path": "docs/review-pipeline-verified-20261013.json"
+        },
+        {
+          "path": "docs/parent-coverage-with-history-20261013.json"
+        },
+        {
+          "path": "docs/review-regression-20261013.log"
+        },
+        {
+          "path": "docs/review-root-cause-tree-receipts-20261013.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "单Agent与四Worker同题小实验收束，保留检查长尾和失败成本",
+      "functions": [
+        {
+          "path": "scripts/benchmark-tree-history-parallel.mjs",
+          "name": "execute"
+        },
+        {
+          "path": "scripts/analyze-tree-history-parallel.mjs",
+          "name": "compareCompletedPairs"
+        },
+        {
+          "path": "scripts/parallel-token-accounting.mjs",
+          "name": "accountParallelTokens"
+        },
+        {
+          "path": "scripts/benchmark-node-granularity.mjs",
+          "name": "verifyFixture"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "scripts/benchmark-tree-history-parallel.test.mjs"
+        },
+        {
+          "path": "scripts/analyze-tree-history-parallel.test.mjs"
+        },
+        {
+          "path": "server/review-recheck-regression.test.js"
+        },
+        {
+          "path": "server/direct-node-workspace.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/tree-history-parallel-smallcheck-20261013.zh.md"
+        },
+        {
+          "path": "docs/tree-history-parallel-smallcheck-20261013.json"
+        },
+        {
+          "path": "docs/tree-history-parallel-smallcheck-20261013-analysis.json"
+        }
+      ]
+    },
+    {
+      "title": "减少检查研究、真实证据包与同波配对对照，保留负结果",
+      "functions": [
+        {
+          "path": "server/node-completion-review.js",
+          "name": "parseCompletionReview"
+        },
+        {
+          "path": "server/codex-coordinator.js",
+          "name": "runWorker"
+        },
+        {
+          "path": "scripts/benchmark-review-evidence-packet.mjs",
+          "name": "trial"
+        },
+        {
+          "path": "scripts/review-efficiency-metrics.mjs",
+          "name": "summarizeRepeat"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "scripts/review-efficiency-experiment.test.mjs"
+        },
+        {
+          "path": "server/node-completion-review.test.js"
+        },
+        {
+          "path": "server/direct-node-workspace.test.js"
+        },
+        {
+          "path": "server/review-recheck-regression.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/review-efficiency-20261013/result.zh.md"
+        },
+        {
+          "path": "docs/review-efficiency-20261013/research-and-audit.zh.md"
+        },
+        {
+          "path": "docs/review-efficiency-20261013/analysis.json"
+        },
+        {
+          "path": "docs/review-efficiency-20261013/paired-repeat.json"
+        },
+        {
+          "path": "docs/review-efficiency-20261013/paired-analysis.json"
+        },
+        {
+          "path": "docs/review-efficiency-20261013/tree-receipts.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "无效重查TDD修复、局部验收精简与安装版部署验证",
+      "functions": [
+        {
+          "path": "server/parallel-worktree.js",
+          "name": "commitCandidateRepairs"
+        },
+        {
+          "path": "server/parallel-worktree.js",
+          "name": "accept"
+        },
+        {
+          "path": "server/tree-registry.js",
+          "name": "loadTreeRegistry"
+        },
+        {
+          "path": "server/node-completion-review.js",
+          "name": "buildCompletionReviewPrompt"
+        },
+        {
+          "path": "server/codex-coordinator.js",
+          "name": "applyRun"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/review-recheck-regression.test.js"
+        },
+        {
+          "path": "server/direct-node-workspace.test.js"
+        },
+        {
+          "path": "server/tree-registry-roundtrip.test.js"
+        },
+        {
+          "path": "scripts/test-adaptive-node-ui.mjs"
+        },
+        {
+          "path": "scripts/test-deployed-page-loading.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/review-latency-fix-20261012.zh.md"
+        },
+        {
+          "path": "docs/review-latency-fix-live-20261012.json"
+        },
+        {
+          "path": "docs/review-latency-fix-live-retest-20261012.json"
+        },
+        {
+          "path": "docs/review-latency-fix-live-service-network-20261012.json"
+        },
+        {
+          "path": "docs/review-latency-fix-artifact-verification-20261013.json"
+        }
+      ]
+    },
+    {
+      "title": "检查函数级长尾取证与临时缓存、注册表键序无效重查复现（未改生产逻辑）",
+      "functions": [
+        {
+          "path": "server/direct-node-workspace.js",
+          "name": "check"
+        },
+        {
+          "path": "server/parallel-worktree.js",
+          "name": "commitCandidateRepairs"
+        },
+        {
+          "path": "server/parallel-worktree.js",
+          "name": "accept"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "readResponse"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "docs/tree-history-parallel-hookfix-20261012.json"
+        },
+        {
+          "path": "server/direct-node-workspace.test.js"
+        },
+        {
+          "path": "server/direct-node-review-http.test.js"
+        },
+        {
+          "path": "server/parallel-pipeline.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/review-latency-diagnosis-20261012.zh.md"
+        },
+        {
+          "path": "docs/review-latency-diagnosis-20261012.json"
+        },
+        {
+          "path": "scripts/diagnose-review-recheck.mjs"
+        },
+        {
+          "path": "scripts/report-review-latency.mjs"
+        }
+      ]
+    },
+    {
+      "title": "Hook修复后的六组真实同题并发复测（已结束，保留失败样本）",
+      "functions": [
+        {
+          "path": "scripts/benchmark-tree-history-parallel.mjs",
+          "name": "execute"
+        },
+        {
+          "path": "scripts/parallel-token-accounting.mjs",
+          "name": "accountParallelTokens"
+        },
+        {
+          "path": "scripts/report-hookfix-retest.mjs",
+          "name": "per-role snapshot report"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "scripts/benchmark-node-granularity.test.mjs"
+        },
+        {
+          "path": "scripts/analyze-node-granularity.test.mjs"
+        },
+        {
+          "path": "scripts/parallel-token-accounting.test.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/tree-history-parallel-hookfix-20261012.json"
+        },
+        {
+          "path": "docs/tree-history-parallel-hookfix-20261012-analysis.json"
+        },
+        {
+          "path": "docs/tree-history-parallel-hookfix-20261012.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "全局Hook精确评分提速与四进程后台预热",
+      "functions": [
+        {
+          "path": "scripts/prewarm-agent-worker.mjs",
+          "name": "prewarm"
+        },
+        {
+          "path": "scripts/graph-pool-prewarm.mjs",
+          "name": "warmGraphPool"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "scripts/verify-hook-acceleration.py"
+        },
+        {
+          "path": "scripts/graph-pool-prewarm.test.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/hook-latency-fix-20261012.zh.md"
+        },
+        {
+          "path": "docs/hook-acceleration-final-aba-20261012.json"
+        },
+        {
+          "path": "docs/hook-ide-consumer-20261012.json"
+        },
+        {
+          "path": "docs/hook-pool-cold-20261012.json"
+        }
+      ]
+    },
+    {
+      "title": "GLM默认、DeepSeek备用与响应头超时恢复",
+      "functions": [
+        {
+          "path": "server/deepseek-run.js",
+          "name": "loadDeepSeekConfig"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "requestModel"
+        },
+        {
+          "path": "server/codex-coordinator.js",
+          "name": "requestDeepSeekPlanner"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/deepseek-run.test.js"
+        },
+        {
+          "path": "scripts/test-model-fallback-live.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/model-fallback.zh.md"
+        },
+        {
+          "path": "docs/model-fallback-live-20261011.json"
+        }
+      ]
+    },
+    {
+      "title": "最后检查同会话修复复验与失败停止、共享接口和工作量分工",
+      "functions": [
+        {
+          "path": "server/node-completion-review.js",
+          "name": "buildCompletionReviewPrompt"
+        },
+        {
+          "path": "server/direct-node-workspace.js",
+          "name": "check"
+        },
+        {
+          "path": "server/codex-coordinator.js",
+          "name": "buildPlannerPrompt"
+        },
+        {
+          "path": "server/adaptive-node-execution.js",
+          "name": "createAdaptiveNodeExecution"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/direct-node-review-http.test.js"
+        },
+        {
+          "path": "server/direct-node-workspace.test.js"
+        },
+        {
+          "path": "scripts/test-final-node-review-live.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/node-completion-review.zh.md"
+        },
+        {
+          "path": "docs/node-completion-review-glm-5.3-tools-mode-live.json"
+        },
+        {
+          "path": "docs/node-completion-review-glm-5.3-live.json"
+        },
+        {
+          "path": "docs/node-completion-review-live.json"
+        }
+      ]
+    },
+    {
+      "title": "关机后保留旧结果并只接续未启动样本",
+      "functions": [
+        {
+          "path": "scripts/benchmark-node-granularity.mjs",
+          "name": "createExperimentQueue"
+        },
+        {
+          "path": "scripts/analyze-node-granularity.mjs",
+          "name": "compareGranularity"
+        },
+        {
+          "path": "scripts/checkpoint-node-granularity.mjs",
+          "name": "API snapshot checkpoint"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "scripts/benchmark-node-granularity.test.mjs"
+        },
+        {
+          "path": "scripts/analyze-node-granularity.test.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/node-granularity-glm-incremental-review-live.json"
+        },
+        {
+          "path": "docs/node-granularity-glm-incremental-review-live-checkpoint.json"
+        },
+        {
+          "path": "docs/node-granularity-glm-dedup-128k-live-analysis.json"
+        },
+        {
+          "path": "docs/node-granularity-glm-recovery.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "分支即时检查与父局部检查，关键路径计时而非Agent累加",
+      "functions": [
+        {
+          "path": "server/adaptive-node-execution.js",
+          "name": "createAdaptiveNodeExecution"
+        },
+        {
+          "path": "server/direct-node-workspace.js",
+          "name": "check"
+        },
+        {
+          "path": "scripts/analyze-node-granularity.mjs",
+          "name": "summarizeWorkerTimeline"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/direct-node-workspace.test.js"
+        },
+        {
+          "path": "scripts/test-adaptive-node-ui.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/node-granularity-glm-incremental-review-live.json"
+        },
+        {
+          "path": "docs/node-granularity-glm-recovery.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "同轮配对收益与合格率分析，保留超时失败不当成功基线",
+      "functions": [
+        {
+          "path": "scripts/analyze-node-granularity.mjs",
+          "name": "compareGranularity"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "scripts/analyze-node-granularity.test.mjs"
+        },
+        {
+          "path": "docs/node-granularity-glm-dedup-128k-live.json"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/node-granularity-glm-dedup-128k-live-analysis.json"
+        },
+        {
+          "path": "docs/node-granularity-glm-recovery.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "相同变更导致重审的修复、GLM实际容量与并发粒度复测",
+      "functions": [
+        {
+          "path": "server/parallel-worktree.js",
+          "name": "accept"
+        },
+        {
+          "path": "scripts/probe-glm-context-window.mjs",
+          "name": "capacity probe"
+        },
+        {
+          "path": "scripts/analyze-node-granularity.mjs",
+          "name": "summarizeParallel"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/direct-node-workspace.test.js"
+        },
+        {
+          "path": "scripts/analyze-node-granularity.test.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/node-granularity-glm-recovery.zh.md"
+        },
+        {
+          "path": "docs/node-granularity-glm-window-probe-160000.json"
+        },
+        {
+          "path": "docs/node-granularity-glm-dedup-128k-live.json"
+        }
+      ]
+    },
+    {
+      "title": "GLM恢复及输出截断、重复摘要根因修复与真实粒度对照",
+      "functions": [
+        {
+          "path": "server/deepseek-run.js",
+          "name": "startDeepSeekTurn"
+        },
+        {
+          "path": "server/deepseek-context.js",
+          "name": "createDeepSeekContext"
+        },
+        {
+          "path": "scripts/benchmark-node-granularity.mjs",
+          "name": "experiment"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/deepseek-run.test.js"
+        },
+        {
+          "path": "server/deepseek-context.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/node-granularity-glm-recovery.zh.md"
+        },
+        {
+          "path": "docs/node-granularity-glm-recovery-probe.json"
+        },
+        {
+          "path": "docs/node-granularity-glm-full-output-live.json"
+        },
+        {
+          "path": "docs/node-granularity-glm-coload-live.json"
+        }
+      ]
+    },
+    {
+      "title": "单节点粒度对照与端到端计时修复；真实实验受网关生成故障阻塞",
+      "functions": [
+        {
+          "path": "scripts/benchmark-node-granularity.mjs",
+          "name": "experiment"
+        },
+        {
+          "path": "server/execution-progress.js",
+          "name": "recordRunDuration"
+        },
+        {
+          "path": "server/direct-node-workspace.js",
+          "name": "check"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "scripts/benchmark-node-granularity.test.mjs"
+        },
+        {
+          "path": "server/execution-progress.test.js"
+        },
+        {
+          "path": "scripts/test-adaptive-node-ui.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/node-granularity-experiment.zh.md"
+        },
+        {
+          "path": "docs/node-granularity-analysis.json"
+        },
+        {
+          "path": "docs/node-granularity-model-probe.json"
+        }
+      ]
+    },
+    {
+      "title": "统一执行入口与首轮按需拆分、完成分支即时合入",
+      "functions": [
+        {
+          "path": "server/adaptive-node-execution.js",
+          "name": "createAdaptiveNodeExecution"
+        },
+        {
+          "path": "server/codex-coordinator.js",
+          "name": "runWorker"
+        },
+        {
+          "path": "server/codex-coordinator.js",
+          "name": "buildWorkerPrompt"
+        },
+        {
+          "path": "server/parallel-worktree.js",
+          "name": "accept"
+        },
+        {
+          "path": "public/app.js",
+          "name": "runDirectNode"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/adaptive-node-execution.test.js"
+        },
+        {
+          "path": "scripts/test-adaptive-node-ui.mjs"
+        },
+        {
+          "path": "scripts/test-adaptive-node-deepseek-live.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/adaptive-node-execution.zh.md"
+        },
+        {
+          "path": "docs/adaptive-node-deepseek-live.json"
+        }
+      ]
+    },
     {
       "title": "工程入口和真实分支并行链路修复",
       "functions": [
@@ -87,6 +1884,250 @@
       ]
     },
     {
+      "title": "Planner与Worker主树摘要优先及完成后刷新",
+      "functions": [
+        {
+          "path": "server/tree-context.js",
+          "name": "readTreeSummary"
+        },
+        {
+          "path": "server/codex-coordinator.js",
+          "name": "buildBranchInputContext"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/tree-context-ide.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/tree-context.zh.md"
+        },
+        {
+          "path": "docs/tree-context-live.json"
+        }
+      ]
+    },
+    {
+      "title": "三地址请求级备用切换",
+      "functions": [
+        {
+          "path": "server/deepseek-run.js",
+          "name": "requestModel"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "scripts/test-gateway-hosts-live.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/gateway-failover.zh.md"
+        },
+        {
+          "path": "docs/gateway-hosts-live.json"
+        },
+        {
+          "path": "docs/gateway-failover-live.json"
+        }
+      ]
+    },
+    {
+      "title": "网关502请求级恢复与故障诊断",
+      "functions": [
+        {
+          "path": "server/deepseek-run.js",
+          "name": "requestModel"
+        },
+        {
+          "path": "server.js",
+          "name": "directRunNotification"
+        },
+        {
+          "path": "server/execution-progress.js",
+          "name": "executionProgress"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "scripts/test-gateway-recovery-live.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/gateway-recovery.zh.md"
+        },
+        {
+          "path": "docs/gateway-recovery-live.json"
+        }
+      ]
+    },
+    {
+      "title": "工具高并发与无效模型回合根因修复",
+      "functions": [
+        {
+          "path": "server/read-wave.js",
+          "name": "runReadWaves"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "startDeepSeekTurn"
+        },
+        {
+          "path": "server/subtree-fold.js",
+          "name": "planSubtreeFold"
+        },
+        {
+          "path": "scripts/mcp-server.mjs",
+          "name": "toolNode"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "scripts/test-chinese-progress-live.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/concurrency-optimization.zh.md"
+        },
+        {
+          "path": "docs/concurrency-optimization-performance.json"
+        },
+        {
+          "path": "docs/model-batch-live-performance.json"
+        }
+      ]
+    },
+    {
+      "title": "函数级延迟剖析与可逆根因实验",
+      "functions": [
+        {
+          "path": "scripts/profile-agent-functions.mjs",
+          "name": "instrumentRouter"
+        },
+        {
+          "path": "scripts/profile-deepseek-roundtrip.mjs",
+          "name": "main"
+        },
+        {
+          "path": "scripts/profile-graph-retrieval.py",
+          "name": "wall_query"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "docs/codex-api-comparison-performance.json"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/function-latency-root-cause.zh.md"
+        },
+        {
+          "path": "docs/function-latency-profile.json"
+        },
+        {
+          "path": "docs/graph-retrieval-function-profile.json"
+        },
+        {
+          "path": "docs/deepseek-function-roundtrip-profile.json"
+        },
+        {
+          "path": "docs/dialogue-render-function-profile.json"
+        }
+      ]
+    },
+    {
+      "title": "当前 Codex API 隔离延迟对照",
+      "functions": [
+        {
+          "path": "scripts/test-codex-api-comparison.mjs",
+          "name": "requestResponses"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "scripts/test-chinese-progress-live.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/codex-api-comparison.zh.md"
+        },
+        {
+          "path": "docs/codex-api-comparison-performance.json"
+        },
+        {
+          "path": "docs/fixed-api-tool-probe-performance.json"
+        }
+      ]
+    },
+    {
+      "title": "再次核查根因与真实响应波动",
+      "functions": [
+        {
+          "path": "server/subtree-fold.js",
+          "name": "planSubtreeFold"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "startDeepSeekTurn"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "scripts/test-chinese-progress-live.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/execution-progress-retest.zh.md"
+        },
+        {
+          "path": "docs/execution-progress-retest-performance.json"
+        }
+      ]
+    },
+    {
+      "title": "中文输出、执行状态与折叠阻塞修复",
+      "functions": [
+        {
+          "path": "server/subtree-fold.js",
+          "name": "planSubtreeFold"
+        },
+        {
+          "path": "server/execution-progress.js",
+          "name": "executionProgress"
+        },
+        {
+          "path": "server.js",
+          "name": "executeDeepSeekTaskTreeTool"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/subtree-fold.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/execution-progress.zh.md"
+        },
+        {
+          "path": "docs/execution-progress-live-performance.json"
+        },
+        {
+          "path": "scripts/test-execution-progress-ui.mjs"
+        },
+        {
+          "path": "scripts/test-chinese-progress-live.mjs"
+        }
+      ]
+    },
+    {
       "title": "完整上下文规划、并发与冲突协商",
       "functions": [
         {
@@ -120,6 +2161,315 @@
         {
           "path": "artifacts/parallel-automatic/current-progress.png"
         }
+      ]
+    },
+    {
+      "title": "共享常驻工具服务与全文对话恢复",
+      "functions": [
+        {
+          "path": "server/shared-agent-worker.js",
+          "name": "createSharedAgentRuntime"
+        },
+        {
+          "path": "server/thread-dialogue-store.js",
+          "name": "saveThreadDialogue"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "startDeepSeekTurn"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/agent-runtime.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/deepseek-shared-codex-context.zh.md"
+        },
+        {
+          "path": "scripts/test-shared-worker-live.mjs"
+        },
+        {
+          "path": "scripts/test-dialogue-history.mjs"
+        }
+      ]
+    },
+    {
+      "title": "DeepSeek 子树误覆盖修复与细粒度实测",
+      "functions": [
+        {
+          "path": "server.js",
+          "name": "executeDeepSeekTaskTreeTool"
+        },
+        {
+          "path": "server/tree-write-safety.js",
+          "name": "assertMainTreeWrite"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "startDeepSeekTurn"
+        },
+        {
+          "path": "server/maintenance.js",
+          "name": "auditTurnMaintenance"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/task-tree-write.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/tree-write-regression.zh.md"
+        },
+        {
+          "path": "docs/tree-write-regression-performance.json"
+        },
+        {
+          "path": "scripts/test-tree-expansion-live.mjs"
+        },
+        {
+          "path": "scripts/test-tree-expansion-ui.mjs"
+        }
+      ]
+    },
+    {
+      "title": "每个树节点一个持续对话",
+      "functions": [
+        {
+          "path": "server/dialogue-state.js",
+          "name": "normalizeNodeDialogues"
+        },
+        {
+          "path": "public/app.js",
+          "name": "orderedDirectRuns"
+        },
+        {
+          "path": "public/app.js",
+          "name": "deleteDirectRunConversation"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/node-dialogue.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/node-dialogue.zh.md"
+        },
+        {
+          "path": "scripts/test-node-dialogue-ui.mjs"
+        }
+      ]
+    },
+    {
+      "title": "最后检查按执行节点自动补齐步骤证据",
+      "functions": [
+        {
+          "path": "server/maintenance.js",
+          "name": "ensureMinimalStepEvidence"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "startDeepSeekTurn"
+        },
+        {
+          "path": ".codex/hooks/stop-postflight.mjs"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/review-postflight.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/review-postflight-repair.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "双节点直接并发与任务树安全合并",
+      "functions": [
+        {
+          "path": "server/direct-node-workspace.js",
+          "name": "createDirectNodeWorkspace"
+        },
+        {
+          "path": "server/parallel-worktree.js",
+          "name": "integrate"
+        },
+        {
+          "path": "server/tree-field-merge.js",
+          "name": "mergeIndependentTreeFields"
+        },
+        {
+          "path": "server.js",
+          "name": "executeDeepSeekTaskTreeTool"
+        },
+        {
+          "path": "scripts/mcp-server.mjs",
+          "name": "toolSubtree"
+        },
+        {
+          "path": "server/graph-render.js",
+          "name": "renderGraphPng"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/tree-field-merge.test.js"
+        },
+        {
+          "path": "scripts/test-direct-parallel-live.mjs"
+        },
+        {
+          "path": "scripts/test-direct-parallel-deepseek-live.mjs"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "scripts/steps/N3/latest/report.zh.md"
+        },
+        {
+          "path": "docs/direct-parallel-deepseek-live.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "最终检查树状态一致性回执与维护接续",
+      "functions": [
+        {
+          "path": "server/maintenance.js",
+          "name": "auditTurnMaintenance"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "startDeepSeekTurn"
+        },
+        {
+          "path": "server/agent-runtime.js",
+          "name": "hooks"
+        },
+        {
+          "path": ".codex/hooks/stop-postflight.mjs"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/review-postflight.test.js"
+        },
+        {
+          "path": "server/maintenance.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/review-tree-maintenance-repair.zh.md"
+        },
+        {
+          "path": "scripts/steps/N3/latest/review-tree-maintenance/source/tests.json"
+        },
+        {
+          "path": "scripts/steps/N3/latest/review-tree-maintenance/kit/tests.json"
+        }
+      ]
+    },
+    {
+      "title": "收尾错误分类与诊断链修复",
+      "functions": [
+        {
+          "path": "server/execution-error.js",
+          "name": "executionErrorDetails"
+        },
+        {
+          "path": "server/deepseek-run.js",
+          "name": "runHook / final result error"
+        },
+        {
+          "path": "server/node-completion-review.js",
+          "name": "completionReviewInterruption / completionReviewFailure"
+        },
+        {
+          "path": "server/direct-node-workspace.js",
+          "name": "assertCompleted"
+        },
+        {
+          "path": "server/codex-coordinator.js",
+          "name": "assertTurnCompleted"
+        }
+      ],
+      "inputs": [
+        {
+          "path": "server/node-completion-review.test.js"
+        },
+        {
+          "path": "server/deepseek-run.test.js"
+        },
+        {
+          "path": "server/direct-node-workspace.test.js"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "scripts/steps/N3/latest/report.zh.md"
+        },
+        {
+          "path": "llm-task-tree-kit/server/execution-error.js"
+        },
+        {
+          "path": "marketplace/plugins/task-tree/runtime/server/execution-error.js"
+        }
+      ]
+    },
+    {
+      "title": "194节点Git忽略文件扫描溢出修复：29项回归，远程工作区准备通过，模型网络仍阻塞",
+      "functions": [
+        {
+          "path": "server/parallel-worktree.js",
+          "name": "snapshotPaths / inspectChanges"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/remote-git-inventory-20261020.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "194远程网络、Linux监听与最终检查提示修复：200项回归，真实只读节点最终验收通过",
+      "functions": [
+        {
+          "path": "scripts/remote-workspace-bootstrap.mjs",
+          "name": "bootstrapRemoteWorkspace"
+        },
+        {
+          "path": "server/review-input-watch.js",
+          "name": "createReviewInputWatch / projectStamp"
+        },
+        {
+          "path": "server/node-completion-review.js",
+          "name": "buildCompletionReviewPrompt"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/remote-network-20261020.zh.md"
+        }
+      ]
+    },
+    {
+      "title": "本机全局安装同步与空闲服务升级：源码739项、全局48项回归及真实服务恢复通过",
+      "functions": [
+        { "path": "scripts/project-service-macos.mjs", "name": "start" },
+        { "path": "server/runtime-revision.js", "name": "runtimeRevision / workerRuntimeRevision / projectServiceIdle" }
+      ],
+      "outputs": [
+        { "path": "docs/local-runtime-update-20261022.zh.md" }
       ]
     }
   ]

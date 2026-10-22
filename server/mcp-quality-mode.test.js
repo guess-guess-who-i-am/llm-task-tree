@@ -43,7 +43,9 @@ test('advisory MCP check/write/subtree allow complete oversized text and expose 
   const subtree='# LLM Task Graph Subtree\n\n> Fold root: N9\n\n## N9 - 子节点\n- Notes: '+fullText+'\n\n# GraphState\n- Current: N9\n- Next: N9\n\n# Edges\n';
   const written=await tools.call('task_tree_subtree',{action:'write',path:'subtrees/N9-subtree.md',markdown:subtree,reason:'完整子树'});
   assert.equal(written.ok,true);assert.equal(written.advisory,true);assert.ok(written.warnings.violations.length);
-  assert.equal(await readFile(path.join(cwd,'subtrees/N9-subtree.md'),'utf8'),subtree);
+  const persistedSubtree=await readFile(path.join(cwd,'subtrees/N9-subtree.md'),'utf8');
+  assert.ok(persistedSubtree.includes('- Notes: '+fullText),'fold normalization must retain the complete field');
+  assert.match(await readFile(path.join(cwd,'task-tree.md'),'utf8'),/- SubtreeFile: subtrees\/N9-subtree\.md/,'the parent must link the folded subtree');
   await assert.rejects(tools.call('task_tree_write',{markdown:subtree,reason:'错误主树覆盖'}),/子树/);
   await assert.rejects(tools.call('task_tree_write',{nodeId:'N9',fields:{Next:'ROOT'},reason:'错误焦点修改'}),/GraphState/);
 });

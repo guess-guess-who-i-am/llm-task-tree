@@ -10,6 +10,27 @@ const sub=(nodes,edges)=>tree(nodes,edges,'- Current: N9\n- Next: N9_1').replace
 const main=()=>tree([node('ROOT'),node('N9'),node('N9_1'),node('N9_2'),node('N10')],[edge('E1','ROOT','N9'),edge('E2','N9_1','N9'),edge('E3','N9_1','N9_2'),edge('E4','ROOT','N10')]);
 const ids=markdown=>parseTreeNodeFields(markdown).map(n=>n.id);
 
+test('attach generated subtree preserves every stage and relationship in a sequential main graph',()=>{
+  const stages=Array.from({length:16},(_,i)=>`DOC_S${String(i+1).padStart(2,'0')}`);
+  const current=tree([node('DOC_ROOT'),...stages.map(id=>node(id))],stages.map((id,i)=>edge(`D${i}`,i?stages[i-1]:'DOC_ROOT',id)));
+  const proposed=tree([node(stages[0]),node('NEW')],[edge('NEW_EDGE',stages[0],'NEW')]);
+  const result=planSubtreeFold(current,proposed,{rootId:stages[0],mode:'attach'});
+  assert.deepEqual(ids(result.markdown),['DOC_ROOT',...stages]);
+  assert.deepEqual(result.movedNodeIds,[]);
+  assert.deepEqual(ids(result.subtreeMarkdown),[stages[0],'NEW']);
+  assert.equal(result.markdown,current);
+  assert.throws(()=>planSubtreeFold(current,tree([node(stages[0]),node(stages[1])],[edge('X',...stages.slice(0,2))]),{rootId:stages[0],mode:'attach'}),/其它分支/);
+});
+
+test('attach retains previous owned nodes, refuses main-node collisions and invalid modes',()=>{
+  const previous=sub([node('N9'),node('OLD')],[edge('OLD_EDGE','N9','OLD')]);
+  const result=planSubtreeFold(main(),sub([node('N9'),node('NEW')],[edge('NEW_EDGE','N9','NEW')]),{rootId:'N9',previous,mode:'attach'});
+  assert.deepEqual(new Set(ids(result.subtreeMarkdown)),new Set(['N9','OLD','NEW']));
+  assert.deepEqual(result.movedNodeIds,[]);
+  assert.throws(()=>planSubtreeFold(main(),sub([node('N9')],[]),{rootId:'N9',previous:sub([node('N9'),node('N9_1')],[edge('OLD_EDGE','N9','N9_1')]),mode:'attach'}),/其它分支/);
+  assert.throws(()=>planSubtreeFold(main(),sub([node('N9')],[]),{rootId:'N9',mode:'typo'}),/mode/);
+});
+
 test('fold existing descendants with stable IDs instead of treating them as overlap',()=>{
   const before=main();
   const result=planSubtreeFold(before,sub([node('N9'),node('N9_1','新标准')],[edge('E2','N9','N9_1')]),{rootId:'N9'});

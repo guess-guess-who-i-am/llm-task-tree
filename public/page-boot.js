@@ -90,7 +90,11 @@
         loadAsset('/vendor/katex/katex.min.css', true, 1).catch(() => {}),
         loadAsset('/vendor/katex/katex.min.js', false, 1).catch(() => {})
       ]);
-      if (!scriptException) await loadAsset('/app.js');
+      if (!scriptException) {
+        await loadAsset('/parallel-agents.js');
+        await loadAsset('/remote-ssh.js');
+        await loadAsset('/app.js');
+      }
     } catch (error) { boot.fail(error); }
     finally { starting = false; }
   };

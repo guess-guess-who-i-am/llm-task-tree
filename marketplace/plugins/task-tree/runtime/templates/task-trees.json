@@ -1,0 +1,15 @@
+{
+  "schema": "task-tree-registry/v1",
+  "activeMethod": "method",
+  "trees": [
+    {
+      "id": "method",
+      "title": "方法迭代",
+      "role": "method",
+      "path": "task-tree.md",
+      "description": "当前默认加载、持续迭代并与执行流程关联的方法任务树",
+      "editable": true,
+      "flowEnabled": true
+    }
+  ]
+}

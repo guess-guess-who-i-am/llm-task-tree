@@ -54,21 +54,32 @@ await mkdir(path.join(projectRoot, "subtrees"), { recursive: true });
 await copyIfMissing(path.join(kitDir, "templates", "task-tree.starter.md"), path.join(projectRoot, "task-tree.md"));
 const registryFile = path.join(projectRoot, "task-trees.json");
 const registryTemplate = path.join(kitDir, "templates", "task-trees.json");
+const isBundledOptionalTree = (tree) => {
+  const id = String(tree?.id || "");
+  const treePath = String(tree?.path || "").replace(/\\/g, "/");
+  const title = String(tree?.title || "");
+  return (id === "background" && treePath === "trees/background.md" && title === "项目背景支撑")
+    || (id === "architecture" && treePath === "trees/architecture.md" && title === "任务图系统架构");
+};
 if (!existsSync(registryFile)) {
   await copyIfMissing(registryTemplate, registryFile);
-} else if (existsSync(registryTemplate)) {
+} else if (existsSync(registryTemplate) && !process.argv.includes('--preserve-existing-trees')) {
   const registry = JSON.parse((await readFile(registryFile, "utf8")).replace(/^\uFEFF/, ""));
   const expected = JSON.parse((await readFile(registryTemplate, "utf8")).replace(/^\uFEFF/, ""));
-  const trees = Array.isArray(registry.trees) ? registry.trees : [];
+  const originalTrees = Array.isArray(registry.trees) ? registry.trees : [];
+  const trees = originalTrees.filter((tree) => !isBundledOptionalTree(tree));
   const ids = new Set(trees.map((tree) => String(tree.id || "")));
   const added = (expected.trees || []).filter((tree) => !ids.has(String(tree.id || "")));
-  if (added.length) {
+  const removed = originalTrees.length - trees.length;
+  if (added.length || removed) {
     registry.trees = [...trees, ...added];
+    if (!registry.trees.some((tree) => String(tree.id || "") === String(registry.activeMethod || ""))) {
+      registry.activeMethod = registry.trees.find((tree) => tree.role === "method")?.id || "method";
+    }
     await writeFile(registryFile, `${JSON.stringify(registry, null, 2)}\n`, "utf8");
+    if (removed) console.log(`>> Removed ${removed} bundled optional tree registration(s); tree files were kept`);
   }
 }
-await copyIfMissing(path.join(kitDir, "templates", "background-tree.md"), path.join(projectRoot, "trees", "background.md"));
-await copyIfMissing(path.join(kitDir, "templates", "architecture-tree.md"), path.join(projectRoot, "trees", "architecture.md"));
 await copyIfMissing(path.join(kitDir, "templates", "scripts", "README.md"), path.join(projectRoot, "scripts", "README.md"));
 await copyIfMissing(path.join(kitDir, "templates", "scripts", "steps", "README.md"), path.join(projectRoot, "scripts", "steps", "README.md"));
 

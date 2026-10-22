@@ -125,11 +125,13 @@ await runCase("initialize negotiates protocol and advertises tools", async () =>
     "task_tree_models",
     "task_tree_node",
     "task_tree_open",
+    "task_tree_read",
     "task_tree_render",
     "task_tree_scope",
     "task_tree_server",
     "task_tree_skills",
     "task_tree_subtree",
+    "task_tree_summary",
     "task_tree_versions",
     "task_tree_write"
   ]);
@@ -323,8 +325,8 @@ await runCase("task_tree_write protects GraphState focus and requires a reason",
     call(2, "task_tree_write", { nodeId: "N12", fields: { Next: "N1" }, reason: "测试焦点保护" }),
     call(3, "task_tree_write", { nodeId: "N12", fields: { Notes: "x" } })
   ]);
-  assert.match(JSON.parse(responses.find((item) => item.id === 2).result.content[0].text).error, /GraphState/);
-  assert.match(JSON.parse(responses.find((item) => item.id === 3).result.content[0].text).error, /reason/);
+  assert.match(responses.find((item) => item.id === 2).result.content[0].text, /GraphState/);
+  assert.match(responses.find((item) => item.id === 3).result.content[0].text, /reason/);
 });
 
 await runCase("task_tree_write round-trips an existing node field idempotently", async () => {
@@ -751,12 +753,12 @@ await runCase("switching to a sleeping project starts it instead of showing a de
   }
 });
 
-await runCase("one click starts a Codex turn and hands back its deeplink", async () => {
+await runCase("one click starts a turn and hands back its DeepSeek deeplink", async () => {
   const { threadId } = await startCodexTurn({
     cwd: root,
     spawnCodex: () => spawnFakeAppServer()
   });
-  assert.equal(threadDeepLink(threadId), `codex://threads/${threadId}`, "the UI jumps to the thread it just started");
+  assert.equal(threadDeepLink(threadId), `deepseek://runs/${threadId}`, "the UI jumps to the thread it just started");
 });
 
 await runCase("a completed Codex turn returns its final agent message", async () => {

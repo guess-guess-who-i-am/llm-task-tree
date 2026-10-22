@@ -26,6 +26,15 @@ test('export snapshots include live text once, never tool logs or reasoning', ()
   assert.deepEqual(dialogueSnapshot({ messages }, { ...live, status: 'stopped' }), messages);
 });
 
+test('failed and stopped exports identify the real project, source tree and preserved candidate', () => {
+  for (const status of ['failed','stopped']) {
+    const markdown = dialogueMarkdown({nodeId:'N1',treeId:'method',status,projectRoot:'/project',treePath:'subtrees/N1.md',workspacePath:'/isolated',messages:[]});
+    assert.match(markdown,/主项目：\/project/);
+    assert.match(markdown,/来源树文件：subtrees\/N1.md/);
+    assert.match(markdown,/未合入候选：\/isolated/);
+  }
+});
+
 test('desktop export preserves long Unicode text, uses unique safe filenames and does not overwrite', async () => {
   const desktopDir = await mkdtemp(path.join(os.tmpdir(), 'dialogue-export-test-'));
   try {

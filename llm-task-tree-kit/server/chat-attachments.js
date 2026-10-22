@@ -27,7 +27,7 @@ export async function prewarmImageOcr() {
       try { await access(binary); } catch {
         const temp = `${binary}-${randomUUID()}`;
         try {
-          await run('/usr/bin/swiftc', [source, '-O', '-o', temp], { timeout: 90000 });
+          await run('/usr/bin/swiftc', [source, '-O', '-o', temp]);
           const { rename } = await import('node:fs/promises');
           await rename(temp, binary);
         } finally { await rm(temp, { force: true }); }
@@ -40,7 +40,7 @@ export async function prewarmImageOcr() {
 async function ocrImage(file) {
   if (process.platform !== 'darwin') return { text: '', warning: '本机没有 macOS 文字识别；将发送原图，需模型支持视觉。' };
   try {
-    const { stdout } = await run(await prewarmImageOcr(), [file], { timeout: 60000, maxBuffer: 64 * 1024 * 1024 });
+    const { stdout } = await run(await prewarmImageOcr(), [file], { maxBuffer: 64 * 1024 * 1024 });
     return { text: stdout.trim(), warning: '' };
   } catch { return { text: '', warning: '本机文字识别不可用；将发送原图，需模型支持视觉。' }; }
 }
@@ -72,7 +72,7 @@ export async function parseDocument(file, extension) {
     } finally { await pdf.destroy(); }
   }
   if (['.doc', '.rtf'].includes(extension) && process.platform === 'darwin') {
-    return (await run('/usr/bin/textutil', ['-convert', 'txt', '-stdout', file], { timeout: 60000, maxBuffer: 64 * 1024 * 1024 })).stdout;
+    return (await run('/usr/bin/textutil', ['-convert', 'txt', '-stdout', file], { maxBuffer: 64 * 1024 * 1024 })).stdout;
   }
   throw fail('不支持此文档类型，请使用 PDF、DOCX、TXT 或 Markdown。');
 }
@@ -129,7 +129,7 @@ export async function saveAttachment({ projectRoot, treeId, nodeId, name, bytes 
     else {
       // Isolate binary parsers: malformed documents must not crash the IDE or read external files.
       const result = await run(process.execPath, ['--max-old-space-size=256', fileURLToPath(import.meta.url), '--parse', file, extension],
-        { timeout: 60000, maxBuffer: 64 * 1024 * 1024 });
+        { maxBuffer: 64 * 1024 * 1024 });
       text = result.stdout;
       if (!text.trim()) throw fail('文档没有可读取文字。');
     }

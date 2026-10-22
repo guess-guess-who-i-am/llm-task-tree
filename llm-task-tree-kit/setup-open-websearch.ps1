@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 function Resolve-OpenWebSearchDir {
   param([string]$BaseDir, [string]$ProjectRoot)
   $candidates = @(
+    (Join-Path $BaseDir "node_modules\open-websearch"),
     (Join-Path $BaseDir "open-webSearch"),
     (Join-Path $ProjectRoot "open-webSearch"),
     (Join-Path (Split-Path $BaseDir -Parent) "open-webSearch"),
@@ -45,39 +46,23 @@ if (Test-Path -LiteralPath $configFile) {
 $targetDir = Resolve-OpenWebSearchDir -BaseDir $KitDir -ProjectRoot $projectRoot
 $entry = Join-Path $targetDir "build\index.js"
 
-if (-not (Test-Path -LiteralPath (Join-Path $targetDir "package.json"))) {
-  $parentSource = Join-Path (Split-Path $KitDir -Parent) "open-webSearch"
-  if (Test-Path -LiteralPath (Join-Path $parentSource "package.json")) {
-    if (-not (Test-Path -LiteralPath $targetDir)) {
-      cmd /c mklink /J "$targetDir" "$parentSource" | Out-Null
-      Write-Host "Linked $targetDir -> $parentSource"
-    }
-  } else {
-    Write-Host "Installing open-websearch npm package into $targetDir ..."
-    New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
-    Push-Location $targetDir
-    try {
-      npm install open-websearch@2.1.11 --no-save
-    } finally {
-      Pop-Location
-    }
-  }
-}
-
 if (-not (Test-Path -LiteralPath $entry)) {
-  Push-Location $targetDir
+  # All published dependencies live in the shared kit, not a per-project folder.
+  # This also repairs old installations with a package.json but no root build/.
+  Write-Host "Installing shared dependencies from the IDE lockfile ..."
+  Push-Location $KitDir
   try {
-    if (-not (Test-Path -LiteralPath (Join-Path $targetDir "node_modules"))) {
-      npm install
-    }
-    npm run build
+    npm ci --ignore-scripts --no-audit --no-fund
+    if ($LASTEXITCODE -ne 0) { throw "Shared dependency installation failed" }
   } finally {
     Pop-Location
   }
+  $targetDir = Resolve-OpenWebSearchDir -BaseDir $KitDir -ProjectRoot $projectRoot
+  $entry = Join-Path $targetDir "build\index.js"
 }
 
 if (-not (Test-Path -LiteralPath $entry)) {
-  throw "open-webSearch build failed. Expected $entry"
+  throw "open-websearch published package entry is missing. Expected $entry"
 }
 
 Write-Host "open-webSearch ready at $targetDir"

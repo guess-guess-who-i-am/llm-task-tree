@@ -62,12 +62,15 @@ const { auditTurnMaintenance, repairTurnMaintenance } = await loadRuntimeModule(
 const { diffWorkspaceSnapshots, snapshotWorkspace } = await loadRuntimeModule(root, "turn-tracker.js");
 const markerFile = path.join(root, ".task-tree-maintenance", "turns", `${safe(input.session_id)}-${safe(input.turn_id)}.json`);
 const marker = existsSync(markerFile) ? JSON.parse(await readFile(markerFile, "utf8")) : { startedAtMs: Date.now() - 60_000 };
+const activeTreeId = marker.activeTreeId || '';
 const currentSnapshot = await snapshotWorkspace(root);
 const changedFiles = marker.baseline
   ? diffWorkspaceSnapshots(marker.baseline, currentSnapshot)
   : Object.entries(currentSnapshot.files).filter(([, info]) => info.mtimeMs >= Number(marker.startedAtMs || 0) - 1000).map(([file]) => file);
-const repaired = await repairTurnMaintenance({ projectRoot: root, changedFiles, previousTreeMarkdown: marker.activeTreeMarkdown || "" });
-const status = await auditTurnMaintenance({ projectRoot: root, startedAtMs: marker.startedAtMs, changedFiles: repaired.changedFiles });
+const repaired = await repairTurnMaintenance({ projectRoot: root, changedFiles, activeTreeId, previousTreeMarkdown: marker.activeTreeMarkdown || "",
+  executionNodeId: input.execution_node_id || '', completionReview: input.completion_review });
+const status = await auditTurnMaintenance({ projectRoot: root, activeTreeId, startedAtMs: marker.startedAtMs, changedFiles: repaired.changedFiles,
+  executionNodeId: input.execution_node_id || '', completionReview: input.completion_review });
 status.repairs = repaired.repairs;
 const outDir = path.join(root, ".task-tree-maintenance", "latest");
 await mkdir(outDir, { recursive: true });
@@ -75,9 +78,9 @@ await writeFile(path.join(outDir, "status.json"), `${JSON.stringify(status, null
 await writeFile(path.join(outDir, "report.zh.md"), reportMarkdown(status), "utf8");
 
 const stopHookActive = input.stop_hook_active === true || String(input.stop_hook_active || "").toLowerCase() === "true";
-if (!status.ok && !stopHookActive) {
+if (!status.ok && (!stopHookActive || input.completion_review)) {
   const details = status.issues.map((item) => `${item.code}: ${item.message}`).join("；");
-  process.stdout.write(JSON.stringify({ decision: "block", reason: `任务维护未闭环：${details}。若是字段超预算，必须继续语义精炼（保留结论/数字/风险，历史和证据移出节点，禁止机械截断）；其余问题请更新 active method tree、step evidence 或 flow，然后再次结束。` }));
+  process.stdout.write(JSON.stringify({ decision: "block", taskTreeMaintenance: { schema: 'task-tree-maintenance/v1', issues: status.issues }, reason: `任务维护未闭环：${details}。若是字段超预算，必须继续语义精炼（保留结论/数字/风险，历史和证据移出节点，禁止机械截断）；其余问题请更新 active method tree、step evidence 或 flow，然后再次结束。最后检查者如已核对树状态准确且无需重复写入，可提交有具体理由的 treeState consistent，由宿主保存关联回执。` }));
 } else if (!status.ok) {
   process.stdout.write(JSON.stringify({ systemMessage: "postflight 第二次仍有维护债务；为避免 Stop hook 无限循环，本次不再阻塞。请查看 .task-tree-maintenance/latest/report.zh.md。" }));
 } else {

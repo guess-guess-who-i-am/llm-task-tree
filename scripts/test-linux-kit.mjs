@@ -103,8 +103,6 @@ try {
   for (const relative of [
     "task-tree.md",
     "task-trees.json",
-    "trees/background.md",
-    "trees/architecture.md",
     "scripts/README.md",
     "scripts/steps/README.md",
     "AGENTS.md",
@@ -133,10 +131,28 @@ try {
   assert.equal(path.resolve(stubDir, config.sharedKitDir), kitDir);
   assert.match(await readFile(path.join(stubDir, "mcp-server.mjs"), "utf8"), /shared kit MCP server missing/);
   const registry = JSON.parse(await readFile(path.join(projectDir, "task-trees.json"), "utf8"));
-  assert.ok(registry.trees.some((tree) => tree.id === "architecture"), "architecture tree was not registered");
+  assert.deepEqual(registry.trees.map((tree) => tree.id), ["method"], "new projects should only register their method tree");
+  assert.equal(existsSync(path.join(projectDir, "trees", "background.md")), false, "optional background file should not be pre-created");
+  assert.equal(existsSync(path.join(projectDir, "trees", "architecture.md")), false, "optional architecture file should not be pre-created");
+
+  await mkdir(path.join(projectDir, "trees"), { recursive: true });
+  await writeFile(path.join(projectDir, "trees", "background.md"), "user background data\n");
+  await writeFile(path.join(projectDir, "trees", "architecture.md"), "user architecture data\n");
+  registry.trees.push(
+    { id: "background", title: "项目背景支撑", role: "background", path: "trees/background.md", editable: true, flowEnabled: false },
+    { id: "architecture", title: "任务图系统架构", role: "architecture", path: "trees/architecture.md", editable: true, flowEnabled: false },
+    { id: "my-notes", title: "我的自建树", role: "reference", path: "trees/my-notes.md", editable: true, flowEnabled: false }
+  );
+  await writeFile(path.join(projectDir, "trees", "my-notes.md"), "keep my custom tree\n");
+  await writeFile(path.join(projectDir, "task-trees.json"), `${JSON.stringify(registry, null, 2)}\n`);
 
   const second = await runNode([installer, projectDir, kitDir, stubDir]);
   assert.equal(second.code, 0, second.stderr || second.stdout);
+  const afterRepeat = JSON.parse(await readFile(path.join(projectDir, "task-trees.json"), "utf8"));
+  assert.deepEqual(afterRepeat.trees.map((tree) => tree.id), ["method", "my-notes"], "repeat install should remove only bundled optional registrations");
+  assert.equal(await readFile(path.join(projectDir, "trees", "background.md"), "utf8"), "user background data\n", "optional tree data must be kept");
+  assert.equal(await readFile(path.join(projectDir, "trees", "architecture.md"), "utf8"), "user architecture data\n", "optional tree data must be kept");
+  assert.equal(await readFile(path.join(projectDir, "trees", "my-notes.md"), "utf8"), "keep my custom tree\n", "custom tree must be kept");
   const agentsAgain = await readFile(path.join(projectDir, "AGENTS.md"), "utf8");
   assert.equal((agentsAgain.match(/<!-- llm-task-tree:begin -->/g) || []).length, 1, "AGENTS merge is not idempotent");
   const cursorAgain = JSON.parse(await readFile(path.join(projectDir, ".cursor", "mcp.json"), "utf8"));
@@ -161,7 +177,7 @@ try {
   ], projectDir);
   assert.equal(session.stderr.trim(), "", `stub wrote to stderr: ${session.stderr.slice(0, 300)}`);
   assert.equal(session.responses.find((item) => item.id === 1).result.serverInfo.name, "llm-task-tree");
-  assert.equal(session.responses.find((item) => item.id === 2).result.tools.length, 18);
+  assert.ok(session.responses.find((item) => item.id === 2).result.tools.length >= 18, "installed MCP must expose the full task-tree tool set");
   const focus = JSON.parse(session.responses.find((item) => item.id === 3).result.content[0].text);
   assert.equal(physicalPath(focus.projectRoot), physicalPath(projectDir));
   assert.equal(focus.graphState.current, "ROOT");

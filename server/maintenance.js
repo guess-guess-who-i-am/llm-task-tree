@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { createHash } from 'node:crypto';
 import path from "node:path";
 import { buildExecutionCatalog, computeFlowDrift, getFlowScript, parseFlowMarkdown, putFlowScript, syncFlowBlockStatuses } from "./flow-script.js";
 import { getFlowStep, listStepPackIndex, putFlowStep } from "./flow-step.js";
@@ -19,8 +20,27 @@ function isSubstantiveFile(file) {
   // implementation work; neither should send a content-only turn into a code/flow loop.
   if (isTreeMarkdownPath(rel) || /^\.task-tree-[^/]+$/.test(rel)) return false;
   if (/\.(log|tmp)$/i.test(rel) || rel === ".task-tree-port" || rel === ".task-tree-ports") return false;
-  if (/^scripts\/steps\/[^/]+\/latest\//.test(rel) || rel === "skill-routing-log.md") return false;
+  if (/^scripts\/steps\/[^/]+\/(latest|runs)\//.test(rel) || rel === "skill-routing-log.md") return false;
   return true;
+}
+
+function hasTreeConsistency(review) {
+  return ['pass', 'failed'].includes(review?.verdict) && review.treeState?.status === 'consistent'
+    && typeof review.treeState.reason === 'string' && Boolean(review.treeState.reason.trim());
+}
+
+async function reviewTreeBinding(projectRoot, treeFile, nodeId) {
+  const main = await readFile(treeFile, 'utf8');
+  const subtreesDir = path.join(projectRoot, 'subtrees');
+  const files = new Set(parseFlowMarkdown(main).nodes.map(node => node.subtreeFile).filter(Boolean).map(normalized));
+  if (existsSync(subtreesDir)) for (const file of await readdir(subtreesDir)) if (file.endsWith('.md')) files.add(`subtrees/${file}`);
+  const sections = await Promise.all([...files].sort().map(async file => {
+    const fullPath = path.resolve(projectRoot, file);
+    if (!existsSync(fullPath)) return null;
+    const markdown = await readFile(fullPath, 'utf8');
+    return parseFlowMarkdown(markdown).nodes.some(node => node.id === nodeId) ? [file, markdown] : null;
+  }));
+  return createHash('sha256').update(JSON.stringify([normalized(path.relative(projectRoot, treeFile)), main, sections.filter(Boolean)])).digest('hex');
 }
 
 function currentResultFromMarkdown(markdown, nodeId) {
@@ -79,33 +99,45 @@ function inferChangedNodeId(beforeMarkdown, afterMarkdown) {
   return resultChanged.length === 1 ? resultChanged[0][0] : "";
 }
 
-export async function ensureMinimalStepEvidence({ projectRoot, changedFiles = [], activeTreeId = "", previousTreeMarkdown = "" }) {
+export async function ensureMinimalStepEvidence({ projectRoot, changedFiles = [], activeTreeId = "", previousTreeMarkdown = "", executionNodeId = "", completionReview }) {
   const registryFile = path.join(projectRoot, "task-trees.json");
   const registry = await loadTreeRegistry({ projectRoot, registryFile, create: false });
   const tree = findTree(registry, activeTreeId || registry.activeMethod);
-  if (!tree || tree.flowEnabled === false) return { created: false, reason: "active tree has no flow" };
+  const review = completionReview && ['pass', 'failed'].includes(completionReview.verdict) ? completionReview : null;
+  const explicitReview = Boolean(review && executionNodeId);
+  if (!tree || (tree.flowEnabled === false && !explicitReview)) return { created: false, reason: "active tree has no flow" };
   const treeFile = resolveTreeFile(projectRoot, tree);
   const treeRel = normalized(path.relative(projectRoot, treeFile));
   const changed = [...new Set(changedFiles.map(normalized).filter(Boolean))];
   const substantive = changed.filter(isSubstantiveFile).filter((file) => file !== treeRel && file !== "task-trees.json");
   if (!substantive.length) return { created: false, reason: "no substantive files" };
-  if (!changed.includes(treeRel)) return { created: false, reason: "tree not updated yet" };
-  if (changed.some((file) => /^scripts\/steps\/[^/]+\/latest\/(step\.json|report\.zh\.md)$/.test(file))) {
+  if (!explicitReview && !changed.includes(treeRel)) return { created: false, reason: "tree not updated yet" };
+  if (!explicitReview && changed.some((file) => /^scripts\/steps\/[^/]+\/latest\/(step\.json|report\.zh\.md)$/.test(file))) {
     return { created: false, reason: "step evidence already changed" };
   }
 
   const markdown = existsSync(treeFile) ? await readFile(treeFile, "utf8") : "";
   const parsed = parseFlowMarkdown(markdown);
-  const nodeId = inferChangedNodeId(previousTreeMarkdown, markdown);
+  // The final checker is assigned by the host. It must not infer ownership from
+  // global focus or from an ambiguous multi-node diff. This records receipts,
+  // not a synthetic pass, and does not waive tree/flow audits below.
+  const nodeId = explicitReview ? executionNodeId : inferChangedNodeId(previousTreeMarkdown, markdown);
   if (!nodeId) return { created: false, reason: "changed node is ambiguous" };
-  const node = parsed.nodes.find((item) => item.id === nodeId);
+  const catalog = explicitReview ? await buildExecutionCatalog({ projectRoot, treeFile, subtreesDir: path.join(projectRoot, 'subtrees') }) : parsed;
+  const node = /^[A-Za-z0-9_-]+$/.test(nodeId) && catalog.nodes.find((item) => item.id === nodeId);
+  if (!node) return { created: false, reason: "execution node is not in this tree" };
   const scriptsDir = path.join(projectRoot, "scripts");
   const existing = await getFlowStep({ scriptsDir, nodeId });
   const autoSubstep = {
     title: "Stop postflight 自动记录本轮实质文件",
     autoGenerated: true,
     inputs: [{ path: treeRel, name: "active method tree" }],
-    outputs: substantive.slice(0, 20).map((file) => ({ path: file }))
+    outputs: substantive.map((file) => ({ path: file })),
+    ...(review ? { completionReview: review } : {}),
+    ...(hasTreeConsistency(review) ? { treeConsistencyReceipt: {
+      nodeId, treeId: tree.id, treePath: treeRel, recordedAtMs: Date.now(),
+      treeSha256: await reviewTreeBinding(projectRoot, treeFile, nodeId)
+    } } : {})
   };
   const priorSubsteps = Array.isArray(existing.step?.substeps)
     ? existing.step.substeps.filter((item) => item?.autoGenerated !== true)
@@ -128,7 +160,8 @@ export async function ensureMinimalStepEvidence({ projectRoot, changedFiles = []
   const priorReport = existsSync(reportFile) ? await readFile(reportFile, "utf8") : `# ${nodeId} 步骤报告\n`;
   const begin = "<!-- auto-postflight:begin -->";
   const end = "<!-- auto-postflight:end -->";
-  const block = `${begin}\n## 自动生成的本轮文件证据\n\n> 此区由 Stop postflight 保底生成；Agent 应在 CurrentResult 中补充结论和测量。\n\n${substantive.slice(0, 20).map((file) => `- \`${file}\``).join("\n")}\n${end}`;
+  const reviewBlock = review ? `\n\n## 最后检查实际判定\n\n> 原样保存检查者提交的结论；生成此记录不代表任务通过，failed 不会变为 pass。\n\n\`\`\`json\n${JSON.stringify(review, null, 2)}\n\`\`\`` : '';
+  const block = `${begin}\n## 自动生成的本轮文件证据\n\n> 此区由 Stop postflight 保底生成；Agent 应在 CurrentResult 中补充结论和测量。\n\n${substantive.map((file) => `- \`${file}\``).join("\n")}${reviewBlock}\n${end}`;
   const report = priorReport.includes(begin)
     ? priorReport.replace(new RegExp(`${begin}[\\s\\S]*?${end}`), block)
     : `${priorReport.trim()}\n\n${block}\n`;
@@ -143,7 +176,7 @@ export async function ensureMinimalStepEvidence({ projectRoot, changedFiles = []
   };
 }
 
-export async function repairTurnMaintenance({ projectRoot, changedFiles = [], activeTreeId = "", previousTreeMarkdown = "" }) {
+export async function repairTurnMaintenance({ projectRoot, changedFiles = [], activeTreeId = "", previousTreeMarkdown = "", executionNodeId = "", completionReview }) {
   const registryFile = path.join(projectRoot, "task-trees.json");
   const registry = await loadTreeRegistry({ projectRoot, registryFile, create: false });
   const tree = findTree(registry, activeTreeId || registry.activeMethod);
@@ -161,7 +194,7 @@ export async function repairTurnMaintenance({ projectRoot, changedFiles = [], ac
     }
   }
 
-  const step = await ensureMinimalStepEvidence({ projectRoot, changedFiles: changed, activeTreeId: tree.id, previousTreeMarkdown });
+  const step = await ensureMinimalStepEvidence({ projectRoot, changedFiles: changed, activeTreeId: tree.id, previousTreeMarkdown, executionNodeId, completionReview });
   if (step.created) {
     changed.push(...step.changedFiles);
     repairs.push({ code: "STEP_EVIDENCE_CREATED", message: `为 ${step.nodeId} 自动生成最小 step evidence` });
@@ -169,7 +202,7 @@ export async function repairTurnMaintenance({ projectRoot, changedFiles = [], ac
   return { changedFiles: [...new Set(changed)], repairs };
 }
 
-export async function auditTurnMaintenance({ projectRoot, startedAtMs = 0, changedFiles = [], activeTreeId = "", qualityMode = process.env.TASK_TREE_QUALITY_MODE || 'strict' }) {
+export async function auditTurnMaintenance({ projectRoot, startedAtMs = 0, changedFiles = [], activeTreeId = "", qualityMode = process.env.TASK_TREE_QUALITY_MODE || 'strict', executionNodeId = "", completionReview }) {
   const registryFile = path.join(projectRoot, "task-trees.json");
   const registry = await loadTreeRegistry({ projectRoot, registryFile, create: false });
   const tree = findTree(registry, activeTreeId || registry.activeMethod);
@@ -216,7 +249,38 @@ export async function auditTurnMaintenance({ projectRoot, startedAtMs = 0, chang
     });
   }
 
-  if (substantive.length && !changed.includes(treeRel)) {
+  let nodeTreeUpdated = changed.includes(treeRel);
+  // A final reviewer may correctly update its folded node instead of the main
+  // index. Accept only a changed, in-project subtree containing that explicit
+  // node, never an unrelated tree or mere evidence-pack creation.
+  if (!nodeTreeUpdated && /^[A-Za-z0-9_-]+$/.test(executionNodeId) && ['pass', 'failed'].includes(completionReview?.verdict)) {
+    for (const file of changedTreeFiles.filter(file => file.startsWith('subtrees/'))) {
+      const fullPath = path.resolve(projectRoot, file);
+      if (!fullPath.startsWith(`${path.resolve(projectRoot)}${path.sep}`) || !existsSync(fullPath)) continue;
+      if (parseFlowMarkdown(await readFile(fullPath, 'utf8')).nodes.some(node => node.id === executionNodeId)) {
+        nodeTreeUpdated = true;
+        break;
+      }
+    }
+  }
+  // A factual correction need not change an already accurate current-state tree.
+  // A pass alone is insufficient: bind the explicit attestation to the host's
+  // persisted receipt, this node/tree, this turn and the actual changed files.
+  let treeConsistencyRecorded = false;
+  if (!nodeTreeUpdated && /^[A-Za-z0-9_-]+$/.test(executionNodeId) && hasTreeConsistency(completionReview)) {
+    const catalog = await buildExecutionCatalog({ projectRoot, treeFile, subtreesDir: path.join(projectRoot, 'subtrees') });
+    if (catalog.nodes.some(node => node.id === executionNodeId)) {
+      const step = await getFlowStep({ scriptsDir: path.join(projectRoot, 'scripts'), nodeId: executionNodeId });
+      const receipt = step.step?.substeps?.findLast(item => item?.autoGenerated === true);
+      const binding = receipt?.treeConsistencyReceipt;
+      treeConsistencyRecorded = Boolean(binding && binding.nodeId === executionNodeId && binding.treeId === tree.id
+        && binding.treePath === treeRel && binding.recordedAtMs >= startedAtMs
+        && binding.treeSha256 === await reviewTreeBinding(projectRoot, treeFile, executionNodeId)
+        && JSON.stringify(receipt.completionReview) === JSON.stringify(completionReview)
+        && JSON.stringify(receipt.outputs?.map(item => item.path).sort()) === JSON.stringify([...substantive].sort()));
+    }
+  }
+  if (substantive.length && !nodeTreeUpdated && !treeConsistencyRecorded) {
     issues.push({ code: "TREE_NOT_UPDATED", message: `本轮修改了 ${substantive.length} 个实质文件，但未更新 active method tree ${treeRel}` });
   }
   if (substantive.length && !changedStepFiles.length) {
@@ -268,6 +332,7 @@ export async function auditTurnMaintenance({ projectRoot, startedAtMs = 0, chang
       changed: qualityReports
     },
     flow,
+    treeConsistencyRecorded,
     issues,
     warnings
   };

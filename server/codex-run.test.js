@@ -294,18 +294,22 @@ test("interactive turns report final usage and compaction after completion", asy
   assert.equal(outcome.contextCompactions, 1);
 });
 
-test("completion timeout closes the app-server session", async () => {
+test("legacy app-server completion has no IDE wall-clock limit", async t => {
+  t.mock.timers.enable({apis:['setTimeout','Date']});
   const child = fakeAppServer();
-  await assert.rejects(
-    startCodexTurn({
+  let ready;const accepted=new Promise(r=>ready=r);
+  const pending=startCodexTurn({
       cwd: "E:\\project",
       prompt: "test",
       waitForCompletion: true,
       completionTimeoutMs: 1_000,
       totalTimeoutMs: 20,
+      onAccepted:ready,
       spawnCodex: () => child
-    }),
-    /等待 Codex 完成 超时/
-  );
+    });
+  await accepted;t.mock.timers.tick(3600000);
+  assert.equal(child.killed,false);
+  child.stdout.write(`${JSON.stringify({method:'turn/completed',params:{threadId:'thread-test',turn:{id:'turn-test',status:'completed',items:[{type:'agentMessage',text:'done'}]}}})}\n`);
+  const result=await pending;assert.equal(result.status,'completed');
   assert.equal(child.killed, true);
 });

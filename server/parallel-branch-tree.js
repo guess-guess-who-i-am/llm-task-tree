@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { loadTreeRegistry, saveTreeRegistry, findTree } from './tree-registry.js';
+import { loadTreeRegistry, addTree, findTree } from './tree-registry.js';
 import { patchNodeFields } from './tree-node-patch.js';
 
 const line = value => String(value || '').replace(/\r?\n/g, ' ').trim();
@@ -10,6 +10,15 @@ const section = (id, title, fields) => [
   ...Object.entries(fields).map(([key, value]) => `- ${key}: ${line(value)}`), ''
 ].join('\n');
 const graph = id => `# GraphState\n\n- Current: ${id}\n- Next: ${id}\n- NextPlan:\n\n# Edges\n`;
+const pendingRun=run=>!['accepted','failed','stopped'].includes(run.status);
+function branchState(run,job) {
+  if(['failed','blocked','stopped'].includes(job.status)||(!pendingRun(run)&&run.status!=='accepted'))
+    return {Completion:'需重做',CurrentResult:'本轮未获验收，失败原因与保留成果见并行运行窗口。'};
+  if(job.status==='completed')return run.finalReviewOnly&&run.review?.verdict!=='pass'
+    ?{Completion:'进行中',CurrentResult:'本分支已实施并整合，待整体最终验收。'}
+    :{Completion:'已完成',CurrentResult:'本分支已实施并通过适用验收。'};
+  return {Completion:['queued','planned',undefined].includes(job.status)?'未开始':'进行中',CurrentResult:'宿主正在推进本分支，尚未交付。'};
+}
 
 export async function readParallelSource(projectRoot, { treeId, subtree, nodeId } = {}) {
   const registry = await loadTreeRegistry({ projectRoot, registryFile: path.join(projectRoot, 'task-trees.json'), create: false });
@@ -36,7 +45,9 @@ export async function materializeParallelBranches(projectRoot, run, jobs = run.j
     job.taskFile ||= `subtrees/${job.executionNodeId}.task.json`;
     await writeFile(path.join(projectRoot, job.taskFile), JSON.stringify({
       sourceTree: run.sourceTree, taskId: job.taskId, sourceNodeId: job.nodeId, title: job.title,
-      instruction: job.instruction, branchContext: job.branchContext, dependsOn: job.dependsOn
+      instruction: job.instruction, branchContext: job.branchContext, dependsOn: job.dependsOn,
+      deliverables:job.deliverables||[],acceptanceCriteria:job.acceptanceCriteria||[],
+      ...(run.sharedContract ? {sharedContract:run.sharedContract} : {})
     }, null, 2) + '\n', 'utf8');
     const file = path.join(projectRoot, job.subtreeFile);
     try { await readFile(file); }
@@ -54,9 +65,8 @@ export async function materializeParallelBranches(projectRoot, run, jobs = run.j
   }
   const registryFile = path.join(projectRoot, 'task-trees.json');
   const registry = await loadTreeRegistry({ projectRoot, registryFile, create: false });
-  if (!registry.trees.some(t => t.id === run.branchTree.id)) await saveTreeRegistry({ registryFile, registry: {
-    ...registry, trees: [...registry.trees, { ...run.branchTree, role: 'reference', description: `来源：${run.sourceTree?.path || 'task-tree.md'}`, editable: true, flowEnabled: false }]
-  } });
+  if (!registry.trees.some(t => t.id === run.branchTree.id)) await addTree({projectRoot,registryFile,registry,
+    input:{...run.branchTree,role:'reference',description:`来源：${run.sourceTree?.path || 'task-tree.md'}`,editable:true,flowEnabled:false}});
   let markdown = '# LLM Task Graph\n\n' + section(prefix, '本轮并行任务', {
     Completion: '进行中', Problem: `如何完成本轮目标？`,
     Input: `来源：${run.sourceTree?.path || 'task-tree.md'}；目标全文见 ${run.branchTree.planPath}。`,
@@ -64,7 +74,7 @@ export async function materializeParallelBranches(projectRoot, run, jobs = run.j
     NextIdea: '进入各分支子树查看当前任务与结果。'
   });
   for (const job of run.jobs) markdown += section(job.executionNodeId, job.title, {
-    Completion: job.status === 'completed' ? '已完成' : '未开始',
+    ...branchState(run,job),
     Problem: `如何完成“${job.title}”？`, Folded: 'true', SubtreeFile: job.subtreeFile, SubtreeCount: '1'
   });
   markdown += graph(prefix);
@@ -76,8 +86,8 @@ export async function materializeParallelBranches(projectRoot, run, jobs = run.j
   await writeFile(path.join(projectRoot, run.branchTree.planPath), JSON.stringify({
     schema: 'parallel-branch-plan/v1', runId: run.id, sourceTree: run.sourceTree,
     goal: run.goal, coverage: run.coverage,
-    jobs: run.jobs.map(({ taskId, nodeId, executionNodeId, title, instruction, branchContext, writeSet, dependsOn, subtreeFile, taskFile }) =>
-      ({ taskId, nodeId, executionNodeId, title, instruction, branchContext, writeSet, dependsOn, subtreeFile, taskFile }))
+    jobs: run.jobs.map(({ taskId, nodeId, executionNodeId, title, instruction, branchContext, writeSet, dependsOn, subtreeFile, taskFile, deliverables, acceptanceCriteria }) =>
+      ({ taskId, nodeId, executionNodeId, title, instruction, branchContext, writeSet, dependsOn, subtreeFile, taskFile, deliverables, acceptanceCriteria }))
   }, null, 2) + '\n', 'utf8');
   return run.branchTree;
 }
@@ -86,12 +96,10 @@ export async function recordParallelBranchResults(projectRoot, run) {
   if (!run.branchTree) return;
   const file = path.join(projectRoot, run.branchTree.path);
   let markdown = await readFile(file, 'utf8');
-  for (const job of run.jobs) markdown = patchNodeFields(markdown, job.executionNodeId, {
-    Completion: job.status === 'completed' ? '已完成' : '需重做'
-  }).markdown;
+  for (const job of run.jobs) markdown = patchNodeFields(markdown, job.executionNodeId, branchState(run,job)).markdown;
   markdown = patchNodeFields(markdown, `P_${run.id.replace(/-/g, '')}`, {
-    Completion: run.status === 'accepted' ? '已完成' : '需重做',
-    CurrentResult: `本轮已完成 ${run.jobs.filter(j => j.status === 'completed').length}/${run.jobs.length} 个分支；${run.status === 'accepted' ? '结果已自动合入原工程。' : '有分支未完成，失败原因与保留结果见并行运行窗口。'}`
+    Completion: run.status === 'accepted' ? '已完成' : pendingRun(run)?'进行中':'需重做',
+    CurrentResult: `本轮已实施 ${run.jobs.filter(j => j.status === 'completed').length}/${run.jobs.length} 个分支；${run.status === 'accepted' ? '结果已整合并通过最终验收。' : pendingRun(run)?'结果待整体最终验收，宿主运行尚未结束。':'整体任务未获验收，失败原因与保留成果见并行运行窗口。'}`
   }).markdown;
   await writeFile(file, markdown, 'utf8');
 }

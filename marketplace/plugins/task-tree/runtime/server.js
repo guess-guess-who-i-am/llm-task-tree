@@ -1,4 +1,8 @@
 import http from "node:http";
+import os from 'node:os';
+import { createRemoteSshManager } from './server/remote-ssh.js';
+import { createSearchMemo, searchQuality, searchWebBatch } from './server/web-research-batch.js';
+import { apiConnectionsFile, createApiConnectionsStore, connectionDefaults, configuredConnection, resolveGlobalEnvFile } from './server/api-connections.js';
 import https from "node:https";
 import { httpsPortFor, loadLocalTls } from "./server/local-tls.js";
 import {
@@ -46,22 +50,27 @@ import {
   describePresets
 } from "./server/codex-prompts.js";
 import { createParallelCodexCoordinator } from "./server/codex-coordinator.js";
+import { createDirectNodeWorkspace } from "./server/direct-node-workspace.js";
 import { createExecutionScopeStore } from "./server/execution-scope.js";
 import { patchNodeFields } from "./server/tree-node-patch.js";
 import { validateToolArguments } from './server/tool-arguments.js';
 import { assertMainTreeWrite, assertRenderableTree } from './server/tree-write-safety.js';
-import { dialogueMessages, serializeDialogueState, normalizeNodeDialogues, nodeConversationId, latestNodeRuns } from './server/dialogue-state.js';
+import { dialogueMessages, dialogueWithCompletionReceipt, serializeDialogueState, normalizeNodeDialogues, nodeConversationId, latestNodeRuns } from './server/dialogue-state.js';
+import { createDialogueDraftStore } from './server/dialogue-drafts.js';
 import { reviseUserMessage, dialogueSnapshot, exportDialogueToDesktop } from './server/dialogue-actions.js';
 import { archiveThreadDialogue } from './server/thread-dialogue-store.js';
 import { saveAttachment, importLocalAttachment, loadAttachment, materializeAttachments, attachmentReference, attachPromptImages, MAX_ATTACHMENT_BYTES } from './server/chat-attachments.js';
 import { listNodeMaterials, updateNodeMaterial, filterMaterialHistory } from './server/node-materials.js';
-import { executionProgress, recordRunDuration, readableExecutionError } from './server/execution-progress.js';
+import { executionProgress, recordRunDuration, readableExecutionError, recordCompactionProgress, recordIntegrationProgress } from './server/execution-progress.js';
 import { planSubtreeFold } from './server/subtree-fold.js';
 import { readTreeSummary } from './server/tree-context.js';
+import { ADAPTIVE_NODE_INSTRUCTIONS, NODE_EXECUTION_TOOL, createAdaptiveNodeExecution } from './server/adaptive-node-execution.js';
+import { startCoordinatedNodeTurn } from './server/execution-coordination.js';
 import { ACTIVE_METHOD_TREE_MAX_BYTES, inspectTreeMarkdown, parseTreeNodeFields } from "./server/tree-quality.js";
 import { buildTaskTreeCheckpointContext, extractTaskTreeTurnFocus } from "./server/turn-context.js";
 import { changedNodeIds, diffTreeMarkdown } from "./server/tree-diff.js";
-import { describeProjects, ensureProjectServer } from "./server/projects.js";
+import { describeProjects, ensureProjectServer, registerProject } from "./server/projects.js";
+import { TREE_CATALOG_TOOL } from './server/tree-catalog-tool.js';
 import { execFile, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { appendFile, copyFile, mkdir, open, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
@@ -69,9 +78,14 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { resolveSearchInstallation, searchDaemonEnvironment } from './server/open-websearch-installation.js';
+import { localNetworkEnvironment } from './server/network-environment.js';
+import { resolveWebSearchConfig, normalizeWebSearchProvider } from './server/web-search-config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const kitDir = __dirname;
+const remoteSsh = createRemoteSshManager({ kitDir });
+const executionHost = { mode: process.env.TASK_TREE_REMOTE_HOST ? 'ssh' : 'local', hostname: os.hostname(), platform: process.platform };
 const stubDir = process.env.TASK_TREE_STUB_DIR
   ? path.resolve(process.env.TASK_TREE_STUB_DIR)
   : kitDir;
@@ -101,6 +115,7 @@ const treeRegistryFile = path.join(projectRoot, "task-trees.json");
 let treeRegistry = await loadTreeRegistry({ projectRoot, registryFile: treeRegistryFile });
 let activeTreeEntry = findTree(treeRegistry, treeRegistry.activeMethod);
 let treeFile = resolveTreeFile(projectRoot, activeTreeEntry);
+try { registerProject(projectRoot); } catch(error) { console.warn(`项目使用记录未保存：${error.message}`); }
 const subtreesDir = path.join(projectRoot, "subtrees");
 const scriptsDir = path.join(projectRoot, "scripts");
 const versionsDir = path.join(projectRoot, "versions");
@@ -117,9 +132,7 @@ const webSearchConfigFile = path.join(projectRoot, "web-search-config.json");
 const envFile = path.join(projectRoot, ".env");
 // One shared provider configuration serves every project created by this kit. A project `.env`
 // may override non-empty values, but newly created directories do not need to copy API keys.
-const globalEnvFile = process.env.TASK_TREE_GLOBAL_ENV_FILE
-  ? path.resolve(process.env.TASK_TREE_GLOBAL_ENV_FILE)
-  : path.resolve(kitDir, "..", "..", ".env");
+const globalEnvFile = resolveGlobalEnvFile(kitDir);
 const port = Number(process.env.PORT || 5177);
 const host = process.env.HOST || "127.0.0.1";
 const execFileAsync = promisify(execFile);
@@ -148,9 +161,11 @@ async function ensureProjectGitRepository() {
 }
 const executionScopes = createExecutionScopeStore({ projectRoot });
 const parallelCodex = createParallelCodexCoordinator({ projectRoot });
+const directNodeWorkspace = createDirectNodeWorkspace({ projectRoot });
 const directRuns = new Map();
 const directRunControllers = new Map();
 const directConversations = new Map();
+const dialogueDrafts = createDialogueDraftStore(projectRoot);
 const deletingDirectConversations = new Set();
 const startingDirectConversations = new Set();
 const directStateFile = path.join(projectRoot, '.task-tree-direct-state.json');
@@ -209,21 +224,38 @@ function directRunEvent(run, type, text = "", detail = {}) {
 }
 
 function directRunNotification(run, message) {
+  if(message?.method==='assistant/presentation') {
+    run.presentation=message.params.presentation;
+    scheduleDirectStateFlush();
+    return;
+  }
   const params = message?.params || {};
+  if(message?.method==='context/input-prepared'){
+    run.timing ||= {provider:'deepseek',rounds:[],tools:[]};
+    run.timing.inputPrepared=params;
+    directRunEvent(run,message.method,'模型输入分项大小已记录',{inputPrepared:params});
+    return;
+  }
+  if(message?.method==='execution/finalizing')run.phase='finalizing';
+  if(message?.method==='execution/continuing'){run.phase='repairing';run.continuationMessage=params.message;}
+  if(message?.method==='execution/saving')run.phase='saving';
   if(message?.method==='runtime/loading')run.phase='loading';
-  if(message?.method==='context/compaction-started')run.phase='summarizing';
-  if(message?.method==='context/compaction-completed')run.phase='model';
+  if(message?.method==='execution/reassessing')run.phase='planning';
+  recordCompactionProgress(run, message?.method);
   if(['runtime/ready','model/request-started','model/round-completed'].includes(message?.method))run.phase='model';
   if(message?.method==='model/request-retrying'){
     run.phase='retrying';
     run.retryAt=Date.now()+(Number(params.delayMs)||0);
   }
+  if(message?.method==='model/continuing') { run.phase='retrying';delete run.retryAt; }
+  if(message?.method==='context/compaction-retrying')run.phase='summarizing';
+  if(message?.method==='dialogue/save-retrying')run.phase='saving';
   if(message?.method==='model/request-started')delete run.retryAt;
   if(message?.method==='tool/started')run.phase='tool';
   if(message?.method==='tool/completed')run.phase='model';
   if(message?.method==='model/round-completed'){
     run.timing ||= {provider:'deepseek',rounds:[],tools:[]};
-    const timing={round:params.round,requestMs:params.requestMs,streamMs:params.streamMs,totalMs:params.totalMs,toolCalls:params.toolCalls,attempts:params.attempts,requestBytes:params.requestBytes,model:params.model};
+    const timing={round:params.round,requestMs:params.requestMs,streamMs:params.streamMs,totalMs:params.totalMs,toolCalls:params.toolCalls,attempts:params.attempts,requestBytes:params.requestBytes,model:params.model,failedStage:params.failedStage,errorCode:params.errorCode,contextInput:params.contextInput,tokenUsage:params.tokenUsage};
     run.timing.rounds.push(timing);
     directRunEvent(run,message.method,`模型第 ${timing.round} 轮返回（${((timing.totalMs || 0)/1000).toFixed(1)} 秒）`,{timing});
     return;
@@ -250,25 +282,40 @@ function directRunNotification(run, message) {
   }
   const text = item.text || item.delta || params.delta || params.message || params.error?.message || "";
   const type = message?.method || item.type || "notification";
-  if (text || type) directRunEvent(run, type, text, { itemType: item.type || "", ...(type.startsWith('hook/') ? { hookEvent: params.event, reports: params.reports || [], blocked: params.blocked } : {}), ...(type === 'runtime/ready' ? { instructionSources: params.instructionSources || [], indexFile: params.indexFile, toolCount: params.toolCount, worker: params.worker, runtimeMs: params.runtimeMs } : {}) });
+  if (text || type) directRunEvent(run, type, text, { itemType: item.type || "", ...(type.startsWith('hook/') ? { hookEvent: params.event, reports: params.reports || [], blocked: params.blocked } : {}), ...(type.startsWith('context/compaction-') ? {compaction:{phase:params.phase,error:params.error,errorCode:params.errorCode,durationMs:params.durationMs,beforeTokens:params.beforeTokens,afterTokens:params.afterTokens,beforeEstimateTokens:params.beforeEstimateTokens,afterEstimateTokens:params.afterEstimateTokens,components:params.components}} : {}), ...(type === 'execution/strategy' ? {mode:params.mode} : {}), ...(type === 'runtime/ready' ? { instructionSources: params.instructionSources || [], indexFile: params.indexFile, toolCount: params.toolCount, worker: params.worker, runtimeMs: params.runtimeMs } : {}) });
 }
 
 function publicDirectRun(run) {
   return {
     id: run.id,
     treeId: run.treeId || '',
+    projectRoot: run.projectRoot || projectRoot,
+    treePath: run.treePath || '',
     nodeId: run.nodeId,
     conversationId: run.conversationId || "",
     prompt: run.prompt || "",
     messages: Array.isArray(run.messages) ? run.messages : [],
     output: run.output || "",
+    ...(run.presentation ? {presentation:run.presentation} : {}),
     reasoning: run.reasoning || "",
     streams: run.streams || {},
     status: run.status,
+    workerCompleted: run.workerCompleted === true,
+    reviewActivity: run.reviewActivity || null,
+    continuationMessage: run.continuationMessage || '',
     threadId: run.threadId || "",
     turnId: run.turnId || "",
     events: run.events,
     error: run.error || "",
+    workspacePath: run.workspacePath || "",
+    changedFiles: run.changedFiles || [],
+    appliedFiles: run.appliedFiles || [],
+    treeChanges: run.treeChanges || [],
+    integrationTimings: run.integrationTimings || [],
+    persistenceWarning: run.persistenceWarning || '',
+    review: run.review || null,
+    executionMode: run.executionMode || 'auto',
+    parallel: run.parallel || null,
     progress: executionProgress(run,directTimingSamples),
     errorSummary: readableExecutionError(run.error),
     timing: run.timing || null,
@@ -583,6 +630,7 @@ async function persistTreeMarkdown(scope, markdown, body = {}) {
 }
 
 const DEEPSEEK_TASK_TREE_TOOLS = Object.freeze([
+  {type:'function',function:TREE_CATALOG_TOOL},
   {
     type: 'function', function: {
       name: 'task_tree_summary', description: '读取当前主树地图摘要及折叠根最新状态，不自动展开子树后代；需要细节再读完整主树或指定子树。',
@@ -628,11 +676,11 @@ const DEEPSEEK_TASK_TREE_TOOLS = Object.freeze([
     type: "function",
     function: {
       name: "task_tree_subtree",
-      description: '展开节点为独立子树。write 同时保存子树和主树折叠索引，保留主树 ROOT、兄弟节点与焦点；无需另写主树。正文包含折叠根节点、子节点、GraphState、Edges，文件头注明 > Fold root: 节点ID。read/context 可读取现有子树。',
+      description: '接入独立子树时 write 必须选择 mode=attach：保留全部主树节点和关系，仅链接新子节点与该根已有子树。mode=fold（省略时兼容旧行为）会折叠现有画布后代，不能用于业务阶段主干接入。write 同时保存子树和主树索引；无需另写主树。正文包含根节点、子节点、GraphState、Edges，文件头注明 > Fold root: 节点ID。内部节点 ID 仅用 ASCII 英文字母、数字、下划线或横线，边 ID 还须以 E 开头；中文用于标题和字段正文。read/context 读取现有子树。',
       parameters: {type:'object',additionalProperties:false,required:['action','path'],properties:{
         treeId:{type:'string'},action:{type:'string',enum:['read','context','write','sync_stub']},
         path:{type:'string',description:'例如 subtrees/N9-subtree.md'},foldRoot:{type:'string'},
-        markdown:{type:'string'},reason:{type:'string'}
+        markdown:{type:'string'},reason:{type:'string'},mode:{type:'string',enum:['attach','fold']}
       }}
     }
   },
@@ -677,11 +725,11 @@ async function buildDeepSeekTaskTreeSystemPrompt({ nodeId = "", treeScope = null
   const node = (await findDeepSeekNode(scope,nodeId))?.node;
   const rules = [
     "你正在通过任务图 IDE 的 DeepSeek 工具桥接工作，不是只生成代码树的聊天问答。",
-    '本次用户要求：中间进度、工具前后的说明和最终答复都以中文为主；只有工具名、代码、路径或必要原词保留英文。不要逐句用英语复述“我要读文件”。每次进度说明指出正在完成什么；最终明确“本轮已完成”或“本轮未完成：原因”。不得把收到请求、读完上下文或打印树形文本当成任务完成。',
+    '本次用户要求：中间进度、工具前后的说明和最终答复都以中文为主；只有工具名、代码、路径或必要原词保留英文。不要逐句用英语复述“我要读文件”。每次进度说明指出正在完成什么；交付后说明“执行者工作已结束，结果待宿主整合验收”，未完成则说明原因，不宣称整轮已验收或主项目已更新。不得把收到请求、读完上下文或打印树形文本当成任务完成。',
     'IDE 的篇幅、格式、12 KiB 精炼检查只作提示，不阻塞本节点工作。不要为解决这类提示反复读文件、压缩整棵树、改变其它分支；保存当前节点实际成果即可。工具参数或误覆盖保护失败时仅修正该问题。需要折叠已有分支时保留原子节点 ID，宿主会迁移真实后代，而不是要求换一批新 ID。不要为了 gate 增加用户未要求的步骤。',
     "任务树修改必须落盘，回答中的代码树不算修改。已有节点字段用 task_tree_write(nodeId,fields,reason)。新增少量主树节点才使用完整 markdown，保留所有原节点和 GraphState。展开分支必须用 task_tree_subtree(action=write,path,foldRoot,markdown,reason)：一次保存独立子树并链接主树索引，不能把子树正文传给 task_tree_write，也不能给 task_tree_write 传 path。",
     '示例：展开 N9 身体底盘，调用 task_tree_subtree，action="write"，path="subtrees/N9-subtree.md"，foldRoot="N9"，markdown 为含 N9、睡眠/习惯/时间子节点、GraphState 和二元 Edges 的完整子树；标题后注明 > Fold root: N9。原 ROOT 和收入分支不能消失。多个独立分支可以同轮提出工具调用。',
-    '节点 ID 仅含字母、数字、下划线、横线，例如 N9_1、N9_SLEEP；不要生成 N9.1。边 ID 以 E 开头。子树根节点的现有字段由宿主从最新主树保留，不必重复生成其原文；只生成本次变化和新子节点的必要内容（问题、当前方法、可判定标准、下一步）。不要为了占位输出大量空字段、位置/尺寸或重复背景；这不是截断内容。先展开用户要求的分支，不为篇幅提示修改其它分支。',
+    '节点 ID 仅含 ASCII 英文字母、数字、下划线、横线，例如 N9_1、N9_SLEEP；不要生成中文 ID 或 N9.1。边 ID 以 E 开头且仅含同一字符集；中文用于标题和正文。子树根节点的现有字段由宿主从最新主树保留，不必重复生成其原文；只生成本次变化和新子节点的必要内容（问题、当前方法、可判定标准、下一步）。不要为了占位输出大量空字段、位置/尺寸或重复背景；这不是截断内容。先展开用户要求的分支，不为篇幅提示修改其它分支。',
     '完整调用示例（同样适用于每个分支，不是只生成子节点之间的边）：\n'+JSON.stringify({tool:'task_tree_subtree',arguments:{action:'write',path:'subtrees/N9-subtree.md',foldRoot:'N9',reason:'展开睡眠行动',markdown:'# LLM Task Graph Subtree\n\n> Fold root: N9\n\n## N9 - 身体底盘\n\n## N9_1 - 睡眠基线\n- Problem: 如何了解当前睡眠与精力？\n- Approach: 先记录实际作息，不编造健康信息。\n- Metrics: 三天记录含入睡、起床与精力。\n- NextIdea: 记录今天的作息与白天精力。\n\n# GraphState\n- Current: N9\n- Next: N9_1\n\n# Edges\n## E9_1 - 基线\n- Endpoints: N9, N9_1\n- Label: 先了解底盘\n'}})+'\n每个子节点必须通过二元边与折叠根直接或间接连接；边不能只连子节点而把根悬空。计数使用工具返回的 childCount、addedNodeIds，不能重复计算主树索引根。',
     '按当前任务类型选技能。生活规划/改树不是 IDE 工程任务：不要研究 server.js、启动器、运行元数据或当前会话工具日志来推断子树协议。先用树工具理解目标，按路由读必要完整协议，再写树；read_file 和只读树工具可同一轮批量调用。协议或接口错误只修正提示的参数，不重试相同失败调用。无执行流程脚本是正常状态，无需为此创建流程或研究代码。',
     "宿主已在首轮前通过 task_tree_focus、task_tree_summary 提供目标节点及新鲜主树地图摘要；折叠分支只含根摘要，不自动展开其后代。你自行决定是否需要 task_tree_read（完整主树）或 task_tree_subtree(action=read,path)（指定子树全文）。修改整树或子树全文前必须读取相应最新原文；只改节点字段无需读完整树。写入后按已回读核验的 changes 报告实际变化；任务已达成且无错误时结束，不为重复核查再开回合。",
@@ -696,10 +744,33 @@ async function buildDeepSeekTaskTreeSystemPrompt({ nodeId = "", treeScope = null
   return rules.filter(Boolean).join("\n\n");
 }
 
+function buildIsolatedNodeSystemPrompt({ nodeId, treeScope }) {
+  // Shared runtime owns global rules/Hook and the fresh tree summary. This
+  // layer supplies only the selected-node scope and its execution mechanics.
+  return [
+    `执行节点：${nodeId}。用户本轮要求与所选节点优先；摘要中的全局 Current/Next 仅作背景，不是本轮任务。`,
+    ADAPTIVE_NODE_INSTRUCTIONS,
+    `当前树：${treeScope.tree.id}（${treeScope.tree.path}）。本轮位于独立 Git 工作区；代码与任务树修改先在此落盘，完成后由宿主合并到主项目。`,
+    '你的最终回复是执行者报告，不是宿主整轮验收结果。交付后写“执行者工作已结束，结果待宿主整合验收”，说明真实改动与未解决问题；不要宣称主项目已经更新或整轮已全部完成。',
+    '主树摘要与所选节点已由宿主预读；仅在缺少细节或状态已变化时补读。把树视为项目框架，围绕本轮交付实施，不为预先写满树延迟执行；独立后续问题才细化为子节点。',
+    '现有子树先用 task_tree_subtree(action=read,path) 读取；action=write 同时保存并链接父节点，无需重复 sync_stub。独立新树用 task_tree_registry(create/register)，后续指定 treeId；changes 是实际落盘差异。',
+    '当前工作区可能基于稍早快照；不要猜测其他 Agent 的未合并结果。需要它们的真实结果时说明依赖，宿主合并后再继续。'
+  ].join('\n\n');
+}
+
 async function executeDeepSeekTaskTreeTool(name, args = {}) {
   const definition = DEEPSEEK_TASK_TREE_TOOLS.find(t=>t.function.name===name);
   if (!definition) throw new Error(`未知任务树工具：${name}`);
   validateToolArguments(definition.function.parameters,args);
+  if (name === TREE_CATALOG_TOOL.name) {
+    if (args.action === 'list') return {ok:true,...await refreshTreeRegistry()};
+    if (!args.id || !args.title) throw new Error('新建/接入独立树需要 id 和 title');
+    if (args.action === 'register' && (!args.path || args.markdown !== undefined)) throw new Error('register 需要已有 path，不传 markdown');
+    const {action,...input} = args;
+    const added = await addTree({projectRoot,registryFile:treeRegistryFile,input:{...input,createFile:true,registerExisting:action==='register'}});
+    treeRegistry = added.registry;
+    return {ok:true,...added,treeId:added.tree.id,path:added.tree.path,url:`/?tree=${encodeURIComponent(added.tree.id)}`};
+  }
   const scope = await readDeepSeekTreeScope(args);
   if (name === 'task_tree_summary') return { ok: true, ...await readTreeSummary({ projectRoot, tree: scope.tree, markdown: scope.markdown, persist: true }) };
   if (name === "task_tree_focus") {
@@ -730,8 +801,10 @@ async function executeDeepSeekTaskTreeTool(name, args = {}) {
       const parent = parseTreeNodeFields(current).find(n=>n.id===rootId);
       if (!parent) throw new Error(`主树中没有折叠根节点 ${rootId}`);
       if (parent.fields.SubtreeFile?.trim() && parent.fields.SubtreeFile.trim()!==args.path) throw new Error(`此节点已有子树 ${parent.fields.SubtreeFile}，请读该文件并更新，勿替换路径`);
-      if(previous && parseSubtreeFoldRoot(previous)!==rootId) throw new Error('该子树文件已属于其它折叠根，不能覆盖');
-      const fold=planSubtreeFold(current,markdown,{rootId,previous});
+      const previousRoot=previous && parseSubtreeFoldRoot(previous);
+      if(previous && previousRoot!==rootId && !(args.mode==='attach' && !previousRoot)) throw new Error('该子树文件已属于其它折叠根，不能覆盖');
+      if(parseTreeNodeFields(current).some(n=>n.id!==rootId && n.fields.SubtreeFile?.trim()===args.path)) throw new Error('该子树文件已被其它折叠根使用，不能覆盖');
+      const fold=planSubtreeFold(current,markdown,{rootId,previous,...(args.mode!==undefined?{mode:args.mode}:{})});
       markdown=fold.subtreeMarkdown;
       assertRenderableTree(markdown);
       const parsed=parseTreeNodeFields(markdown);
@@ -806,20 +879,7 @@ async function executeDeepSeekTaskTreeTool(name, args = {}) {
 }
 
 function resolveOpenWebSearchDir() {
-  const candidates = [
-    path.join(kitDir, "open-webSearch"),
-    path.join(projectRoot, "open-webSearch"),
-    path.resolve(kitDir, "..", "open-webSearch"),
-    path.resolve(projectRoot, "..", "open-webSearch")
-  ];
-  const seen = new Set();
-  for (const dir of candidates) {
-    const resolved = path.resolve(dir);
-    if (seen.has(resolved)) continue;
-    seen.add(resolved);
-    if (existsSync(path.join(resolved, "package.json"))) return resolved;
-  }
-  return path.join(kitDir, "open-webSearch");
+  return resolveSearchInstallation(kitDir, projectRoot).dir;
 }
 
 function openWebSearchLogDir() {
@@ -877,14 +937,14 @@ async function ensureOpenWebSearchDaemon() {
   }
   if (openWebSearchDaemonPromise) return openWebSearchDaemonPromise;
   openWebSearchDaemonPromise = (async () => {
-    const dir = resolveOpenWebSearchDir();
-    const entry = path.join(dir, "build", "index.js");
+    const {dir, entry, packaged} = resolveSearchInstallation(kitDir, projectRoot);
     const logs = openWebSearchLauncherLogs();
     await mkdir(logs.dir, { recursive: true }).catch(() => {});
     if (!existsSync(entry)) {
       if (!existsSync(path.join(dir, "package.json"))) {
-        throw new Error(`open-webSearch not found at ${dir}. Run llm-task-tree-kit/setup-open-websearch.ps1 or set WEB_SEARCH_PROVIDER=tavily with an API key.`);
+        throw new Error(`共享搜索服务尚未安装：${dir}。请在 IDE 安装目录运行 npm ci --ignore-scripts；免 key 的 Open-WebSearch 不需要搜索 API key。`);
       }
+      if(packaged) throw new Error('Open-WebSearch 发布包入口缺失，请在 IDE 安装目录重新运行 npm ci --ignore-scripts；无需编译发布包。');
       try {
         await buildOpenWebSearch(dir);
       } catch (error) {
@@ -896,31 +956,37 @@ async function ensureOpenWebSearchDaemon() {
       throw new Error(`open-webSearch is not built at ${entry}. Run setup-open-websearch.ps1.`);
     }
     const url = new URL(baseUrl.startsWith("http") ? baseUrl : `http://${baseUrl}`);
+    if(!['localhost','127.0.0.1','[::1]'].includes(url.hostname))throw new Error(`远程搜索服务不可达：${baseUrl}；不会在本机冒充启动远程服务。`);
     const daemonHost = url.hostname || "127.0.0.1";
     const daemonPort = url.port || "3210";
     const engines = String(env.OPEN_WEBSEARCH_ENGINES || "");
     const searchMode = String(env.OPEN_WEBSEARCH_SEARCH_MODE || "request");
     const defaultEngine = engines.split(",").map((item) => item.trim()).filter(Boolean)[0] || "duckduckgo";
-    const childEnv = {
-      ...process.env,
+    const childEnv = searchDaemonEnvironment({
+      ...await localNetworkEnvironment({...process.env,...env}),
       OPEN_WEBSEARCH_DAEMON_HOST: daemonHost,
       OPEN_WEBSEARCH_DAEMON_PORT: daemonPort,
       DEFAULT_SEARCH_ENGINE: defaultEngine,
       ALLOWED_SEARCH_ENGINES: engines,
       SEARCH_MODE: searchMode
-    };
-    const child = spawn(process.execPath, ["build/index.js", "serve", "--host", daemonHost, "--port", daemonPort], {
+    });
+    const logHandle=await open(logs.log,'a'),errHandle=await open(logs.err,'a');
+    let child;
+    try {child = spawn(process.execPath, [entry, "serve", "--host", daemonHost, "--port", daemonPort], {
       cwd: dir,
       detached: true,
-      stdio: "ignore",
+      stdio: ['ignore',logHandle.fd,errHandle.fd],
       windowsHide: true,
       env: childEnv
-    });
+    });}finally{await logHandle.close();await errHandle.close();}
+    let launchError;
+    child.on('error',error=>{launchError=error;});
     child.unref();
     for (let attempt = 0; attempt < 60; attempt += 1) {
       if (await testOpenWebSearchDaemon(baseUrl)) {
         return { ok: true, baseUrl, running: true, started: true, dir };
       }
+      if(launchError)throw new Error(`搜索服务启动失败：${launchError.message}。详见 ${logs.err}`);
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
     throw new Error(`open-webSearch daemon failed to start at ${baseUrl}. See ${logs.err}`);
@@ -938,7 +1004,7 @@ async function getOpenWebSearchStatus() {
   const env = await loadLocalEnv();
   const baseUrl = config.baseUrl || env.WEB_SEARCH_BASE_URL || "http://127.0.0.1:3210";
   const dir = resolveOpenWebSearchDir();
-  const built = existsSync(path.join(dir, "build", "index.js"));
+  const built = existsSync(resolveSearchInstallation(kitDir,projectRoot).entry);
   const reachable = await testOpenWebSearchDaemon(baseUrl);
   return {
     provider: "openwebsearch",
@@ -1093,6 +1159,20 @@ async function loadLocalEnv() {
   return merged;
 }
 
+const apiConnections = createApiConnectionsStore({
+  file: apiConnectionsFile(globalEnvFile),
+  getDefaults: async () => connectionDefaults({ ...await loadLocalEnv(), ...process.env })
+});
+
+async function configuredApi(kind) {
+  return configuredConnection(apiConnections.file, kind, connectionDefaults({ ...await loadLocalEnv(), ...process.env }));
+}
+
+function apiAgent(connection, id = 'api-knowledge', model = connection.model) {
+  return { id, name: model, model, baseUrl: connection.baseUrl, apiKey: connection.apiKey,
+    hasApiKey: Boolean(connection.apiKey), enabled: true, wireApi: 'chat', agentFile: '' };
+}
+
 function envKeySegment(value) {
   return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
 }
@@ -1128,16 +1208,6 @@ function defaultKnowledgeConfig() {
       maxChunksPerDoc: 1,
       candidatePoolMultiplier: 10
     }
-  };
-}
-
-function defaultWebSearchConfig() {
-  return {
-    provider: "",
-    apiKey: "",
-    baseUrl: "",
-    enabled: false,
-    maxResults: 8
   };
 }
 
@@ -1418,6 +1488,12 @@ async function loadKnowledgeConfig({ includeKey = false } = {}) {
   config.embedding.batchSize = Math.max(1, Math.min(512, Number(env.KNOWLEDGE_EMBEDDING_BATCH_SIZE || env.EMBEDDING_BATCH_SIZE || config.embedding.batchSize) || defaults.embedding.batchSize));
   config.embedding.concurrency = Math.max(1, Math.min(100, Number(env.KNOWLEDGE_EMBEDDING_CONCURRENCY || env.EMBEDDING_CONCURRENCY || config.embedding.concurrency) || defaults.embedding.concurrency));
   config.chat.modelId = String(env.KNOWLEDGE_CHAT_MODEL_ID || config.chat.modelId || "");
+  const api = await configuredApi('knowledge');
+  if (api) {
+    Object.assign(config.embedding, { baseUrl: api.baseUrl, apiKey: includeKey ? api.apiKey : '', hasApiKey: Boolean(api.apiKey), model: api.embeddingModel || '' });
+    config.chat.modelId = 'api-knowledge';
+    config.chat.model = api.model;
+  }
   config.chunk.maxChars = Math.max(400, Math.min(6000, Number(config.chunk.maxChars) || defaults.chunk.maxChars));
   config.chunk.overlapChars = Math.max(0, Math.min(1000, Number(config.chunk.overlapChars) || defaults.chunk.overlapChars));
   config.retrieval.diversify = envBool(env.KNOWLEDGE_RETRIEVAL_DIVERSIFY, config.retrieval.diversify !== false);
@@ -2050,6 +2126,8 @@ function parseLlmSearchQueries(text) {
 }
 
 async function resolveKnowledgeChatAgent() {
+  const api = await configuredApi('knowledge');
+  if (api) return apiAgent(api);
   const config = await loadKnowledgeConfig();
   const modelId = safeModelId(config.chat?.modelId);
   if (!modelId) return null;
@@ -2204,20 +2282,8 @@ function buildKnowledgeContext(results, { maxChars = RETRIEVAL_CONTEXT_MAX_CHARS
 
 async function loadWebSearchConfig({ includeKey = false } = {}) {
   const env = await loadLocalEnv();
-  const saved = await readJsonFile(webSearchConfigFile, defaultWebSearchConfig());
-  const provider = normalizeWebSearchProvider(env.WEB_SEARCH_PROVIDER || saved.provider || "");
-  const envKey = env.WEB_SEARCH_API_KEY || env.TAVILY_API_KEY || env.BRAVE_SEARCH_API_KEY || env.EXA_API_KEY;
-  const savedKey = saved.apiKey || saved.api_key;
-  const rawBaseUrl = normalizeBaseUrl(env.WEB_SEARCH_BASE_URL || saved.baseUrl || saved.base_url || "");
-  return {
-    provider,
-    apiKey: includeKey ? String(envKey || savedKey || "") : "",
-    hasApiKey: Boolean(envKey || savedKey),
-    requiresApiKey: !["searxng", "openwebsearch"].includes(provider),
-    baseUrl: rawBaseUrl || (provider === "openwebsearch" ? "http://127.0.0.1:3210" : ""),
-    enabled: envBool(env.WEB_SEARCH_ENABLED, saved.enabled === true || Boolean(provider)),
-    maxResults: Math.max(1, Math.min(15, Number(env.WEB_SEARCH_MAX_RESULTS || saved.maxResults) || 8))
-  };
+  const saved = await readJsonFile(webSearchConfigFile, {});
+  return resolveWebSearchConfig(env,saved,{includeKey});
 }
 
 async function saveWebSearchConfig(input) {
@@ -2233,16 +2299,7 @@ async function saveWebSearchConfig(input) {
   return loadWebSearchConfig();
 }
 
-function normalizeWebSearchProvider(value) {
-  const compact = String(value || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
-  if (compact === "openwebsearch") return "openwebsearch";
-  if (compact === "searxng") return "searxng";
-  if (compact === "tavily") return "tavily";
-  if (compact === "brave") return "brave";
-  if (compact === "exa") return "exa";
-  return String(value || "").trim().toLowerCase();
-}
-
+const memoizedWebSearch = createSearchMemo();
 async function searchWeb(query, options = {}) {
   const text = String(query || "").trim();
   if (!text) throw new Error("query is required");
@@ -2251,12 +2308,15 @@ async function searchWeb(query, options = {}) {
   if (!config.provider) throw new Error("missing web search provider");
   if (!["searxng", "openwebsearch"].includes(config.provider) && !config.apiKey) throw new Error("missing web search api_key");
   const maxResults = Math.max(1, Math.min(15, Number(options.topK || config.maxResults) || 8));
-  if (config.provider === "tavily") return searchTavily(text, config, maxResults);
-  if (config.provider === "brave") return searchBrave(text, config, maxResults);
-  if (config.provider === "exa") return searchExa(text, config, maxResults);
-  if (config.provider === "searxng") return searchSearxng(text, config, maxResults);
-  if (config.provider === "openwebsearch") return searchOpenWebSearch(text, config, maxResults);
-  throw new Error(`unsupported web search provider: ${config.provider}`);
+  const env = await loadLocalEnv();
+  const identity = crypto.createHash('sha256').update(JSON.stringify([config,text,maxResults,env.OPEN_WEBSEARCH_ENGINES,env.OPEN_WEBSEARCH_SEARCH_MODE])).digest('hex');
+  return memoizedWebSearch(identity, async()=>{
+    const providers={tavily:searchTavily,brave:searchBrave,exa:searchExa,searxng:searchSearxng,openwebsearch:searchOpenWebSearch};
+    if(!providers[config.provider])throw new Error(`unsupported web search provider: ${config.provider}`);
+    const response=await providers[config.provider](text,config,maxResults);
+    const quality=searchQuality(text,response.results);
+    return {...response,...quality,rejected:[...(response.rejected || []),...quality.rejected],warnings:[...(response.warnings || []),...quality.warnings]};
+  },{refresh:options.refresh===true});
 }
 
 async function searchTavily(query, config, maxResults) {
@@ -2366,37 +2426,36 @@ async function searchOpenWebSearch(query, config, maxResults) {
     .map((item) => item.trim())
     .filter(Boolean);
   const searchMode = String(env.OPEN_WEBSEARCH_SEARCH_MODE || "").trim();
-  const body = { query, limit: maxResults };
-  if (engines.length) body.engines = engines;
-  if (searchMode) body.searchMode = searchMode;
-  let response;
-  try {
-    response = await fetch(joinUrl(baseUrl, "/search"), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body)
-    });
-  } catch (error) {
-    throw new Error(`openwebsearch daemon not reachable at ${baseUrl}: ${error.message}`);
-  }
-  const envelope = await parseProviderResponse(response);
-  if (envelope.status === "error") {
-    throw new Error(envelope.error?.message || envelope.hint || "openwebsearch error");
-  }
-  const data = envelope.data || envelope;
-  const failures = Array.isArray(data.partialFailures) && data.partialFailures.length
-    ? `\n\nPartial failures: ${data.partialFailures.map((item) => `${item.engine}: ${item.message}`).join("; ")}`
-    : "";
-  const results = (data.results || []).slice(0, maxResults).map((item, index) => ({
+  const requested=engines.length?engines:['duckduckgo'];
+  // Give each engine the full quota instead of splitting it with an empty or
+  // query-drifted engine. Independent requests overlap in the shared daemon.
+  const responses=await Promise.all(requested.map(async engine=>{
+    const started=performance.now();
+    try {
+      const response=await fetch(joinUrl(baseUrl,"/search"),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({query,limit:maxResults,engines:[engine],...(searchMode?{searchMode}:{})})});
+      const envelope=await parseProviderResponse(response);
+      if(envelope.status==='error')throw new Error(envelope.error?.message || envelope.hint || 'openwebsearch error');
+      const data=envelope.data || envelope;
+      return {...data,requestedEngine:engine,elapsedMs:Math.round(performance.now()-started)};
+    }catch(error){return {results:[],requestedEngine:engine,elapsedMs:Math.round(performance.now()-started),partialFailures:[{engine,message:error.message}]};}
+  }));
+  const failures=responses.flatMap(x=>x.partialFailures || []);
+  if(responses.every(x=>!x.results?.length) && failures.length)throw new Error(failures.map(x=>`${x.engine}: ${x.message}`).join('; '));
+  const results = responses.flatMap(x=>x.results || []).map((item, index) => ({
     source: "web",
     provider: "openwebsearch",
+    engine: item.engine,
     title: item.title || item.url || "web result",
     url: item.url || "",
     path: item.url || "",
-    content: `${item.description || ""}${failures}`,
+    content: item.description || "",
     score: 1 - index / Math.max(maxResults, 1)
   }));
-  return { query, results, failures: data.partialFailures || [] };
+  const quality=searchQuality(query,results);
+  const seen=new Set();
+  // Cap only the search result count; no document/snippet content truncation.
+  const candidates=quality.results.filter(x=>{if(seen.has(x.canonicalUrl))return false;seen.add(x.canonicalUrl);return true;}).slice(0,maxResults);
+  return { query,...quality,results:candidates,failures,engines:responses.map(x=>({engine:x.requestedEngine,actualEngines:x.engines || [],elapsedMs:x.elapsedMs,results:x.results?.length || 0})) };
 }
 
 async function stopLocalPort(portValue) {
@@ -2534,6 +2593,7 @@ function defaultModelAgentPrompt(name) {
 }
 
 async function readModelAgentPrompt(agent) {
+  if (agent.source === 'api-connections' || agent.id?.startsWith('api-collaboration-')) return defaultModelAgentPrompt(agent.name);
   await mkdir(modelAgentsDir, { recursive: true });
   const configured = agent.agentFile ? resolveWorkspacePath(agent.agentFile, "") : null;
   const agentPath = configured || path.join(modelAgentsDir, `${agent.id}.md`);
@@ -2544,6 +2604,12 @@ async function readModelAgentPrompt(agent) {
 }
 
 async function loadModelAgents({ includeKeys = false } = {}) {
+  const api = await configuredApi('collaboration');
+  if (api) {
+    const selected = api.selectedModels?.length ? api.selectedModels : [api.model].filter(Boolean);
+    return { models: selected.map((model, index) => ({ ...apiAgent(api, `api-collaboration-${index}`, model),
+      apiKey: includeKeys ? api.apiKey : '', source: 'api-connections' })) };
+  }
   const env = await loadLocalEnv();
   const data = await readJsonFile(modelAgentsFile, { models: [] });
   const models = Array.isArray(data.models) ? [...data.models] : [];
@@ -3339,12 +3405,12 @@ async function runModelAgentWithTools({ agent, agentPrompt, treeMarkdown, nodeMa
   messages.push({ role: "user", content: question });
 
   let answer = "";
-  for (let step = 0; step < 4; step += 1) {
+  for (;;) {
     answer = await callOpenAICompatible(agent, messages, { execute: true, treeId,
       dialogueContext: [...priorTurns,{role:'user',content:question}],
       persistAnswer: text => !enableTools || !parseAgentToolRequest(text)
     });
-    const request = enableTools && step < 3 ? parseAgentToolRequest(answer) : null;
+    const request = enableTools ? parseAgentToolRequest(answer) : null;
     if (!request) break;
     let search;
     try {
@@ -3393,14 +3459,15 @@ async function callOpenAICompatible(agent, messages, { execute = false, treeId =
   if (!agent.apiKey) throw new Error("missing api_key");
   if (!agent.model) throw new Error("missing model");
   if (!agent.baseUrl) throw new Error("missing base_url");
-  const timeoutMs = Math.max(30000, Number(process.env.MODEL_AGENT_TIMEOUT_MS) || 180000);
   try {
     const scope = execute ? await readDeepSeekTreeScope({treeId}) : null;
     const result = await startCodexTurn({
       cwd: projectRoot, prompt: messages.filter(m => m.role === 'user').at(-1)?.content || '', messages,
       dialogueContext, ...(persistAnswer ? {persistAnswer} : {}),
-      model: agent.model, environment: { MODEL_AGENT_MAIN_BASE_URL: agent.baseUrl, MODEL_AGENT_MAIN_API_KEY: agent.apiKey, MODEL_AGENT_MAIN_MODEL: agent.model },
-      waitForCompletion: true, completionTimeoutMs: timeoutMs,
+      model: agent.model, environment: { MODEL_AGENT_MAIN_BASE_URL: agent.baseUrl, MODEL_AGENT_MAIN_API_KEY: agent.apiKey, MODEL_AGENT_MAIN_MODEL: agent.model,
+        ...(scope ? { TASK_TREE_CONTEXT_TREE_FILE: scope.tree.path } : {}),
+        MODEL_AGENT_MAIN_FALLBACK_BASE_URLS: '', MODEL_AGENT_MAIN_FALLBACK_MODELS: '' },
+      waitForCompletion: true,
       ...(execute ? {
         tools: deepSeekTaskTreeTools(),
         toolHandler: (name, args) => executeDeepSeekTaskTreeTool(name, { ...args, treeId: args.treeId || scope.tree.id }),
@@ -3412,9 +3479,6 @@ async function callOpenAICompatible(agent, messages, { execute = false, treeId =
     if (!answer) throw new Error("model returned empty content");
     return answer;
   } catch (error) {
-    if (error?.name === "AbortError") {
-      throw new Error(`model API timeout after ${Math.round(timeoutMs / 1000)}s（${modelAgentEndpoint(agent)}）`);
-    }
     throw new Error(formatModelApiError(error, agent));
   }
 }
@@ -4264,13 +4328,8 @@ const handleRequest = async (req, res) => {
       const body = JSON.parse(await readBody(req));
       try {
         const current = await refreshTreeRegistry();
-        const added = await addTree({ projectRoot, registryFile: treeRegistryFile, registry: current, input: body });
+        const added = await addTree({ projectRoot, registryFile: treeRegistryFile, registry: current, input: {...body,createFile:true} });
         treeRegistry = added.registry;
-        const filePath = resolveTreeFile(projectRoot, added.tree);
-        if (!existsSync(filePath)) {
-          await mkdir(path.dirname(filePath), { recursive: true });
-          await writeFile(filePath, starterTreeMarkdown(added.tree), "utf8");
-        }
         const git = await ensureProjectGitRepository();
         jsonResponse(res, 201, { ok: true, tree: added.tree, registry: added.registry, git });
       } catch (error) {
@@ -4481,6 +4540,24 @@ const handleRequest = async (req, res) => {
       return;
     }
 
+    if (reqPath === "/api/tree/agent-subtree-node-patch" && req.method === "POST") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const nodeId = String(body.nodeId || "").trim();
+        const scope = await readDeepSeekTreeScope(body);
+        const located = await findDeepSeekNode(scope, nodeId);
+        if (!located || located.file === scope.filePath) throw new Error(`子树中没有节点 ${nodeId}`);
+        if (body.scopeId) await executionScopes.assertWritable(body.scopeId, nodeId, { treeId: scope.tree.id });
+        jsonResponse(res, 200, await executeDeepSeekTaskTreeTool("task_tree_write", {
+          nodeId, fields: body.fields, reason: body.reason,
+          ...(body.treeId ? { treeId: body.treeId } : {})
+        }));
+      } catch (error) {
+        jsonResponse(res, 400, { ok: false, error: error.message });
+      }
+      return;
+    }
+
     if (reqPath === "/api/tree/node-patch" && req.method === "POST") {
       try {
         const body = JSON.parse(await readBody(req));
@@ -4617,11 +4694,35 @@ const handleRequest = async (req, res) => {
       return;
     }
 
+    if (reqPath === '/api/remote-ssh' || reqPath.startsWith('/api/remote-ssh/')) {
+      // Only the local launcher controls SSH. Remote pages reconnect through that launcher.
+      const origin = req.headers.origin;
+      if (executionHost.mode === 'ssh') { jsonResponse(res, 409, { error: '请从本机 IDE 的 SSH 入口管理连接' }); return; }
+      if (origin && origin !== `http://${req.headers.host}` && origin !== `https://${req.headers.host}`) {
+        jsonResponse(res, 403, { error: 'SSH 管理仅允许同源请求' }); return;
+      }
+      try {
+        if (reqPath === '/api/remote-ssh' && req.method === 'GET') jsonResponse(res, 200, await remoteSsh.list());
+        else if (reqPath.startsWith('/api/remote-ssh/jobs/') && req.method === 'GET') {
+          const job = remoteSsh.job(reqPath.slice('/api/remote-ssh/jobs/'.length));
+          jsonResponse(res, job ? 200 : 404, job ? { job } : { error: '连接任务不存在，请重新连接' });
+        } else if (req.method === 'POST') {
+          const body = JSON.parse(await readBody(req));
+          if (reqPath === '/api/remote-ssh/save') jsonResponse(res, 200, { profile: await remoteSsh.save(body) });
+          else if (reqPath === '/api/remote-ssh/connect') jsonResponse(res, 202, { job: await remoteSsh.connect(body) });
+          else if (reqPath === '/api/remote-ssh/disconnect') jsonResponse(res, 200, await remoteSsh.disconnect(body.id));
+          else jsonResponse(res, 404, { error: '未知 SSH 操作' });
+        } else jsonResponse(res, 405, { error: '不支持此请求方法' });
+      } catch (error) { jsonResponse(res, 400, { error: error.message }); }
+      return;
+    }
+
     if (reqPath === "/api/project" && req.method === "GET") {
       send(res, 200, JSON.stringify({
         root: projectRoot,
         kitDir,
         name: path.basename(projectRoot),
+        executionHost,
         treeFile: path.relative(projectRoot, treeFile),
         // The widget needs to know whether a framable https address exists before it tries one.
         httpsUrl: tlsListener ? `https://${host}:${tlsListener.address()?.port}` : null
@@ -4803,13 +4904,25 @@ const handleRequest = async (req, res) => {
 
       try {
         if (body.progress === true) {
-          const id = crypto.randomUUID();
+          const resumeRun = body.resumeRunId ? directRuns.get(body.resumeRunId) : null;
+          const executionObjective = resumeRun?.prompt || prompt;
+          const canResume = resumeRun?.recoveryPending || (['failed','stopped'].includes(resumeRun?.status)
+            && resumeRun.checkpoint?.workerPath);
+          if(body.resumeRunId && (!canResume || directRunControllers.has(body.resumeRunId))) {
+            jsonResponse(res,409,{error:'该执行没有待恢复任务或已经在恢复。'});return;
+          }
+          const id = resumeRun?.id || crypto.randomUUID();
           const nodeId = String(body.nodeId || "").trim();
           if (!nodeId) { jsonResponse(res, 400, { error: '节点对话需要 nodeId' }); return; }
           const deepSeekTreeScope = await readDeepSeekTreeScope({ treeId: body.treeId || "" });
-          const deepSeekSystemPrompt = await buildDeepSeekTaskTreeSystemPrompt({ nodeId, treeScope: deepSeekTreeScope });
-          const initialReads = ['task_tree_focus','task_tree_summary'].map(name=>({name,args:{treeId:deepSeekTreeScope.tree.id,...(name==='task_tree_focus'?{nodeId}:{})}}));
+          const deepSeekSystemPrompt = buildIsolatedNodeSystemPrompt({ nodeId, treeScope: deepSeekTreeScope });
+          const initialReads = [
+            { name: 'task_tree_node', args: { nodeId } }
+          ];
           const conversationId = nodeConversationId(deepSeekTreeScope.tree.id, nodeId);
+          if(resumeRun && (resumeRun.nodeId!==nodeId || resumeRun.treeId!==deepSeekTreeScope.tree.id)) {
+            jsonResponse(res,409,{error:'恢复任务与节点或树不匹配。'});return;
+          }
           if (startingDirectConversations.has(conversationId)) {
             jsonResponse(res, 409, { error: '这个节点正在提交，请勿重复发送。' }); return;
           }
@@ -4819,7 +4932,7 @@ const handleRequest = async (req, res) => {
           const conversation = directConversations.get(conversationId) || { id: conversationId, nodeId, treeId: deepSeekTreeScope.tree.id, messages: [], activeRunId: "", threadId: '' };
           if (conversation.activeRunId) {
             const active = directRuns.get(conversation.activeRunId);
-            if (active && ["starting", "running", "stopping"].includes(active.status)) {
+            if (active && active!==resumeRun && ["starting", "running", "stopping"].includes(active.status)) {
               jsonResponse(res, 409, { error: "这个节点的上一轮对话还在执行，请等它完成后再继续。", runId: active.id, conversationId });
               return;
             }
@@ -4846,12 +4959,19 @@ const handleRequest = async (req, res) => {
           const messages = [...(revised ? revised.slice(0, -1) : dialogueMessages(conversation.messages)), userMessage];
           const modelMessages = await materializeAttachments(filterMaterialHistory(messages, materials, uniqueAttachments.map(a => a.id)), scope);
           if (editing) await backupDirectDialogues({ runs: [...directRuns.values()].filter(r => r.conversationId === conversationId), conversations: [conversation] }, 'edited');
+          else if(conversation.messages.length) await backupDirectDialogues({runs:[...directRuns.values()].filter(r=>r.conversationId===conversationId),conversations:[conversation]},'before-next-turn');
+          const isolated = resumeRun?.checkpoint || await directNodeWorkspace.prepare(id);
+          if(resumeRun?.checkpoint) await stat(isolated.workerPath);
+          const resumedParallel = resumeRun?.parallel?.id ? await parallelCodex.snapshot(resumeRun.parallel.id) : null;
+          const selectedSource = await findDeepSeekNode(deepSeekTreeScope, nodeId);
           const tracked = {
             id,
             nodeId,
             treeId: deepSeekTreeScope.tree.id,
+            projectRoot,
+            treePath: selectedSource?.path || deepSeekTreeScope.tree.path,
             conversationId,
-            prompt,
+            prompt: executionObjective,
             messages,
             status: "starting",
             phase: 'queued',
@@ -4862,7 +4982,10 @@ const handleRequest = async (req, res) => {
             output: "",
             reasoning: "",
             error: "",
-            createdAt: new Date().toISOString(),
+            checkpoint: isolated,
+            recoveryPending: false,
+            recoveryHistory: resumeRun?.recoveryHistory || [],
+            createdAt: resumeRun?.createdAt || new Date().toISOString(),
             updatedAt: new Date().toISOString()
           };
           for (const old of directRuns.values()) {
@@ -4876,14 +4999,68 @@ const handleRequest = async (req, res) => {
           directConversations.set(conversationId, conversation);
           directRunEvent(tracked, "queued", "已收到节点执行请求");
           await persistDirectState();
-          const result = await startCodexTurn({
+          const adaptiveExecution = createAdaptiveNodeExecution({ coordinator: parallelCodex, workspace: directNodeWorkspace,
+            ...(resumedParallel?{resumeRunId:resumedParallel.id}:{}),
+            state: isolated, nodeId, treeScope: { ...deepSeekTreeScope, tree: { ...deepSeekTreeScope.tree, path: selectedSource?.path || deepSeekTreeScope.tree.path } }, objective: executionObjective, contextMessages: modelMessages, historyMessages: messages,
+            onProgress: progress => {
+              const previousJobs = new Map((tracked.parallel?.jobs || []).map(job => [job.taskId, job]));
+              tracked.executionMode = 'parallel';
+              tracked.parallel = { id: progress.id, status: progress.status || tracked.parallel?.status,
+                coordination: progress.coordination || tracked.parallel?.coordination,
+                reason: progress.reason || tracked.parallel?.reason || '',
+                jobs: (progress.jobs || tracked.parallel?.jobs || []).map(job => ({ taskId: job.taskId, parentTaskId:job.parentTaskId || '', title: job.title, status: job.status,
+                  activity:job.activity,completedTools:job.completedTools,startedAt:job.startedAt,finishedAt:job.finishedAt,
+                  communication:job.communication,executionStrategy:job.executionStrategy,contextActivity:job.contextActivity,
+                  error: job.error || '', output: previousJobs.get(job.taskId)?.output || job.output || '' })) };
+              tracked.phase = progress.status === 'checking' ? 'checking' : 'parallel';
+              if(progress.event==='final_review_started')tracked.phase='checking';
+              if(progress.event==='final_review_phase') {
+                tracked.phase=progress.detail.phase;
+                directRunEvent(tracked,'review/phase',progress.detail.message);
+              }
+              if(progress.event==='final_review_progress') {
+                tracked.phase='checking';
+                const previousActivity=tracked.reviewActivity?.message;
+                const activity=recordIntegrationProgress(tracked,progress.detail.notification);
+                if(activity&&activity!==previousActivity)directRunEvent(tracked,'review/activity',activity);
+                else if(activity)tracked.updatedAt=tracked.reviewActivity.at;
+              }
+              if (progress.notification) {
+                const event = progress.notification;
+                const child = tracked.parallel.jobs.find(job => job.taskId === progress.taskId);
+                if (child && event.params?.item?.type === 'agentMessage') {
+                  if (event.method === 'item/updated') child.output += event.params.item.delta || '';
+                  if (event.method === 'item/completed') child.output = event.params.item.text || child.output;
+                }
+                if (event.method === 'item/completed' && event.params?.item?.type === 'agentMessage') {
+                  directRunEvent(tracked, 'worker/output', `${progress.taskId}：${event.params.item.text || ''}`);
+                }
+              } else if (progress.event === 'coordination_recovery_scheduled') {
+                directRunEvent(tracked,'worker/status',`${progress.detail.taskId}：协调器${progress.detail.message}`);
+              } else if (progress.event === 'worker_subdivided') {
+                directRunEvent(tracked,'worker/status',`${progress.detail.taskId}：已有成果已保存，继续拆分为 ${progress.detail.taskIds.length} 个任务；就绪分支立即并发执行`);
+              } else if (progress.phase === 'checkpoint') {
+                directRunEvent(tracked,'worker/phase',progress.message);
+              } else if (progress.event === 'worker_stopped') {
+                const child = tracked.parallel.jobs.find(job => job.taskId === progress.detail.taskId);
+                if (child) { child.status = 'retrying'; child.error = '模型会话意外停止，正在自动续跑'; child.output = progress.detail.output || child.output || ''; }
+                directRunEvent(tracked, 'worker/status', `${progress.detail.taskId}：模型会话意外停止，正在自动续跑`);
+              } else if (progress.event === 'worker_retrying') {
+                const child = tracked.parallel.jobs.find(job => job.taskId === progress.detail.taskId);
+                if (child) { child.status = 'retrying'; child.error = `正在自动续跑（第 ${progress.detail.retryCount || 1} 次）`; }
+                directRunEvent(tracked, 'worker/status', `${progress.detail.taskId}：${child?.error || '正在自动续跑'}`);
+              } else if (progress.event === 'worker_phase') directRunEvent(tracked, 'worker/phase', `${progress.detail.taskId}：${progress.detail.message}`);
+              else if (progress.event === 'completed' || progress.event === 'blocked') directRunEvent(tracked, 'worker/status', `${progress.detail.taskId}：${progress.event === 'completed' ? '已整合，待最终任务验收' : progress.detail.error}`);
+              scheduleDirectStateFlush();
+            } });
+          const turnOptions = {
             signal: runController.signal,
-            prompt, messages: modelMessages, dialogueContext: messages, cwd: projectRoot, threadId: conversation.threadId || '', waitForCompletion: false,
-            environment: { TASK_TREE_QUALITY_MODE: 'advisory' },
+            prompt, messages: modelMessages, dialogueContext: messages, cwd: isolated.workerPath, threadId: conversation.threadId || '', waitForCompletion: false,
+            environment: { TASK_TREE_PROJECT_ROOT: projectRoot, TASK_TREE_CONTEXT_TREE_FILE: deepSeekTreeScope.tree.path, TASK_TREE_CONTEXT_NODE_ID: nodeId, TASK_TREE_QUALITY_MODE: 'advisory' },
             systemPrompt: deepSeekSystemPrompt,
-            tools: deepSeekTaskTreeTools(),
+            tools: [NODE_EXECUTION_TOOL], toolHandler: adaptiveExecution,
             initialToolCalls: initialReads.map(({name,args},index)=>({id:`host-${index}-${id}`,type:'function',function:{name,arguments:JSON.stringify(args)}})),
-            toolHandler: (name, args) => executeDeepSeekTaskTreeTool(name, { ...args, treeId: args.treeId || deepSeekTreeScope.tree.id, ...(name === 'task_tree_focus' ? { nodeId: args.nodeId || nodeId } : {}) }),
+            ...(resumedParallel?{resumeDelegationCall:{id:`resume-${id}`,type:'function',function:{name:NODE_EXECUTION_TOOL.function.name,arguments:JSON.stringify({reason:'服务重启，复用原分支任务与成果继续执行',jobs:resumedParallel.jobs.map(({taskId,nodeId,title,instruction})=>({taskId,nodeId,title,instruction})),sharedContract:resumedParallel.sharedContract||''})}}}:{}),
             onAccepted: ({ threadId, turnId }) => {
               if (tracked.status !== 'stopping') tracked.status = "running";
               tracked.threadId = threadId || ""; tracked.turnId = turnId || "";
@@ -4891,7 +5068,58 @@ const handleRequest = async (req, res) => {
               directRunEvent(tracked, "turn/accepted", "模型已接受执行");
             },
             onNotification: (message) => directRunNotification(tracked, message),
+            onCompletedError: async error => {
+              tracked.status=runController.signal.aborted?'stopped':'failed';
+              tracked.error=tracked.status==='stopped'?'':`宿主整合验收收尾异常：${error.message}；执行者成果保留，可继续验收。`;
+              tracked.workspacePath ||= isolated.workerPath;
+              conversation.activeRunId='';
+              directRunControllers.delete(id);
+              directRunEvent(tracked,tracked.status,tracked.error||'已停止');
+              await persistDirectState();
+            },
             onCompleted: async ({ status, error, output, reasoning, timing, messages: completedMessages }) => {
+              if(status==='completed') {
+                tracked.workerCompleted=true;
+                tracked.output=String(output||tracked.streams?.agentMessage?.text||'');
+                tracked.messages=dialogueMessages(completedMessages||[...messages,{role:'assistant',content:tracked.output}]);
+                // Persist this boundary before merge/review. Restart must not
+                // execute a completed Worker merely because review was pending.
+                await persistDirectState().catch(()=>persistDirectState()).catch(error=>{
+                  tracked.persistenceWarning=error.message;
+                  directRunEvent(tracked,'dialogue/save-warning','执行结果保存暂时失败，仍继续整合；隔离工作区保留。');
+                });
+              }
+              let mergeError = null;
+              try {
+                const receipt = await directNodeWorkspace.finish(isolated, {
+                  nodeId, objective: executionObjective, output, status, threadId: tracked.threadId, signal: runController.signal,
+                  historyMessages: modelMessages, dialogueContext: messages,
+                  treeFile: selectedSource?.path || deepSeekTreeScope.tree.path,
+                  onTiming: sample => { (tracked.integrationTimings ||= []).push(sample); scheduleDirectStateFlush(); },
+                  onNotification: message => {
+                    const previousActivity=tracked.reviewActivity?.message;
+                    const activity=recordIntegrationProgress(tracked,message);
+                    if(activity&&activity!==previousActivity)directRunEvent(tracked,'review/activity',activity);
+                    else if(activity)tracked.updatedAt=tracked.reviewActivity.at;
+                    if(activity)scheduleDirectStateFlush();
+                  },
+                  onPhase: (phase, message) => { tracked.phase = phase; directRunEvent(tracked, phase, message); scheduleDirectStateFlush(); }
+                });
+                tracked.changedFiles = receipt.changedFiles;
+                tracked.appliedFiles = receipt.appliedFiles;
+                tracked.treeChanges = receipt.treeChanges || [];
+                tracked.workspacePath = receipt.workspacePath || '';
+                tracked.review = receipt.review || null;
+                if (receipt.review) directRunEvent(tracked, 'review/completed', `最后检查${receipt.review.verdict === 'pass' ? '通过' : '失败'}：${receipt.review.reason}`, { review: receipt.review });
+              } catch (integrationError) {
+                mergeError = integrationError;
+                tracked.workspacePath = integrationError.workspacePath || isolated.workerPath;
+                tracked.review = integrationError.review || null;
+              }
+              if (error?.review && !mergeError) {
+                tracked.review = error.review;
+                tracked.workspacePath = error.workspacePath || tracked.workspacePath;
+              }
               try { if (status !== 'stopped') {
                 const scope = await readDeepSeekTreeScope({ treeId: deepSeekTreeScope.tree.id });
                 const fresh = await readTreeSummary({ projectRoot, tree: scope.tree, markdown: scope.markdown, persist: true });
@@ -4899,21 +5127,50 @@ const handleRequest = async (req, res) => {
               }
               } catch (summaryError) { tracked.summaryWarning = summaryError.message; }
               tracked.timing = timing;
-              tracked.status = status === 'stopped' ? 'stopped' : status === "failed" || error ? "failed" : "completed";
-              tracked.error = error?.message || "";
+              tracked.status = status === 'stopped' || runController.signal.aborted ? 'stopped' : status === "failed" || error || mergeError ? "failed" : "completed";
+              tracked.error = tracked.status === 'stopped' ? '' : mergeError?.message || error?.message || "";
               tracked.output = String(output || tracked.streams?.agentMessage?.text || "");
               tracked.reasoning = String(reasoning || tracked.streams?.reasoning?.text || "");
-              conversation.messages = dialogueMessages(completedMessages || [...messages, { role: "assistant", content: tracked.output }]);
+              conversation.messages = dialogueWithCompletionReceipt(completedMessages || [...messages, { role: "assistant", content: tracked.output }], tracked);
+              tracked.messages = conversation.messages;
               conversation.activeRunId = "";
               directConversations.set(conversationId, conversation);
-              directRunEvent(tracked, tracked.status, tracked.status === 'stopped' ? '已停止；已保存的文件不会回滚' : tracked.status === "completed" ? "执行完成" : (tracked.error || "执行失败"));
+              directRunEvent(tracked, tracked.status, tracked.status === 'stopped' ? '已停止；未合入的隔离修改已保留' : tracked.status === "completed" ? "已整合到项目，执行完成" : (tracked.error || "执行失败"));
               recordRunDuration(directTimingSamples,tracked);
-              await persistDirectState();
-              directRunControllers.delete(id);
+              try {await persistDirectState();}
+              catch(error) {tracked.persistenceWarning=error.message;directRunEvent(tracked,'dialogue/save-warning','状态保存失败；结果已返回，工作区保留，请勿关闭服务。');}
+              finally {directRunControllers.delete(id);}
             }
-          }).catch(error => {
+          };
+          const resumeCompletedWorker = async()=>{
+            tracked.threadId=resumeRun.threadId||'';tracked.turnId=resumeRun.turnId||'';
+            if(resumedParallel)await adaptiveExecution(NODE_EXECUTION_TOOL.function.name,{
+              reason:'复用已完成并行成果',jobs:resumedParallel.jobs.map(({taskId,nodeId,title,instruction})=>({taskId,nodeId,title,instruction})),
+              sharedContract:resumedParallel.sharedContract||''
+            },{signal:runController.signal});
+            await turnOptions.onCompleted({status:'completed',output:resumeRun.output,messages:conversation.messages});
+          };
+          const result = await (resumeRun?.workerCompleted ? Promise.resolve().then(()=>{
+            tracked.status='running';tracked.phase='checking';
+            void resumeCompletedWorker().catch(error=>{
+              directRunControllers.delete(id);tracked.status='failed';tracked.error=error.message;
+              tracked.workspacePath=isolated.workerPath;conversation.activeRunId='';
+              directRunEvent(tracked,'failed',error.message);void persistDirectState().catch(()=>{});
+            });
+            return {threadId:resumeRun.threadId||'',turnId:resumeRun.turnId||''};
+          }) : startCoordinatedNodeTurn(startCodexTurn,turnOptions,{state:tracked,runId:id,
+            resumeFromCheckpoint:!!resumeRun&&body.fresh===true,
+            resumeState:resumeRun||tracked,
+            onRecovery:async recovery=>{
+              tracked.phase='coordinating';tracked.workerCompleted=false;
+              directRunEvent(tracked,'worker/status','协调器保留工作区和旧对话，从任务树与检查点换新上下文继续');
+              await persistDirectState();
+            }})).catch(error => {
             directRunControllers.delete(id);
             tracked.status = 'failed'; tracked.error = error.message;
+            if (!tracked.workspacePath) {
+              tracked.workspacePath = isolated.workerPath;
+            }
             conversation.activeRunId = '';
             directRunEvent(tracked, 'failed', error.message);
             void persistDirectState().catch(e => console.warn(e.message));
@@ -4974,11 +5231,19 @@ const handleRequest = async (req, res) => {
       const run = [...directRuns.values()].find(r => r.conversationId === id);
       if (!conversation && !run) { jsonResponse(res, 404, { error: '找不到节点对话' }); return; }
       const file = await exportDialogueToDesktop({ treeId: body.treeId, nodeId: body.nodeId,
+        projectRoot, treePath: run?.treePath || '', workspacePath: run?.workspacePath || '',
         status: run?.status, messages: dialogueSnapshot(conversation, run), baseUrl: `http://${req.headers.host}` });
       jsonResponse(res, 200, { ok: true, path: file }); return;
     }
     if (reqPath === '/api/codex/runs' && req.method === 'GET') {
       jsonResponse(res, 200, {runs:latestNodeRuns(directRuns).map(publicDirectRun)});
+      return;
+    }
+    if (reqPath === '/api/codex/drafts' && ['GET','PUT'].includes(req.method)) {
+      try {
+        if(req.method==='GET')jsonResponse(res,200,{drafts:await dialogueDrafts.list()});
+        else jsonResponse(res,200,{draft:await dialogueDrafts.save(JSON.parse(await readBody(req)))});
+      } catch(error){jsonResponse(res,error.status||500,{error:error.message});}
       return;
     }
     if (reqPath === '/api/codex/conversation' && req.method === 'DELETE') {
@@ -5000,10 +5265,11 @@ const handleRequest = async (req, res) => {
         for (const other of directConversations.values()) if (other.id !== conversationId) threads.delete(other.threadId);
         for (const other of directRuns.values()) if (other.treeId !== treeId || other.nodeId !== nodeId) threads.delete(other.threadId);
         for (const threadId of threads) await archiveThreadDialogue({ threadId });
+        const draft=await dialogueDrafts.clear(treeId,nodeId);
         for (const run of runs) directRuns.delete(run.id);
         directConversations.delete(conversationId);
         await persistDirectState();
-        jsonResponse(res, 200, { ok: true, deletedRunIds: runs.map(run => run.id) });
+        jsonResponse(res, 200, { ok: true, deletedRunIds: runs.map(run => run.id), draft });
       } finally { deletingDirectConversations.delete(conversationId); }
       return;
     }
@@ -5017,10 +5283,30 @@ const handleRequest = async (req, res) => {
     if (reqPath === "/api/codex/parallel" && req.method === "POST") {
       try {
         const body = JSON.parse(await readBody(req));
-        const run = await parallelCodex.start(body.jobs);
+        const run = await parallelCodex.start(body.jobs,{
+          objective:body.objective,sharedContract:body.sharedContract,
+          acceptanceCriteria:body.acceptanceCriteria,coverage:body.coverage,
+          treeId:body.treeId,subtree:body.subtree,nodeId:body.nodeId
+        });
         jsonResponse(res, 202, { run });
       } catch (error) {
         jsonResponse(res, 400, { error: error.message });
+      }
+      return;
+    }
+
+    const parallelResume = reqPath.match(/^\/api\/codex\/parallel\/([A-Za-z0-9-]+)\/resume$/);
+    if (parallelResume && req.method === "POST") {
+      try {
+        const body = await readBody(req);
+        const payload = body ? JSON.parse(body) : {};
+        if (typeof payload !== 'object' || Array.isArray(payload) || payload === null) {
+          throw new Error('续跑请求必须是 JSON 对象');
+        }
+        jsonResponse(res, 202, { run: await parallelCodex.resume(parallelResume[1],
+          payload.reviewScopeFiles === undefined ? {} : {reviewScopeFiles:payload.reviewScopeFiles}) });
+      } catch (error) {
+        jsonResponse(res, error.message.includes('不支持续跑') ? 409 : 400, { error: error.message });
       }
       return;
     }
@@ -5037,6 +5323,17 @@ const handleRequest = async (req, res) => {
         jsonResponse(res, 201, { run });
       } catch (error) {
         jsonResponse(res, 400, { error: error.message });
+      }
+      return;
+    }
+
+    const parallelAgentMessages = reqPath.match(/^\/api\/codex\/parallel\/([A-Za-z0-9-]+)\/messages$/);
+    if(parallelAgentMessages&&req.method==='POST') {
+      try {
+        const body=JSON.parse(await readBody(req));
+        jsonResponse(res,202,await parallelCodex.sendAgentMessage(parallelAgentMessages[1],body));
+      } catch(error) {
+        jsonResponse(res,error.statusCode||400,{error:error.message,code:error.code||'INVALID_AGENT_MESSAGE'});
       }
       return;
     }
@@ -5080,9 +5377,20 @@ const handleRequest = async (req, res) => {
       return;
     }
 
+    const parallelJobMatch = reqPath.match(/^\/api\/codex\/parallel\/([A-Za-z0-9-]+)\/jobs\/([^/]+)$/);
+    if (parallelJobMatch && req.method === 'GET') {
+      const detail = await parallelCodex.getJob(parallelJobMatch[1], decodeURIComponent(parallelJobMatch[2]));
+      jsonResponse(res, detail ? 200 : 404, detail || {error:'找不到这个并行分支'});
+      return;
+    }
     const parallelMatch = reqPath.match(/^\/api\/codex\/parallel\/([A-Za-z0-9-]+)$/);
     if (parallelMatch && req.method === "GET") {
-      const run = await parallelCodex.get(parallelMatch[1]);
+      const view = new URL(req.url, `http://${req.headers.host}`).searchParams.get('view');
+      if(view && view !== 'progress') {
+        jsonResponse(res, 400, {error:'不支持的并行运行视图'});
+        return;
+      }
+      const run = await parallelCodex.get(parallelMatch[1], {view});
       if (!run) {
         jsonResponse(res, 404, { error: "找不到这次并行运行" });
         return;
@@ -5265,11 +5573,33 @@ const handleRequest = async (req, res) => {
       return;
     }
 
+    if (reqPath === "/api/subtree-file/fold" && req.method === "POST") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const result = await executeDeepSeekTaskTreeTool("task_tree_subtree", {
+          action: "write", path: body.path, markdown: body.markdown, reason: body.reason,
+          ...(body.foldRoot ? { foldRoot: body.foldRoot } : {}),
+          ...(body.mode!==undefined ? { mode: body.mode } : {}),
+          ...(body.treeId ? { treeId: body.treeId } : {})
+        });
+        jsonResponse(res, 200, result);
+      } catch (error) {
+        jsonResponse(res, 400, { ok: false, error: error.message });
+      }
+      return;
+    }
+
     if (reqPath === "/api/subtree-file" && req.method === "POST") {
       const body = JSON.parse(await readBody(req));
       const filePath = resolveSubtreeFilePath(body.path);
       if (!filePath || typeof body.markdown !== "string") {
         jsonResponse(res, 400, { error: "invalid subtree path or markdown" });
+        return;
+      }
+      try {
+        assertRenderableTree(body.markdown);
+      } catch (error) {
+        jsonResponse(res, 400, { error: error.message });
         return;
       }
       const current = existsSync(filePath) ? await readFile(filePath, "utf8") : "";
@@ -5316,6 +5646,24 @@ const handleRequest = async (req, res) => {
       return;
     }
 
+    if (reqPath === '/api/api-connections' && req.method === 'GET') {
+      jsonResponse(res, 200, { connections: await apiConnections.get() });
+      return;
+    }
+    if (reqPath === '/api/api-connections' && req.method === 'PUT') {
+      try {
+        const body = JSON.parse(await readBody(req));
+        jsonResponse(res, 200, { connections: await apiConnections.save(body.connections) });
+      } catch (error) { jsonResponse(res, 400, { error: error.message }); }
+      return;
+    }
+    if (reqPath === '/api/api-connections/models' && req.method === 'POST') {
+      try {
+        const body = JSON.parse(await readBody(req));
+        jsonResponse(res, 200, await apiConnections.models(body.kind));
+      } catch (error) { jsonResponse(res, 400, { error: error.message }); }
+      return;
+    }
     if (reqPath === "/api/model-agents" && req.method === "GET") {
       jsonResponse(res, 200, await loadModelAgentDetails());
       return;
@@ -5453,7 +5801,14 @@ const handleRequest = async (req, res) => {
 
     if (reqPath === "/api/web-search/search" && req.method === "POST") {
       const body = JSON.parse(await readBody(req));
-      jsonResponse(res, 200, await searchWeb(body.query, { topK: body.topK }));
+      jsonResponse(res, 200, await searchWeb(body.query, { topK: body.topK, refresh:body.refresh }));
+      return;
+    }
+
+    if (reqPath === "/api/web-search/batch" && req.method === "POST") {
+      const body = JSON.parse(await readBody(req));
+      try {jsonResponse(res, 200, await searchWebBatch(body,args=>searchWeb(args.query,args)));}
+      catch(error){if(error instanceof TypeError)jsonResponse(res,400,{error:error.message});else throw error;}
       return;
     }
 
@@ -5537,7 +5892,8 @@ const handleRequest = async (req, res) => {
         return;
       }
       const agentConfig = await loadModelAgents({ includeKeys: true });
-      const agent = agentConfig.models.find((item) => item.id === modelId);
+      const api = await configuredApi('knowledge');
+      const agent = api ? apiAgent(api) : agentConfig.models.find((item) => item.id === modelId);
       if (!agent) {
         jsonResponse(res, 404, { error: "chat model not found" });
         return;
@@ -5878,11 +6234,29 @@ function startTlsListener(httpPort) {
   tlsListener = secure;
 }
 
-server.listen(port, host, () => {
+server.listen(port, host, async () => {
   const address = server.address();
   const actualPort = typeof address === "object" && address ? address.port : port;
   console.log(`Task tree app running at http://${host}:${actualPort}`);
+  if (process.env.TASK_TREE_REMOTE_READY_FILE) {
+    await writeFile(process.env.TASK_TREE_REMOTE_READY_FILE, JSON.stringify({ port: actualPort, root: projectRoot }));
+  }
   startTlsListener(actualPort);
   if (!codexThreadCache.threads.length) refreshCodexThreadCache().catch(() => {});
   cleanupLegacyOpenWebSearchLauncherLogs().catch(() => {});
+  // One text-only handoff per interrupted node. Reuse its checkpoint and never
+  // resume intentional stops. The same public route owns normal and recovery execution.
+  for(const run of directRuns.values()) if(run.recoveryPending) {
+    const prompt = `【服务重启续跑】继续原节点未完成的工作。先核对当前隔离目录、树和已保存产物；不要重放已完成操作。原目标：\n${run.prompt}`;
+    void fetch(`http://127.0.0.1:${actualPort}/api/codex/run`,{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({progress:true,nodeId:run.nodeId,treeId:run.treeId,resumeRunId:run.id,prompt})})
+      .then(async response=>{
+        if(!response.ok)throw new Error((await response.json()).error || `恢复请求 HTTP ${response.status}`);
+      }).catch(error=>{
+        run.status='failed';run.error=`自动续跑尚未启动：${error.message}；原会话和隔离修改保留，可继续发送。`;
+        run.recoveryPending=false;
+        const conversation=directConversations.get(run.conversationId);if(conversation)conversation.activeRunId='';
+        void persistDirectState().catch(()=>{});
+      });
+  }
 });

@@ -43,6 +43,7 @@ HOST="${HOST:-127.0.0.1}"
 URL="http://${HOST}:${PORT}"
 LOG_FILE="$PROJECT_ROOT/.task-tree-server.log"
 PID_FILE="$PROJECT_ROOT/.task-tree-server.pid"
+GLOBAL_ENV_FILE="${TASK_TREE_GLOBAL_ENV_FILE:-$KIT_DIR/../../.env}"
 
 is_project_server() {
   "$NODE_BIN" --input-type=module - "$URL/api/project" "$PROJECT_ROOT" <<'NODE'
@@ -56,6 +57,12 @@ try {
 } catch { process.exit(1); }
 NODE
 }
+
+# A responding port is not proof that its process loaded the updated kit.
+# The managed service compares executable revisions and preserves busy runs.
+if [[ "$(uname -s)" == "Darwin" ]] && is_project_server; then
+  "$NODE_BIN" "$KIT_DIR/scripts/project-service-macos.mjs" start "$STUB_DIR" "$PROJECT_ROOT" "$PORT" "$HOST" "$GLOBAL_ENV_FILE"
+fi
 
 if ! is_project_server; then
   # A stale marker must not force us onto an occupied port. Recompute the preferred stable port;
@@ -72,12 +79,15 @@ if ! is_project_server; then
     "$NODE_BIN" --input-type=module - "$KIT_DIR/server.js" "$LOG_FILE" "$PID_FILE" <<'NODE'
 import { spawn } from "node:child_process";
 import { openSync, closeSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import path from "node:path";
 const [entry, logFile, pidFile] = process.argv.slice(2);
+const { localNetworkEnvironment } = await import(pathToFileURL(path.join(path.dirname(entry), 'server/network-environment.js')).href);
 const log = openSync(logFile, "a");
 const child = spawn(process.execPath, [entry], {
   detached: true,
   stdio: ["ignore", log, log],
-  env: process.env
+  env: await localNetworkEnvironment()
 });
 child.on("error", (error) => { console.error(error.message); process.exitCode = 1; });
 writeFileSync(pidFile, `${child.pid}\n`);

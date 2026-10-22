@@ -22,7 +22,7 @@ test('eight independent reads execute in one overlapping wave by default', async
   assert.ok(Math.max(...starts) < Math.min(...ends), 'all eight reads really overlap');
 });
 
-test('25 independent reads grow successful waves while preserving input order', async () => {
+test('25 independent reads refill a four-slot pool while preserving input order', async () => {
   const waves = [];
   const input = items(25);
   const output = await runReadWaves(input, async item => {
@@ -30,13 +30,13 @@ test('25 independent reads grow successful waves while preserving input order', 
     return { ok: true, index: item.index };
   }, { initialWidth: 4, onWave: wave => waves.push(wave) });
   assert.deepEqual(output.map(result => result.index), input.map(item => item.index));
-  assert.deepEqual(waves.map(wave => wave.width), [4, 5, 6, 7, 3]);
-  assert.deepEqual(waves.map(wave => wave.wave), [1, 2, 3, 4, 5]);
+  assert.deepEqual(waves.map(wave => wave.width), [4]);
+  assert.deepEqual(waves.map(wave => wave.wave), [1]);
   assert.deepEqual(waves.flatMap(wave => wave.itemIds), input.map(item => item.id));
   assert.ok(waves.every(wave => wave.failed === 0));
 });
 
-test('concurrency never exceeds 20 even when requested higher', async () => {
+test('explicit concurrency is honored without the old twenty-slot ceiling', async () => {
   let active = 0, peak = 0;
   const waves = [];
   await runReadWaves(items(45), async () => {
@@ -45,11 +45,11 @@ test('concurrency never exceeds 20 even when requested higher', async () => {
     active--;
     return { ok: true };
   }, { initialWidth: 80, maxWidth: 100, onWave: wave => waves.push(wave) });
-  assert.equal(peak, 20);
-  assert.deepEqual(waves.map(wave => wave.width), [20, 20, 5]);
+  assert.equal(peak, 45);
+  assert.deepEqual(waves.map(wave => wave.width), [45]);
 });
 
-test('failed objects halve width without retries or skipped independent consumers', async () => {
+test('ordinary failed objects preserve pool width without retries or skipped consumers', async () => {
   const waves = [], executed = [];
   const output = await runReadWaves(items(15), async item => {
     executed.push(item.index);
@@ -58,8 +58,8 @@ test('failed objects halve width without retries or skipped independent consumer
     if (item.index === 6) return { timedOut: true };
     return { ok: true };
   }, { initialWidth: 4, onWave: wave => waves.push(wave) });
-  assert.deepEqual(waves.map(wave => wave.width), [4, 2, 1, 1, 2, 3, 2]);
-  assert.deepEqual(waves.map(wave => wave.failed), [1, 1, 1, 0, 0, 0, 0]);
+  assert.deepEqual(waves.map(wave => wave.width), [4]);
+  assert.deepEqual(waves.map(wave => wave.failed), [3]);
   assert.deepEqual(executed, items(15).map(item => item.index));
   assert.equal(output.length, 15);
 });
@@ -124,7 +124,7 @@ test('configured lower cap and synchronous exceptions follow the same contracts'
   await runReadWaves(items(7), item => ({ ok: true, index: item.index }), {
     initialWidth: 4, maxWidth: 2, onWave: wave => waves.push(wave)
   });
-  assert.deepEqual(waves.map(wave => wave.width), [2, 2, 2, 1]);
+  assert.deepEqual(waves.map(wave => wave.width), [2]);
   const error = new Error('sync failure');
   await assert.rejects(runReadWaves(items(1), () => { throw error; }), result => result === error);
 });

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, writeFile, mkdir, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { createServer } from 'node:http';
 import { startDeepSeekTurn, loadDeepSeekConfig } from './deepseek-run.js';
 import { estimateContextTokens } from './deepseek-context.js';
 
@@ -1045,6 +1046,107 @@ test('three silent gateways fail from request-local header timeouts, not task ag
   assert.equal(state.result.error.code,'MODEL_HEADERS_TIMEOUT');
   assert.equal(state.requests.length, 3);
   assert.ok(state.result.timing.rounds[0].attempts.every(attempt => attempt.errorCode === 'MODEL_HEADERS_TIMEOUT'));
+  assert.deepEqual(state.result.timing.rounds[0].attempts.map(a => a.headersTimeoutMs), [60000, 60000, 60000]);
+});
+
+test('same-gateway header retry tolerates a long tail without replaying successful tools or Hooks', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  let started, retryStarted, retryExpired = false, writes = 0;
+  const ready = new Promise(resolve => { started = resolve; });
+  const retryReady = new Promise(resolve => { retryStarted = resolve; });
+  const silent = init => new Promise((_, reject) => {
+    init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+    started();
+  });
+  const slow = init => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(json({ content: '已从原进度完成' })), 90000);
+    init.signal.addEventListener('abort', () => { retryExpired = true; clearTimeout(timer); reject(init.signal.reason); }, { once: true });
+    retryStarted();
+  });
+  const pending = run(t, [json({ tool_calls: [call('write')] }, 'tool_calls'), silent, slow], {
+    environment: { ...fallbackEnvironment, MODEL_AGENT_MAIN_FALLBACK_BASE_URLS: '', MODEL_AGENT_MAIN_MODEL: 'gpt-6.1-sol' },
+    tools: [schema('write')], toolHandler: async () => { writes++; return { saved: true }; }
+  });
+  await ready;
+  t.mock.timers.tick(60000); await new Promise(resolve => setImmediate(resolve));
+  t.mock.timers.tick(1000); await retryReady;
+  t.mock.timers.tick(90000);
+  await new Promise(resolve => setImmediate(resolve)); t.mock.timers.tick(1000);
+  const state = await pending;
+  assert.equal(state.result.status, 'completed', state.result.error?.message);
+  assert.equal(retryExpired, false);
+  assert.equal(writes, 1);
+  assert.equal(state.hooks.filter(h => h.event === 'UserPromptSubmit').length, 1);
+  assert.deepEqual(state.requests.map(r => r.model), ['gpt-6.1-sol', 'gpt-6.1-sol', 'gpt-6.1-sol']);
+  assert.deepEqual(state.requests[1].messages, state.requests[2].messages);
+  assert.deepEqual(state.result.timing.rounds[1].attempts.map(a => a.headersTimeoutMs), [60000, 120000]);
+});
+
+test('a silent sole gateway still fails with bounded retries and an accurate request-stage diagnosis', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  let started;
+  const ready = new Promise(resolve => { started = resolve; });
+  const silent = init => new Promise((_, reject) => {
+    init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true }); started();
+  });
+  const pending = run(t, [silent, silent, silent], {
+    environment: { ...fallbackEnvironment, MODEL_AGENT_MAIN_FALLBACK_BASE_URLS: '' }
+  });
+  await ready;
+  for (let i = 0; i < 12; i++) { t.mock.timers.tick(45000); await new Promise(resolve => setImmediate(resolve)); }
+  const state = await pending;
+  assert.equal(state.result.status, 'failed');
+  assert.equal(state.result.error.code, 'MODEL_HEADERS_TIMEOUT');
+  assert.match(state.result.error.message, /等待.*响应头超时/);
+  assert.match(state.result.error.message, /1 个.*地址/);
+  assert.doesNotMatch(state.result.error.message, /网络连接暂时失败/);
+  assert.equal(state.requests.length, 3);
+  assert.deepEqual(state.result.timing.rounds[0].attempts.map(a => a.headersTimeoutMs), [60000, 120000, 120000]);
+});
+
+test('user Stop cancels a padded header retry without a third request', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const controller = new AbortController(); let started, retried, calls = 0;
+  const ready = new Promise(resolve => { started = resolve; });
+  const retryReady = new Promise(resolve => { retried = resolve; });
+  const silent = init => new Promise((_, reject) => {
+    init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+    if (++calls === 1) started(); else retried();
+  });
+  const pending = run(t, [silent, silent], {
+    signal: controller.signal, environment: { ...fallbackEnvironment, MODEL_AGENT_MAIN_FALLBACK_BASE_URLS: '' }
+  });
+  await ready; t.mock.timers.tick(60000); await new Promise(resolve => setImmediate(resolve));
+  t.mock.timers.tick(1000); await retryReady; controller.abort();
+  const state = await pending;
+  assert.equal(state.result.status, 'stopped'); assert.equal(state.requests.length, 2);
+  assert.equal(state.result.timing.rounds[0].attempts[1].headersTimeoutMs, 120000);
+});
+
+test('real HTTP header retry resumes the same request after one timeout and writes exactly once', async () => {
+  const requests = []; let writes = 0;
+  const server = createServer(async (req, res) => {
+    let body = ''; for await (const chunk of req) body += chunk;
+    requests.push(JSON.parse(body)); const index = requests.length;
+    if (index === 2) return; // The first continuation never sends headers.
+    const reply = () => {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ choices: [{ message: index === 1 ? { tool_calls: [call('write')] } : { content: '真实传输恢复完成' }, finish_reason: index === 1 ? 'tool_calls' : 'stop' }] }));
+    };
+    if (index === 3) setTimeout(reply, 375); else reply();
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const result = await startDeepSeekTurn({ cwd: root, prompt: '只写一次后完成', waitForCompletion: true,
+      environment: { MODEL_AGENT_MAIN_BASE_URL: `http://127.0.0.1:${server.address().port}/v1`, MODEL_AGENT_MAIN_API_KEY: 'test-only',
+        MODEL_AGENT_MAIN_MODEL: 'gpt-6.1-sol', MODEL_AGENT_MAIN_FALLBACK_BASE_URLS: '', MODEL_AGENT_MAIN_FALLBACK_MODELS: '', MODEL_AGENT_MAIN_HEADERS_TIMEOUT_MS: '250' },
+      runtimeFactory: async () => ({ systemPrompt: '真实HTTP回归夹具', skillCount: 0, hookSources: [], tools: [], hooks: async () => ({ blocked: false, context: '' }), close: async () => {} }),
+      tools: [schema('write')], toolHandler: async () => { writes++; return { saved: true }; }
+    });
+    assert.equal(result.status, 'completed', result.error?.message); assert.equal(writes, 1);
+    assert.equal(requests.length, 3); assert.deepEqual(requests[1], requests[2]);
+    assert.deepEqual(result.timing.rounds[1].attempts.map(a => a.headersTimeoutMs), [250, 500]);
+  } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
 });
 
 test('authentication and invalid request errors are not automatically retried', async t => {

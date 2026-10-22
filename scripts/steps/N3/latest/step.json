@@ -7,6 +7,12 @@
   "reportZh": "report.zh.md",
   "substeps": [
     {
+      "title": "定位cert和org-project响应头超时并修复同地址重试长尾余量",
+      "functions": [{"path":"server/deepseek-run.js","name":"requestModel"}],
+      "inputs": [{"path":"server/deepseek-run.test.js"}],
+      "outputs": [{"path":"docs/model-header-timeout-20261022.zh.md"}]
+    },
+    {
       "title": "协调器交付合同、定点恢复、检查模式一致和大命令输出完整外置",
       "functions": [
         {"path":"server/execution-coordination.js","name":"inspectDeliverables / recoveryDecision / startCoordinatedNodeTurn"},

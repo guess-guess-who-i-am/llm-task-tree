@@ -161,6 +161,14 @@ async function requestModel(baseUrls, init, roundTiming, notify, imageFallback, 
   let fallbackIndex = 0;
   roundTiming.attempts = [];
   const active = new Map();
+  // A repeated request to one slow inference route must not be cancelled at
+  // the same too-short boundary forever. Give that route one bounded padding
+  // step after a header timeout, not extra attempts, a new turn, or more tools.
+  // Other gateways/models retain their original budget; a real outage still
+  // exhausts three attempts. No padding is applied to auth/connect errors.
+  const slowRoutes = new Set();
+  const headerBudget = (endpoint, model) => (route?.headersTimeoutMs || 0)
+    * (slowRoutes.has(JSON.stringify([endpoint, model])) ? 2 : 1);
   let nextAttempt = 1, lastFailure = null, nextHedgeAt = Infinity;
   let rejectAbort;
   const onAbort = () => rejectAbort(init.signal.reason);
@@ -179,15 +187,16 @@ async function requestModel(baseUrls, init, roundTiming, notify, imageFallback, 
     const started = Date.now();
     const endpoint = baseUrls[(attempt - 1) % baseUrls.length];
     const requestBody = JSON.stringify({ ...JSON.parse(init.body), model: candidateModel });
-    const sample = { attempt, endpoint, model: candidateModel, startedAt: new Date(started).toISOString(), status: null, requestMs: null, responseHeaders: {} };
+    const headersTimeoutMs = headerBudget(endpoint, candidateModel);
+    const sample = { attempt, endpoint, model: candidateModel, headersTimeoutMs, startedAt: new Date(started).toISOString(), status: null, requestMs: null, responseHeaders: {} };
     roundTiming.attempts.push(sample);
     const controller = new AbortController();
     const abort = () => controller.abort(init.signal.reason);
     init.signal.addEventListener('abort', abort, { once: true });
     const item = { attempt, endpoint, sample, controller, abort };
-    const headersTimer = route?.headersTimeoutMs > 0 ? setTimeout(() => {
+    const headersTimer = headersTimeoutMs > 0 ? setTimeout(() => {
       controller.abort(Object.assign(new Error('等待模型响应头超时'), { code: 'MODEL_HEADERS_TIMEOUT' }));
-    }, route.headersTimeoutMs) : null;
+    }, headersTimeoutMs) : null;
     item.headersTimer = headersTimer;
     item.outcome = fetch(`${endpoint}/chat/completions`, { ...init, body: requestBody, redirect: 'manual', signal: controller.signal })
       .then(response => ({ item, response }), error => ({ item, error }))
@@ -247,6 +256,9 @@ async function requestModel(baseUrls, init, roundTiming, notify, imageFallback, 
       }
       cleanupItem(item);
       if (init.signal.aborted) init.signal.throwIfAborted();
+      if (['MODEL_HEADERS_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT'].includes(item.sample.errorCode)) {
+        slowRoutes.add(JSON.stringify([item.endpoint, item.sample.model]));
+      }
       if (error && !['ECONNRESET','ECONNREFUSED','EPIPE','ETIMEDOUT','EAI_AGAIN','UND_ERR_CONNECT_TIMEOUT','UND_ERR_SOCKET','UND_ERR_HEADERS_TIMEOUT','MODEL_HEADERS_TIMEOUT'].includes(item.sample.errorCode)) throw error;
       const detail = response ? await responseText(response, { signal: init.signal, idleTimeoutMs: route?.streamIdleTimeoutMs }) : '';
       if ([400, 415, 422].includes(response?.status) && !contextLimitDetails(detail) && /image|vision|multimodal|图片|视觉/i.test(detail) && imageFallback?.()) {
@@ -276,11 +288,12 @@ async function requestModel(baseUrls, init, roundTiming, notify, imageFallback, 
       if ((active.size && !modelChanged) || nextAttempt > maxAttempts) continue;
       item.sample.retryDelayMs = retryDelayMs;
       const nextEndpoint = baseUrls[(nextAttempt - 1) % baseUrls.length];
+      const nextHeadersTimeoutMs = headerBudget(nextEndpoint, candidateModel);
       notify({ method: 'model/request-retrying', params: { round: roundTiming.round, attempt: item.attempt,
         nextAttempt, maxAttempts, status: response?.status || null, delayMs: retryDelayMs,
-        endpoint: item.endpoint, nextEndpoint,
+        endpoint: item.endpoint, nextEndpoint, headersTimeoutMs: nextHeadersTimeoutMs,
         ...(modelChanged ? { model: previousModel, nextModel: candidateModel } : {}),
-        message: `模型网关返回 ${response ? `HTTP ${response.status}` : `连接异常 ${item.sample.errorCode}`}，正在恢复；${modelChanged ? `从 ${previousModel} 切换到 ${candidateModel}；` : ''}${(retryDelayMs / 1000).toFixed(1)} 秒后${nextEndpoint !== item.endpoint ? `切换备用地址 ${new URL(nextEndpoint).host}` : '重试'}（第 ${nextAttempt}/${maxAttempts} 次请求），不会重跑已完成的工具。` } });
+        message: `模型网关返回 ${response ? `HTTP ${response.status}` : item.sample.errorCode === 'MODEL_HEADERS_TIMEOUT' ? '等待响应头超时' : `连接异常 ${item.sample.errorCode}`}，正在恢复；${modelChanged ? `从 ${previousModel} 切换到 ${candidateModel}；` : ''}${(retryDelayMs / 1000).toFixed(1)} 秒后${nextEndpoint !== item.endpoint ? `切换备用地址 ${new URL(nextEndpoint).host}` : '重试'}（第 ${nextAttempt}/${maxAttempts} 次请求）${nextHeadersTimeoutMs > (route?.headersTimeoutMs || 0) ? `，本次响应头最多等待 ${nextHeadersTimeoutMs / 1000} 秒` : ''}，不会重跑已完成的工具。` } });
       await retryDelay(retryDelayMs, init.signal);
       notify({ method: 'model/request-started', params: { round: roundTiming.round, attempt: nextAttempt, message: `正在重试模型第 ${roundTiming.round} 轮响应（第 ${nextAttempt}/${maxAttempts} 次请求）` } });
       launch();
@@ -293,6 +306,12 @@ async function requestModel(baseUrls, init, roundTiming, notify, imageFallback, 
   if (terminal) throw modelHttpError(response.status,item.sample.model,detail);
   const retries = roundTiming.attempts.length - 1;
   const suffix = retries ? `（已重试 ${retries} 次）` : '';
+  if (error && ['MODEL_HEADERS_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT'].includes(item.sample.errorCode)) {
+    const addressCount = new Set(roundTiming.attempts.map(attempt => attempt.endpoint)).size;
+    const budgets = roundTiming.attempts.map(attempt => attempt.headersTimeoutMs / 1000).join('、');
+    throw Object.assign(new Error(`模型 ${item.sample.model} 等待网关响应头超时${suffix}；已尝试 ${addressCount} 个 API 地址，各次等待上限为 ${budgets} 秒。未收到响应头，不能仅凭此判定上游故障。`, { cause: error.cause || error }),
+      { code: error.code || error.cause?.code, stage: 'model-request', requestExhausted: true });
+  }
   if (error) throw Object.assign(new Error(`模型 ${item.sample.model} 网络连接暂时失败${suffix}`, { cause: error.cause || error }), { code: error.code || error.cause?.code, requestExhausted: true });
   throw Object.assign(new Error(`模型 HTTP ${response.status}（${item.sample.model}）${suffix}: ${detail.slice(0, 500)}`), { code: 'MODEL_REQUEST_EXHAUSTED', requestExhausted: true });
 }

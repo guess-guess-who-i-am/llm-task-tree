@@ -12,6 +12,33 @@ const tree='# LLM Task Graph\n## ROOT - 当前目标\n- Problem: 交付本任务
 const shell=options=>options.onNotification({method:'tool/started',params:{toolName:'exec_command',arguments:{cmd:'verify declared inputs'}}});
 const pass={status:'completed',output:'{"verdict":"pass","reason":"实际产物与声明输入已核对"}'};
 
+for (const dependencyChanged of [false,true]) test(`reviewer declares its complete actual dependencies without restarting for unrelated edits (${dependencyChanged})`,async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'review-receipt-dependencies-'));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  await writeFile(path.join(root,'task-tree.md'),tree);
+  await writeFile(path.join(root,'input.txt'),'input-v1');
+  const samples=[];let calls=0;
+  const executor=createDirectNodeWorkspace({projectRoot:root,reviewTurn:async options=>{
+    calls++;shell(options);
+    assert.match(options.prompt,/执行者交付/);
+    assert.match(options.prompt,/已完成机构权限源码分析/);
+    await writeFile(path.join(root,'other-task.txt'),`unrelated ${calls}`);
+    if(dependencyChanged&&calls===1)await writeFile(path.join(root,'input.txt'),'input-v2');
+    if(dependencyChanged&&calls===2)assert.equal(await readFile(path.join(options.cwd,'input.txt'),'utf8'),'input-v2');
+    // A real reviewer explicitly inventories all inputs needed for this verdict.
+    return {status:'completed',output:JSON.stringify({verdict:'pass',reason:'分析产物和全部依据已核对',evidence:['实际输入与报告一致'],
+      dependencyScope:{complete:true,files:['input.txt','output.txt']}})};
+  }});
+  const state=await executor.prepare('receipt-scoped');
+  await writeFile(path.join(state.workerPath,'output.txt'),'owned report');
+  const result=await executor.finish(state,{nodeId:'ROOT',objective:'只分析机构权限，不修改业务代码',status:'completed',
+    output:'已完成机构权限源码分析，报告保存在 output.txt。',onTiming:sample=>samples.push(sample)});
+  assert.equal(result.review.verdict,'pass');
+  assert.equal(calls,dependencyChanged?2:1);
+  assert.ok(samples.some(sample=>sample.operation==='review.dependencies.validate'));
+  assert.equal(await readFile(path.join(root,'output.txt'),'utf8'),'owned report');
+});
+
 for (const dependencyChanged of [false,true]) test(`explicit final-review scope protects dependencies and excludes ambient sourceCommit diffs (${dependencyChanged})`,async t=>{
   const root=await mkdtemp(path.join(os.tmpdir(),'review-scope-direct-'));
   t.after(()=>rm(root,{recursive:true,force:true}));

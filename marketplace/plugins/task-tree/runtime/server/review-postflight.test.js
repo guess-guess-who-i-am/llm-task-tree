@@ -150,7 +150,7 @@ for(const updateTree of [true,false])test(`real checker repair and evidence reac
   const root=await fixture(t);let requests=0,checks=0;
   t.mock.method(globalThis,'fetch',async()=>{
     requests++;
-    return new Response(JSON.stringify({choices:[{message:{tool_calls:[{id:'submit',type:'function',function:{name:'completion_review_submit',arguments:JSON.stringify({verdict:'pass',reason:'修复并验证返回42',evidence:['候选实际返回42'],...(!updateTree?{treeState:{status:'consistent',reason:'指定节点的目标、交付物和缺口与当前成果一致'}}:{})})}}]},finish_reason:'tool_calls'}]}),{headers:{'content-type':'application/json'}});
+    return new Response(JSON.stringify({choices:[{message:{tool_calls:[{id:'submit',type:'function',function:{name:'completion_review_submit',arguments:JSON.stringify({verdict:'pass',reason:'修复并验证返回42',evidence:['候选实际返回42'],dependencyScope:{complete:false,files:[]},...(!updateTree?{treeState:{status:'consistent',reason:'指定节点的目标、交付物和缺口与当前成果一致'}}:{})})}}]},finish_reason:'tool_calls'}]}),{headers:{'content-type':'application/json'}});
   });
   const executor=createDirectNodeWorkspace({projectRoot:root,reviewTurn:async options=>{
     checks++;

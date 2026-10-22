@@ -18,7 +18,7 @@ test('HTTP compaction response continues through real tool execution, Git accept
     let text='';for await(const chunk of req)text+=chunk;const body=JSON.parse(text);requests.push(body);
     const message=requests.length===1?{content:'<analysis>这是当前的压缩请求。</analysis>\n<summary>当前工作：待写文件。可选下一步：创建 result.txt。</summary>'}:
       requests.length===2?{tool_calls:[{id:'write',type:'function',function:{name:'exec_command',arguments:JSON.stringify({command:`${JSON.stringify(process.execPath)} -e "require('fs').writeFileSync('result.txt','实际产物')"`})}}]}:
-      requests.length===3?{content:'已创建 result.txt。'}:{tool_calls:[{id:'review',type:'function',function:{name:'completion_review_submit',arguments:JSON.stringify({verdict:'pass',reason:'实际文件内容正确',evidence:['result.txt 读回为实际产物']})}}]};
+      requests.length===3?{content:'已创建 result.txt。'}:{tool_calls:[{id:'review',type:'function',function:{name:'completion_review_submit',arguments:JSON.stringify({verdict:'pass',reason:'实际文件内容正确',evidence:['result.txt 读回为实际产物'],dependencyScope:{complete:false,files:[]}})}}]};
     res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({choices:[{message,finish_reason:message.tool_calls?'tool_calls':'stop'}]}));
   });
   await new Promise(r=>server.listen(0,'127.0.0.1',r));

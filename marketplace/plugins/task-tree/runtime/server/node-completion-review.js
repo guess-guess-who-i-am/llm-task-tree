@@ -11,6 +11,7 @@ export const COMPLETION_REVIEW_TOOL = {type:'function',function:{
   parameters:{type:'object',additionalProperties:false,required:['verdict','reason','evidence'],properties:{
     verdict:{type:'string',enum:['pass','failed']},reason:{type:'string',minLength:1},
     evidence:{type:'array',minItems:1,maxItems:3,items:{type:'string'}},rootCause:{type:'string'},caseStudy:{type:'string'},
+    dependencyScope:{type:'object',additionalProperties:false,required:['complete','files'],description:'本次判定全部实际依赖的项目相对文件或目录（不使用通配符）。确知全集才声明complete=true，包含测试、脚本和数据的传递依赖，不是只列输出；不确定则complete=false、files为空数组，宿主保守检查。宿主始终保护交付文件和实际读取文件。',properties:{complete:{type:'boolean'},files:{type:'array',items:{type:'string',minLength:1}}}},
     sources:{type:'array',maxItems:3,items:{type:'object',required:['url','finding'],properties:{url:{type:'string'},finding:{type:'string'}}}},solution:{type:'string'},
     treeState:{type:'object',additionalProperties:false,required:['status','reason'],properties:{status:{type:'string',enum:['consistent']},reason:{type:'string',minLength:1}},description:'核对宿主指定节点后，确认树的交付物、结论和剩余缺口与实际产物一致。若不一致，先更新必要字段；不为重复汇报强迫改树。'}
   }}
@@ -42,6 +43,7 @@ export function buildCompletionReviewPrompt(context) {
   return [context,
     '检查目标功能，在候选工作区运行相关测试或关键流程；有缺陷就修复并复验。',
     '验收范围以用户目标和交付合同为准：说明、分析或树内容任务核对事实与实际节点回写，不额外要求启动未被修改的业务服务；软件行为改动仍须验证相关行为，未实测的不要宣称已实测。',
+    '复用执行者交付中的定位和已有证据，实际核对关键来源，不重新开展整项分析。最终判定附dependencyScope声明全部实际依赖的文件或目录，避免其它任务无关改动导致检查从头再来；无法确认完整依赖时明确complete=false，不猜测。例：核对docs/auth.md与src/auth及相关测试后，提交dependencyScope={complete:true,files:["docs/auth.md","src/auth","tests/auth"]}，实际路径按本任务替换。',
     '检查完成后单独调用 completion_review_submit，提交判定、简短原因和最多 3 条验证证据。'
   ].join('\n\n');
 }
@@ -99,8 +101,8 @@ export function completionReviewInterruption(cause) {
   const maintenance = postflight && cause.maintenanceOnly === true;
   const category = maintenance ? 'task-tree-maintenance' : postflight ? 'hook-blocked'
     : cause.code === 'HOOK_EXECUTION_FAILED' ? 'hook-execution'
-    : ['MODEL_HEADERS_TIMEOUT','MODEL_STREAM_IDLE_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','UND_ERR_BODY_TIMEOUT'].includes(cause.code) ? 'model-response-timeout'
-    : ['MODEL_REQUEST_EXHAUSTED','MODEL_STREAM_INCOMPLETE'].includes(cause.code) ? 'model-gateway'
+    : ['MODEL_HEADERS_TIMEOUT','MODEL_STREAM_IDLE_TIMEOUT','MODEL_UPSTREAM_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','UND_ERR_BODY_TIMEOUT'].includes(cause.code) ? 'model-response-timeout'
+    : ['MODEL_REQUEST_EXHAUSTED','MODEL_STREAM_INCOMPLETE','MODEL_STREAM_REQUEST_FAILED'].includes(cause.code) ? 'model-gateway'
     : ['MODEL_CONTEXT_CAPACITY','MODEL_CONTEXT_REJECTED'].includes(cause.code) ? 'model-context'
     : cause.code === 'TREE_REFERENCE_MISSING' ? 'tree-reference' : 'review-interrupted';
   const reason = maintenance

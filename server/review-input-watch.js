@@ -14,6 +14,16 @@ export function validateReviewScopeFiles(files) {
   return [...files];
 }
 
+export function validateReviewDependencyScope(scope) {
+  if(!scope||scope.complete!==true)throw new TypeError('验收依赖必须明确声明 complete=true');
+  const files=validateReviewScopeFiles(scope.files).map(file=>file.replaceAll('\\','/').replace(/\/$/,''));
+  if(files.some(file=>/[\*?\[\]]/.test(file)||file.startsWith(':')||file==='.'||file.includes('//')))
+    throw new TypeError('验收依赖需要实际文件或目录，不接受通配符、全项目或 Git 路径模式');
+  const normalized=files.map(file=>path.posix.normalize(file));
+  if(normalized.some(file=>file==='.'))throw new TypeError('验收依赖不能声明整个项目');
+  return [...new Set(normalized)];
+}
+
 // Git's inventory/pathspec semantics define the declared boundary. Content
 // signatures (not index entries or timestamps) determine whether it changed.
 async function projectSnapshot(root, scope) {
@@ -80,19 +90,30 @@ export async function createReviewInputWatch({projectRoot,candidatePath,files=[]
     const error=Object.assign(new Error(`检查输入已更新：${file}`),{code:'REVIEW_INPUT_CHANGED',file});
     controller.abort(error);rejectChanged(error);
   };
+  const initialStamp = scope?.length === 0 ? Promise.resolve(new Map()) : projectSnapshot(projectRoot,scope);
+  initialStamp.catch(()=>{});
   const add=async file=>{
     const relative=path.relative(candidatePath,path.resolve(candidatePath,file)).replaceAll('\\','/');
     if(relative.startsWith('../')||ignored(relative)||baseline.has(relative))return;
-    baseline.set(relative,await signature(path.join(projectRoot,relative)));
+    // Capture the pre-review version, even if the live source changed before
+    // its first explicit read. A late live baseline would miss that change.
+    const initial=await initialStamp.catch(()=>null);
+    baseline.set(relative,initial&&(scope===undefined||initial.has(relative))
+      ? initial.get(relative)??'absent' : await signature(path.join(projectRoot,relative)));
   };
   await Promise.all(files.map(add));
   const abort=()=>controller.abort(signal.reason);
   if(signal?.aborted)abort();else signal?.addEventListener('abort',abort,{once:true});
-  const validate=async()=>{
+  const validate=async({dependencyScope}={})=>{
     await Promise.all([...observations]);
-    if (watchAll || scope !== undefined) {
-      const previous = await initialStamp;
-      const current = scope?.length === 0 ? new Map() : await projectSnapshot(projectRoot,scope);
+    const declared=dependencyScope===undefined||dependencyScope?.complete===false?undefined:validateReviewDependencyScope(dependencyScope);
+    if (watchAll || scope !== undefined || declared !== undefined) {
+      let previous = await initialStamp;
+      // The explicit host boundary remains authoritative. A final receipt can
+      // narrow only the otherwise-unknown shell fallback, never caller inputs.
+      const narrowed=scope===undefined&&declared!==undefined;
+      if(narrowed)previous=new Map([...previous].filter(([file])=>declared.some(dep=>file===dep||file.startsWith(dep+'/'))));
+      const current = scope?.length === 0 ? new Map() : await projectSnapshot(projectRoot,narrowed?declared.map(file=>`:(literal)${file}`):scope);
       const file = changedPath(previous,current);
       if (file) invalidate(file);
     }
@@ -101,8 +122,6 @@ export async function createReviewInputWatch({projectRoot,candidatePath,files=[]
   };
   // Capture before tool execution on every platform, including before the first
   // shell call. A watcher event only prompts a content check; it is not proof.
-  const initialStamp = scope?.length === 0 ? Promise.resolve(new Map()) : projectSnapshot(projectRoot,scope);
-  initialStamp.catch(()=>{});
   if (platform !== 'linux' && !recursiveWatchUnavailable) try {watcher=watch(projectRoot,{recursive:true},(_,file)=>{
     const relative=String(file||'').replaceAll('\\','/');
     if(!relative||ignored(relative))return;

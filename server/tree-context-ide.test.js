@@ -27,7 +27,7 @@ test('real node IDE starts with a map, supports optional full reads, and persist
     const content = body.messages.map(message => typeof message.content === 'string' ? message.content : '').join('\n');
     if (content.includes('【功能验收】')) {
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ choices: [{ finish_reason: 'tool_calls', message: { content: '隔离候选已核对', tool_calls: [{ id: 'review-submit', type: 'function', function: { name: 'completion_review_submit', arguments: JSON.stringify({ verdict: 'pass', reason: '隔离候选已核对', evidence: ['候选树实际写入'] }) } }] } }] }));
+      res.end(JSON.stringify({ choices: [{ finish_reason: 'tool_calls', message: { content: '隔离候选已核对', tool_calls: [{ id: 'review-submit', type: 'function', function: { name: 'completion_review_submit', arguments: JSON.stringify({ verdict: 'pass', reason: '隔离候选已核对', evidence: ['候选树实际写入'], dependencyScope:{complete:false,files:[]} }) } }] } }] }));
       return;
     }
     const calls = [

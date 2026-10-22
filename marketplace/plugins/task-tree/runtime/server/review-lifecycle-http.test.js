@@ -31,7 +31,7 @@ for(const outcome of ['pass','failed','stopped'])test(`IDE publishes live review
     res.write('data: '+JSON.stringify({choices:[{delta:{content:'正在核对当前树的说明。'},finish_reason:null}]})+'\n\n');
     await barrier;
     if(res.destroyed)return;
-    const verdict={verdict:outcome==='failed'?'failed':'pass',reason:outcome==='failed'?'缺少用户所需的解释':'说明与当前树一致',evidence:['已对照当前树'],treeState:{status:'consistent',reason:'只读说明不改变已有状态'},
+    const verdict={verdict:outcome==='failed'?'failed':'pass',reason:outcome==='failed'?'缺少用户所需的解释':'说明与当前树一致',evidence:['已对照当前树'],dependencyScope:{complete:false,files:[]},treeState:{status:'consistent',reason:'只读说明不改变已有状态'},
       ...(outcome==='failed'?{rootCause:'执行者没有解释具体字段',caseStudy:'从用户要求对照输出，发现字段解释缺失',solution:'补充字段含义后再验收'}:{})};
     res.write('data: '+JSON.stringify({choices:[{delta:{tool_calls:[{index:0,id:'verdict',type:'function',function:{name:'completion_review_submit',arguments:JSON.stringify(verdict)}}]},finish_reason:'tool_calls'}]})+'\n\n');
     res.end('data: [DONE]\n\n');

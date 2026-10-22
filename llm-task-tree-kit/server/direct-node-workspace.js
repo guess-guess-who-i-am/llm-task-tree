@@ -41,7 +41,7 @@ function compactReviewGuidance(messages) {
 
 export function createDirectNodeWorkspace({ projectRoot, workspace = createGitWorkspaceManager({ projectRoot }), startTurn = startCodexTurn, reviewTurn = startTurn } = {}) {
   if (!projectRoot) throw new Error('projectRoot is required');
-  async function check(candidatePath, sourceCommit, { nodeId, objective, onPhase, onTiming, onNotification, signal, delegationReceipt, historyMessages = [], userGuidance = [], treeFile, sharedContract = '', reviewInputs = [], executionFiles = [], reviewScopeFiles }, { attempt = 0, candidateId } = {}) {
+  async function check(candidatePath, sourceCommit, { nodeId, objective, output, changedFiles, onPhase, onTiming, onNotification, signal, delegationReceipt, historyMessages = [], userGuidance = [], treeFile, sharedContract = '', reviewInputs = [], executionFiles = [], reviewScopeFiles }, { attempt = 0, candidateId } = {}) {
     const measure=async(operation,fn)=>{const begin=performance.now();try{return await fn();}finally{onTiming?.({role:'review-stage',operation,attempt,candidateId,durationMs:performance.now()-begin});}};
     onPhase?.('checking', '独立检查正在核对整合结果');
     const inputMaterials=workspace.materializeReviewInputs
@@ -55,6 +55,7 @@ export function createDirectNodeWorkspace({ projectRoot, workspace = createGitWo
         '【功能验收】直接在当前候选工作区验证用户要求的行为。',
         `节点：${nodeId}`,
         `用户目标：${objective}`,
+        ...(output ? [`执行者交付（仅作定位线索，仍需核对真实产物）：\n${output}`] : []),
         ...(guidance ? [`用户运行中补充要求：\n${guidance}`] : []),
         ...(sharedContract ? [`共享接口约定：\n${sharedContract}`] : []),
         ...(manifest ? [manifest] : []),
@@ -62,17 +63,18 @@ export function createDirectNodeWorkspace({ projectRoot, workspace = createGitWo
       ].join('\n\n')));
       onTiming?.({role:'review-input',attempt,candidateId,promptChars:prompt.length,promptBytes:Buffer.byteLength(prompt),
         changedFiles:summary.changedFiles.length,deferredFiles:summary.deferredEvidence?.files?.length||0});
-      const inputWatch = await createReviewInputWatch({projectRoot,candidatePath,
+      const inputWatch = await measure('review.dependencies.snapshot',()=>createReviewInputWatch({projectRoot,candidatePath,
         // The full original-to-current diff can contain concurrent tasks. A
         // caller-declared complete boundary replaces that ambient diff as the
         // dependency inventory; actual checker reads always join it below.
-        files:reviewScopeFiles === undefined ? summary.changedFiles : [],
-        ...(reviewScopeFiles === undefined ? {} : {dependencyScope:{complete:true,files:reviewScopeFiles}}),signal});
+        files:reviewScopeFiles === undefined ? changedFiles ?? summary.changedFiles : [],
+        ...(reviewScopeFiles === undefined ? {} : {dependencyScope:{complete:true,files:reviewScopeFiles}}),signal}));
       onTiming?.({role:'review-dependencies',attempt,candidateId,
         strategy:reviewScopeFiles === undefined ? 'conservative-project-content' : 'declared-complete-scope',
         ...(reviewScopeFiles === undefined ? {} : {reviewScopeFiles})});
       let reviewPending;
       let result;
+      let review;
       const reviewStarted = performance.now();
       try {
       reviewPending = reviewTurn({
@@ -83,12 +85,16 @@ export function createDirectNodeWorkspace({ projectRoot, workspace = createGitWo
         environment: { TASK_TREE_PROJECT_ROOT: candidatePath, TASK_TREE_CONTEXT_NODE_ID: nodeId, TASK_TREE_QUALITY_MODE: 'advisory', ...(treeFile ? { TASK_TREE_CONTEXT_TREE_FILE: treeFile } : {}) },
         prompt,
         completionReview:true,
+        reviewDependencyReceipt:reviewScopeFiles===undefined,
         ...(reviewHistory.length ? { messages: [...reviewHistory, { role: 'user', content: prompt }] } : {}),
         persistDialogue: false,
         forceNewThread: true, waitForCompletion: true
       });
       result = await measure('review.turn',()=>Promise.race([reviewPending,inputWatch.changed]));
-      await inputWatch.validate();
+      assertCompleted(result, '独立检查');
+      review = await measure('review.parse',async()=>parseCompletionReview(result.messages?.at(-1)?.content || result.output));
+      onTiming?.({role:'review-dependency-receipt',attempt,candidateId,dependencyScope:review.dependencyScope||null});
+      await measure('review.dependencies.validate',()=>inputWatch.validate({dependencyScope:review.dependencyScope}));
       } catch(error) {
         onTiming?.({role:'review',attempt,candidateId,status:error.code==='REVIEW_INPUT_CHANGED'?'cancelled':'failed',
           durationMs:performance.now()-reviewStarted,timing:result?.timing||null,errorCode:error.code||''});
@@ -97,7 +103,6 @@ export function createDirectNodeWorkspace({ projectRoot, workspace = createGitWo
       } finally {inputWatch.close();}
       onTiming?.({ role: 'review', attempt, candidateId, timing: result.timing || null, status: result.status });
       assertCompleted(result, '独立检查');
-      const review = await measure('review.parse',async()=>parseCompletionReview(result.messages?.at(-1)?.content || result.output));
       if (review.verdict === 'failed') throw completionReviewFailure(review);
       // Include repairs in the commit that accept() applies, not just the original diff.
       await measure('review.tree-assert',async()=>assertWorkspaceTreeFiles(candidatePath, (await workspace.inspectChanges(candidatePath, sourceCommit)).changedFiles));

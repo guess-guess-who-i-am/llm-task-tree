@@ -19,12 +19,16 @@ export function recordIntegrationProgress(run,message) {
   else if(method==='hook/completed'&&params.event==='Stop')activity='验收收尾 Hook 已返回，正在处理验收结果';
   else if(method==='execution/saving')activity='正在保存验收结果，整轮尚未结束';
   else if(method==='execution/continuing')activity=params.message;
+  else if(method==='model/continuing')activity=params.message;
   else if(method.startsWith('context/compaction-'))activity=params.message||'正在整理验收上下文';
   if(activity) {
     const previous=run.reviewActivity||{},now=new Date().toISOString();
     run.reviewActivity={...previous,message:activity,at:now,startedAt:previous.startedAt||now,
       round:(previous.round||0)+(method==='model/request-started'?1:0),
       receivedChars:(previous.receivedChars||0)+(method==='item/updated'?String(params.item?.delta||'').length:0)};
+    if(method==='model/continuing')run.reviewActivity.continuation={reason:params.reason||'',detail:params.detail||'',at:now};
+    if(method==='model/round-completed')run.reviewActivity.lastModelRound=Object.fromEntries(
+      ['round','requestMs','streamMs','totalMs','toolCalls','finishReason','outputChars','reasoningChars','errorCode'].filter(key=>params[key]!==undefined).map(key=>[key,params[key]]));
   }
   return activity;
 }

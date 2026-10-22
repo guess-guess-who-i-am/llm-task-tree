@@ -7,6 +7,7 @@ import { createServer } from 'node:http';
 import { startDeepSeekTurn, loadDeepSeekConfig } from './deepseek-run.js';
 import { estimateContextTokens } from './deepseek-context.js';
 
+const nativeFetch=globalThis.fetch;
 let root;
 const previous = {};
 before(async () => {
@@ -23,6 +24,20 @@ after(async () => {
 });
 
 const schema = (name) => ({ type: 'function', function: { name, description: name, parameters: { type: 'object', properties: {}, additionalProperties: true } } });
+test('final dependency handoff is required on request and repairs only the receipt, never replays verification',async t=>{
+  let checks=0;
+  const verdict={verdict:'pass',reason:'实际验证完成',evidence:['已读真实输入']};
+  const state=await run(t,[json({tool_calls:[call('verify')]},'tool_calls'),json({tool_calls:[call('completion_review_submit',verdict)]},'tool_calls'),
+    json({tool_calls:[call('completion_review_submit',{...verdict,dependencyScope:{complete:true,files:['facts.txt','report.md']}})]},'tool_calls')],
+    {completionReview:true,reviewDependencyReceipt:true,tools:[schema('verify')],toolHandler:async()=>{checks++;return {ok:true};}});
+  assert.equal(state.result.status,'completed',state.result.error?.message);
+  assert.equal(checks,1);assert.equal(state.requests.length,3);
+  assert.ok(state.requests[0].tools.find(t=>t.function.name==='completion_review_submit').function.parameters.required.includes('dependencyScope'));
+  assert.deepEqual(state.requests[2].tools.map(t=>t.function.name),['completion_review_submit']);
+  assert.match(state.notifications.find(n=>n.method==='model/continuing'&&n.params.reason==='final-format')?.params.detail,/dependencyScope/);
+  assert.match(state.result.timing.formatCorrections[0].detail,/dependencyScope/);
+  assert.deepEqual(JSON.parse(state.result.structuredOutput).dependencyScope.files,['facts.txt','report.md']);
+});
 test('input telemetry attributes the immutable prompt without recording its contents',async t=>{
   const secrets=['RUNTIME_PRIVATE','SESSION_PRIVATE','PROMPT_PRIVATE','ATTACHMENT_PRIVATE','SCOPE_PRIVATE'];
   const state=await run(t,[json({content:'完成'})],{
@@ -563,6 +578,30 @@ test('DONE without a completion reason cannot execute partial tools or claim suc
   assert.equal(state.result.status,'completed',state.result.error?.message);
   assert.equal(state.requests.length,2);assert.equal(writes,0);
   assert.equal(state.result.timing.rounds[0].errorCode,'MODEL_STREAM_INCOMPLETE');
+});
+
+test('HTTP200 stream timeouts fail over without growing context or replaying a saved write',async t=>{
+  let writes=0;
+  const state=await run(t,[json({tool_calls:[call('write')]},'tool_calls'),sse([{error:{message:'Request timed out.',type:'timeout'}}]),json({content:'已恢复完成'})],{
+    environment:{...fallbackEnvironment,MODEL_AGENT_MAIN_MODEL:'gpt-6.1-sol',MODEL_AGENT_MAIN_FALLBACK_MODELS:''},
+    tools:[schema('write')],toolHandler:async()=>{writes++;return {saved:true};}
+  });
+  assert.equal(state.result.status,'completed',state.result.error?.message);assert.equal(writes,1);
+  assert.notEqual(state.requestUrls[1],state.requestUrls[2]);
+  assert.deepEqual(state.requests[1].messages,state.requests[2].messages,'a gateway error is not new user context');
+  assert.ok(state.requests.every(r=>r.model==='gpt-6.1-sol'));
+  assert.equal(state.hooks.filter(h=>h.event==='UserPromptSubmit').length,1);
+  assert.equal(state.result.timing.rounds[1].errorCode,'MODEL_UPSTREAM_TIMEOUT');
+});
+
+test('three empty HTTP200 stream failures end as an API failure, not an endless task continuation',async t=>{
+  const failure=()=>sse([{error:{message:'Request timed out.'}}]);
+  const state=await run(t,[failure(),failure(),failure()],{environment:{...fallbackEnvironment,MODEL_AGENT_MAIN_MODEL:'gpt-6.1-sol',MODEL_AGENT_MAIN_FALLBACK_MODELS:''}});
+  assert.equal(state.result.status,'failed');assert.equal(state.requests.length,3);
+  assert.equal(state.result.error.code,'MODEL_STREAM_REQUEST_FAILED');
+  assert.equal(new Set(state.requestUrls).size,3);
+  assert.ok(state.requests.every(r=>JSON.stringify(r.messages)===JSON.stringify(state.requests[0].messages)));
+  assert.match(state.result.error.message,/HTTP 200.*响应流.*3/);
 });
 
 test('healthy API streaming resets idle timeout and can exceed ten minutes', async t => {
@@ -1123,7 +1162,9 @@ test('user Stop cancels a padded header retry without a third request', async t 
   assert.equal(state.result.timing.rounds[0].attempts[1].headersTimeoutMs, 120000);
 });
 
-test('real HTTP header retry resumes the same request after one timeout and writes exactly once', async () => {
+test('real HTTP header retry resumes the same request after one timeout and writes exactly once', async t => {
+  // Earlier table-driven fixtures may layer fetch spies; this test must use real transport.
+  t.mock.method(globalThis,'fetch',nativeFetch);
   const requests = []; let writes = 0;
   const server = createServer(async (req, res) => {
     let body = ''; for await (const chunk of req) body += chunk;

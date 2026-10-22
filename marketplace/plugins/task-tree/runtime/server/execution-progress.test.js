@@ -2,6 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { executionProgress, recordRunDuration, readableExecutionError, recordCompactionProgress, recordIntegrationProgress } from './execution-progress.js';
 
+test('review continuation exposes receipt repair and retains round diagnostics, not private model content',()=>{
+  const run={status:'running',phase:'checking',output:'执行者产物'};
+  recordIntegrationProgress(run,{method:'model/continuing',params:{reason:'final-format',detail:'工具参数错误：arguments 缺少 dependencyScope',message:'正在修正最终回执，不重做任务'}});
+  assert.match(run.reviewActivity.message,/修正最终回执/);
+  assert.equal(run.reviewActivity.continuation.detail,'工具参数错误：arguments 缺少 dependencyScope');
+  recordIntegrationProgress(run,{method:'model/round-completed',params:{round:3,totalMs:60000,toolCalls:1,outputChars:0,finishReason:'tool_calls',privateText:'not retained'}});
+  assert.deepEqual(run.reviewActivity.lastModelRound,{round:3,totalMs:60000,toolCalls:1,outputChars:0,finishReason:'tool_calls'});
+  assert.ok(!JSON.stringify(run).includes('not retained'));
+  assert.equal(run.status,'running');assert.equal(run.output,'执行者产物');
+});
+
 test('review progress preserves worker answer and running status until final acceptance',()=>{
   const run={status:'running',phase:'checking',output:'本轮全部完成',streams:{agentMessage:{text:'原输出'}},createdAt:new Date().toISOString()};
   const before=JSON.stringify(run.streams);

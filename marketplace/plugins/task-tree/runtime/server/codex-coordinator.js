@@ -19,6 +19,7 @@ import { buildCompletionReviewPrompt, parseCompletionReview, completionReviewFai
 import {executionErrorDetails} from './execution-error.js';
 import {WORKER_SPLIT_TOOL} from './adaptive-node-execution.js';
 import {validateReviewScopeFiles} from './review-input-watch.js';
+import {readLinkedTreeFiles} from './tree-node-location.js';
 import {JOB_DELIVERY_PROPERTIES,normalizeDeliveryContract,snapshotDeliverables,inspectDeliverables,recoveryDecision,coordinationEvidence,stageCoordinationEvidence} from './execution-coordination.js';
 
 // Planner context is supplied explicitly in the prompt. Reusing an ever-growing
@@ -2079,6 +2080,7 @@ export function createParallelCodexCoordinator({
           const receipt = await incrementalWorkspace.reviewIntegrated({ ...run.workspace, snapshotCommit:run.reviewBaselineCommit || run.workspace.snapshotCommit, runId: run.id }, {
             nodeId: run.sourceSelection?.nodeId || run.goal?.stageNodeId,
             objective: run.objective,
+            changedFiles:run.result.appliedFiles,
             onPhase: (phase,message) => event(run,'final_review_phase',{phase,message}),
             onNotification: notification => event(run,'final_review_progress',{notification}),
             userGuidance: run.userMessages || [],
@@ -2594,7 +2596,8 @@ export function createParallelCodexCoordinator({
       const history = await readGoalHistory(runsDir);
       const sharedContract = String(options.sharedContract || '');
       const jobs = executionContexts(assignParallelDraftContexts(validateParallelJobs(input).map(job => ({ ...job, sharedContract: sharedContract || job.sharedContract })), contextOptions), [], contextOptions);
-      const availableNodes = new Set(parseTreeNodeFields(markdown).map(node => node.id));
+      const linkedTrees=await readLinkedTreeFiles({projectRoot,treeFile:source.tree.path,markdown});
+      const availableNodes = new Set(linkedTrees.flatMap(tree=>tree.nodes.map(node=>node.id)));
       if (options.incremental && jobs.some(job => !availableNodes.has(job.nodeId))) throw new Error('拆分任务引用了当前分支中不存在的节点，请使用当前节点或已有子节点 ID。');
       const run = {
         id: randomUUID(), status: "queued", objective: options.objective || "", summary: "按需拆分执行",

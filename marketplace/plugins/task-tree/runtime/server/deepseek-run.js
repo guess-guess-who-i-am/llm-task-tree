@@ -391,7 +391,9 @@ async function readResponse(response, notify, options) {
         const contextError = contextLimitDetails(data.error);
         // Once deltas were published this is not a clean rejected request;
         // automatic replay would duplicate an accepted response.
-        throw Object.assign(new Error(message), contextError && !text && !reasoning && !toolCalls.size ? { code: 'MODEL_CONTEXT_REJECTED' } : {code:'MODEL_STREAM_INCOMPLETE'});
+        const upstreamTimeout=/timeout|timed[ -]?out|请求超时|响应超时/i.test(`${data.error.code||''} ${data.error.type||''} ${message}`);
+        throw Object.assign(new Error(message), contextError && !text && !reasoning && !toolCalls.size ? { code: 'MODEL_CONTEXT_REJECTED' }
+          : {code:upstreamTimeout?'MODEL_UPSTREAM_TIMEOUT':'MODEL_STREAM_INCOMPLETE'});
       }
       const delta = data?.choices?.[0]?.delta || {};
       finishReason ||= String(data?.choices?.[0]?.finish_reason || "");
@@ -517,6 +519,7 @@ export async function startDeepSeekTurn({
   responseFormat = null,
   outputSchema = null,
   completionReview = false,
+  reviewDependencyReceipt = false,
   stopHookPolicy = 'repair',
   temperature = 0.2,
   threadId: previousThreadId = '',
@@ -586,7 +589,9 @@ export async function startDeepSeekTurn({
         ...(environment?.TASK_TREE_CONTEXT_NODE_ID ? { execution_node_id: environment.TASK_TREE_CONTEXT_NODE_ID } : {}),
         ...(environment?.TASK_TREE_CONTEXT_TREE_FILE ? { execution_tree_file: environment.TASK_TREE_CONTEXT_TREE_FILE } : {}) };
       let refreshedSystemPrompt;
-      const terminalTool=completionReview?COMPLETION_REVIEW_TOOL:outputSchema?{type:'function',function:{name:'structured_result_submit',description:'提交本轮最终结构化结果并结束；必须单独调用，宿主负责序列化，不再输出JSON文字。',parameters:outputSchema}}:null;
+      const reviewTool=reviewDependencyReceipt?{...COMPLETION_REVIEW_TOOL,function:{...COMPLETION_REVIEW_TOOL.function,
+        parameters:{...COMPLETION_REVIEW_TOOL.function.parameters,required:[...COMPLETION_REVIEW_TOOL.function.parameters.required,'dependencyScope']}}}:COMPLETION_REVIEW_TOOL;
+      const terminalTool=completionReview?reviewTool:outputSchema?{type:'function',function:{name:'structured_result_submit',description:'提交本轮最终结构化结果并结束；必须单独调用，宿主负责序列化，不再输出JSON文字。',parameters:outputSchema}}:null;
       const runHook = async (event, input) => {
         controller.signal.throwIfAborted();
         const hookStarted = Date.now();
@@ -950,6 +955,7 @@ export async function startDeepSeekTurn({
       // Completion, cancellation or a real execution error end a turn — not an
       // arbitrary number of tool rounds. Read-wave width only limits overlap.
       const rejectedContexts = new Set();
+      const emptyStreamFailures=new Map();
       let formatRecovery = false, recoveryCount = 0;
       const continueResponse = (partial, reason) => {
         if(partial?.text) {
@@ -963,6 +969,8 @@ export async function startDeepSeekTurn({
       };
       const correctFormat = (result,error) => {
         formatRecovery = true;
+        const detail=error instanceof SyntaxError?'最终回执不是合法JSON':String(error.message);
+        (timing.formatCorrections||=[]).push({round:timing.rounds.length,detail});
         if(result.toolCalls?.length) {
           conversation.push({role:'assistant',content:result.text||null,reasoning_content:result.reasoning||'',tool_calls:result.toolCalls});
           for(const call of result.toolCalls) conversation.push({role:'tool',tool_call_id:call.id,name:call.function.name,
@@ -970,7 +978,7 @@ export async function startDeepSeekTurn({
         } else conversation.push({role:'assistant',content:result.text||'',reasoning_content:result.reasoning||''},
           {role:'user',content:`最终结果未按工具约定提交：${error.message}。请保持原结论和证据，仅修正为 ${terminalTool.function.name} 的完整参数；不再执行任务工具。`});
         liveAssistantText = '';
-        notify({method:'model/continuing',params:{message:'最终结果格式不合要求，正在由同一模型修正；不会重做已完成任务。'}});
+        notify({method:'model/continuing',params:{reason:'final-format',detail,message:`正在修正最终回执：${detail}；不会重做已完成任务。`}});
       };
       const receivePendingMessages=async()=>{
         const messages=beforeModelRequest?await beforeModelRequest():[];
@@ -1062,8 +1070,27 @@ export async function startDeepSeekTurn({
           controller.signal.throwIfAborted();
           const code = String(error.code || error.cause?.code || '');
           const timeout = /TIMEOUT|ETIMEDOUT/.test(code);
-          const streamInterrupted = error.partialResponse && (code==='MODEL_STREAM_INCOMPLETE' || /SOCKET|ECONNRESET|EPIPE|terminated|network/i.test(`${code} ${error.message}`));
-          if (!timeout && (error.requestExhausted || streamInterrupted || code==='MODEL_STREAM_INCOMPLETE')) {
+          const streamInterrupted = error.partialResponse && (['MODEL_STREAM_INCOMPLETE','MODEL_UPSTREAM_TIMEOUT'].includes(code) || /SOCKET|ECONNRESET|EPIPE|terminated|network/i.test(`${code} ${error.message}`));
+          if ((!timeout||code==='MODEL_UPSTREAM_TIMEOUT') && (error.requestExhausted || streamInterrupted || code==='MODEL_STREAM_INCOMPLETE')) {
+            if(streamInterrupted||code==='MODEL_STREAM_INCOMPLETE') {
+              // HTTP200 is not a healthy inference when its SSE body fails.
+              // Move that route behind configured backups; never change models.
+              const endpoint=roundTiming.attempts?.findLast(attempt=>attempt.status===200)?.endpoint;
+              const index=config.baseUrls.indexOf(endpoint);
+              if(index>=0)config.baseUrls.push(...config.baseUrls.splice(index,1));
+              const partial=error.partialResponse;
+              const empty=!partial?.text&&!partial?.reasoning&&!partial?.toolCalls?.length;
+              if(empty) {
+                const attempts=(emptyStreamFailures.get(contextFingerprint)||0)+1;
+                emptyStreamFailures.set(contextFingerprint,attempts);
+                const maxAttempts=Math.max(3,config.baseUrls.length);
+                if(attempts>=maxAttempts)throw Object.assign(new Error(`模型 ${config.model} 网关返回 HTTP 200，但响应流连续 ${attempts} 次未产生有效输出：${error.message}；本次 API 请求失败，已保存成果保留。`,{cause:error}),{code:'MODEL_STREAM_REQUEST_FAILED',stage:'model-stream'});
+                notify({method:'model/continuing',params:{reason:'empty-stream-retry',detail:code,
+                  message:`网关响应流失败（${error.message}），正在${config.baseUrls.length>1?'切换已配置备用地址':'重试同一 API'}（第 ${attempts+1}/${maxAttempts} 次）；不会重跑工具或增加上下文。`}});
+                await retryDelay(Math.min(10000,300*2**Math.min(recoveryCount++,5)),controller.signal);
+                continue;
+              }
+            }
             if(error.partialResponse?.text)output += error.partialResponse.text;
             if(error.partialResponse || !error.requestExhausted)continueResponse(error.partialResponse,error.message);
             else notify({method:'model/continuing',params:{message:'本次请求的三次尝试已用完，保留当前任务并继续尝试可用网关；不会重跑工具。'}});
@@ -1076,6 +1103,7 @@ export async function startDeepSeekTurn({
           roundTiming.totalMs = Date.now() - roundStarted;
           notify({ method: 'model/round-completed', params: { ...roundTiming } });
         }
+        emptyStreamFailures.clear();
         controller.signal.throwIfAborted();
         reasoning += result.reasoning || "";
         usage = result.usage || usage;

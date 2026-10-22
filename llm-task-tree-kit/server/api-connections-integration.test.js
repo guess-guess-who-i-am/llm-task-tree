@@ -28,7 +28,7 @@ test('real HTTP routes, model consumers, node execution, embeddings and browser 
       return res.end(JSON.stringify({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{ id: 'mode', type: 'function', function: { name: 'task_tree_continue_single', arguments: JSON.stringify({ reason: '只读配置回归，无独立交付分支', nextCheckpoint: '返回配置结果' }) } }] } }] }));
     }
     if (body.tools?.some(t => t.function.name === 'completion_review_submit')) {
-      return res.end(JSON.stringify({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{ id: 'review', type: 'function', function: { name: 'completion_review_submit', arguments: JSON.stringify({ verdict: 'pass', reason: '已核对只读配置结果', evidence: ['配置路由请求已记录'] }) } }] } }] }));
+      return res.end(JSON.stringify({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{ id: 'review', type: 'function', function: { name: 'completion_review_submit', arguments: JSON.stringify({ verdict: 'pass', reason: '已核对只读配置结果', evidence: ['配置路由请求已记录'], dependencyScope:{complete:false,files:[]} }) } }] } }] }));
     }
     const content = JSON.stringify(body.messages);
     const text = content.includes('【功能验收】') ? '{"verdict":"pass","reason":"已核对"}' : '配置已生效。';

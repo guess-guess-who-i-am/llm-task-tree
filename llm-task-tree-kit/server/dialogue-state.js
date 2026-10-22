@@ -153,6 +153,7 @@ export function serializeDialogueState({ runs, conversations } = {}) {
         changes:(Array.isArray(changes)?changes:[]).map(change=>Object.fromEntries(['kind','nodeId','title','field','before','after'].map(key=>[key,text(change[key])]))) }))} : {}),
       review: reviewOutcome(run.review),
       executionMode: text(run.executionMode),
+      ...(Array.isArray(run.reviewScopeFiles) ? {reviewScopeFiles:run.reviewScopeFiles.map(text)} : {}),
       parallel: run.parallel ? { id: text(run.parallel.id), status: text(run.parallel.status), reason: text(run.parallel.reason),
         coordination:run.parallel.coordination?{phase:text(run.parallel.coordination.phase),taskId:text(run.parallel.coordination.taskId),action:text(run.parallel.coordination.action),message:text(run.parallel.coordination.message),updatedAt:text(run.parallel.coordination.updatedAt)}:null,
         jobs: (run.parallel.jobs || []).map(job => ({ taskId: text(job.taskId), title: text(job.title), status: text(job.status), error: text(job.error), output: text(job.output) })) } : null,

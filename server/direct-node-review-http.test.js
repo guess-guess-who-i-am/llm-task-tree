@@ -40,7 +40,7 @@ test('HTTP final reviewer receives global Hook, reads full Skill, repairs, verif
         message = call('exec_command', { command: `${JSON.stringify(process.execPath)} --input-type=module -e ${JSON.stringify(program)}` });
       } else {
         assert.ok(body.messages.some(m => m.role === 'tool' && m.content.includes('verified42')));
-        message = { content: JSON.stringify({ verdict: 'pass', reason: '已修复并实际执行验证', evidence: ['verified42'] }) };
+        message = { content: JSON.stringify({ verdict: 'pass', reason: '已修复并实际执行验证', evidence: ['verified42'],dependencyScope:{complete:false,files:[]} }) };
       }
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ choices: [{ message, finish_reason: message.tool_calls ? 'tool_calls' : 'stop' }] }));

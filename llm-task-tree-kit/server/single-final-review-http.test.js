@@ -80,8 +80,8 @@ for(const mode of ['pass','failed','peer','expand','late']) test(`real IDE endpo
         }else assert.equal(await readFile(path.join(root,'A.txt'),'utf8'),'A');
         assert.equal(await readFile(path.join(root,'B.txt'),'utf8'),'B');
         message=replyTool('completion_review_submit',verdict==='pass'
-          ?{verdict:'pass',reason:'A与B均实际交付，接口一致',evidence:['实际文件A.txt内容A','实际文件B.txt内容B']}
-          :{verdict:'failed',reason:'任务还缺少联合入口',evidence:['A和B存在但目标联合入口未交付'],rootCause:'Planner分工遗漏联合入口',caseStudy:'从原目标到分工再到整合文件，首次遗漏在分工阶段',solution:'补齐联合入口的独立任务再执行'});
+          ?{verdict:'pass',reason:'A与B均实际交付，接口一致',evidence:['实际文件A.txt内容A','实际文件B.txt内容B'],dependencyScope:{complete:false,files:[]}}
+          :{verdict:'failed',reason:'任务还缺少联合入口',evidence:['A和B存在但目标联合入口未交付'],dependencyScope:{complete:false,files:[]},rootCause:'Planner分工遗漏联合入口',caseStudy:'从原目标到分工再到整合文件，首次遗漏在分工阶段',solution:'补齐联合入口的独立任务再执行'});
         }
       }else{
         counts.worker++;

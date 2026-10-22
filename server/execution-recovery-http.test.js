@@ -11,7 +11,9 @@ test('IDE startup automatically resumes original dirty node workspace and accept
 test('IDE startup after worker completion resumes only final checking, never the worker',{timeout:60000},t=>exercise(t,true));
 test('failed final checking can resume the saved completed worker through the public route',{timeout:60000},t=>exercise(t,true,true));
 test('explicit fresh resume keeps the stopped workspace and reads its full checkpoint through the public route',{timeout:60000},t=>exercise(t,false,false,true));
-async function exercise(t,workerCompleted,failedReview=false,explicitFresh=false) {
+test('direct final-check recovery accepts and persists a host-declared dependency scope',{timeout:60000},t=>exercise(t,true,true,false,true));
+test('automatic final-check recovery retains the persisted dependency scope',{timeout:60000},t=>exercise(t,true,false,false,true));
+async function exercise(t,workerCompleted,failedReview=false,explicitFresh=false,explicitScope=false) {
   const source=path.resolve(import.meta.dirname,'..');
   const root=await mkdtemp(path.join(os.tmpdir(),'ide-recovery-http-'));
   const codexHome=path.join(root,'codex');await mkdir(codexHome);
@@ -23,7 +25,7 @@ async function exercise(t,workerCompleted,failedReview=false,explicitFresh=false
       const checking=body.tools?.some(t=>t.function.name==='completion_review_submit');
       const choosing=body.tool_choice==='required'&&body.tools?.some(t=>t.function.name==='task_tree_continue_single');
       let message;
-      if(checking)message={tool_calls:[{id:'review-final',type:'function',function:{name:'completion_review_submit',arguments:JSON.stringify({verdict:'pass',reason:'真实文件保留前半段并完成后半段',evidence:['partial.txt与final.txt存在']})}}]};
+      if(checking)message={tool_calls:[{id:'review-final',type:'function',function:{name:'completion_review_submit',arguments:JSON.stringify({verdict:'pass',reason:'真实文件保留前半段并完成后半段',evidence:['partial.txt与final.txt存在'],dependencyScope:{complete:false,files:[]}})}}]};
       else if(choosing)message={tool_calls:[{id:'resume-single',type:'function',function:{name:'task_tree_continue_single',arguments:JSON.stringify({reason:'前半段已完成，只需续写一个文件',nextCheckpoint:'保留partial.txt并写入final.txt'})}}]};
       else if(!body.messages.some(m=>m.role==='tool'&&m.name==='exec_command')) {
         if(explicitFresh){
@@ -55,6 +57,7 @@ async function exercise(t,workerCompleted,failedReview=false,explicitFresh=false
   await writeFile(path.join(root,'.task-tree-direct-state.json'),JSON.stringify({schema:'task-tree-direct-state/v2',runs:[{
     id:'original-run',treeId:'method',nodeId:'ROOT',conversationId:'original-conversation',status:explicitFresh?'stopped':failedReview?'failed':'running',threadId:explicitFresh?'old-persisted-thread':'',
     prompt:'完成前后两部分',messages:[{role:'user',content:'完成前后两部分'}],output:'部分输出已保存',checkpoint,workerCompleted,
+    ...(!failedReview&&explicitScope?{reviewScopeFiles:['partial.txt','final.txt']}:{}),
     createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()
   }],conversations:[]}));
   child=spawn(process.execPath,[path.join(source,'server.js')],{cwd:source,env:{...process.env,
@@ -69,8 +72,15 @@ async function exercise(t,workerCompleted,failedReview=false,explicitFresh=false
   });
   if(failedReview||explicitFresh) {
     assert.equal(bodies.length,0,'terminal failures do not restart without a user request');
+    if(explicitScope){
+      const invalid=await fetch(base+'/api/codex/run',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+        progress:true,treeId:'method',nodeId:'ROOT',resumeRunId:'original-run',prompt:'继续验收已完成成果',reviewScopeFiles:'invalid'
+      })});
+      assert.equal(invalid.status,400,await invalid.text());
+    }
     const response=await fetch(base+'/api/codex/run',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
-      progress:true,treeId:'method',nodeId:'ROOT',resumeRunId:'original-run',prompt:'继续验收已完成成果',...(explicitFresh?{fresh:true}:{})
+      progress:true,treeId:'method',nodeId:'ROOT',resumeRunId:'original-run',prompt:'继续验收已完成成果',...(explicitFresh?{fresh:true}:{}),
+      ...(explicitScope?{reviewScopeFiles:['partial.txt','final.txt']}:{})
     })});
     assert.equal(response.status,202,await response.text());
   }
@@ -89,6 +99,12 @@ async function exercise(t,workerCompleted,failedReview=false,explicitFresh=false
   assert.equal(bodies.filter(b=>b.tools?.some(t=>t.function.name==='completion_review_submit')).length,1);
   assert.equal(bodies.length,workerCompleted?1:4);
   const saved=JSON.parse(await readFile(path.join(root,'.task-tree-direct-state.json'),'utf8'));
+  if(explicitScope){
+    assert.deepEqual(saved.runs[0].reviewScopeFiles,['partial.txt','final.txt']);
+    assert.deepEqual(run.reviewScopeFiles,['partial.txt','final.txt']);
+    const checking=bodies.find(b=>b.tools?.some(t=>t.function.name==='completion_review_submit'));
+    assert.ok(!checking.tools.find(t=>t.function.name==='completion_review_submit').function.parameters.required.includes('dependencyScope'));
+  }
   assert.equal(saved.runs[0].recoveryPending,false);
   assert.ok(saved.conversations[0].messages.some(m=>m.content==='部分输出已保存'));
   assert.ok(!JSON.stringify(saved).includes('resume-write'));

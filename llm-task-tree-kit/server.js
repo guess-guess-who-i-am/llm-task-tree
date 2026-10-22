@@ -53,6 +53,8 @@ import { createParallelCodexCoordinator } from "./server/codex-coordinator.js";
 import { createDirectNodeWorkspace } from "./server/direct-node-workspace.js";
 import { createExecutionScopeStore } from "./server/execution-scope.js";
 import { patchNodeFields } from "./server/tree-node-patch.js";
+import {findLinkedTreeNode} from './server/tree-node-location.js';
+import {validateReviewScopeFiles} from './server/review-input-watch.js';
 import { validateToolArguments } from './server/tool-arguments.js';
 import { assertMainTreeWrite, assertRenderableTree } from './server/tree-write-safety.js';
 import { dialogueMessages, dialogueWithCompletionReceipt, serializeDialogueState, normalizeNodeDialogues, nodeConversationId, latestNodeRuns } from './server/dialogue-state.js';
@@ -315,6 +317,7 @@ function publicDirectRun(run) {
     persistenceWarning: run.persistenceWarning || '',
     review: run.review || null,
     executionMode: run.executionMode || 'auto',
+    ...(run.reviewScopeFiles === undefined ? {} : {reviewScopeFiles:run.reviewScopeFiles}),
     parallel: run.parallel || null,
     progress: executionProgress(run,directTimingSamples),
     errorSummary: readableExecutionError(run.error),
@@ -706,17 +709,7 @@ async function readDeepSeekTreeScope(body = {}) {
 }
 
 async function findDeepSeekNode(scope, nodeId, markdown=scope.markdown) {
-  const nodes=parseTreeNodeFields(markdown);
-  const main=nodes.find(n=>n.id===nodeId);
-  for (const stub of nodes) {
-    if(main && main.id!==stub.id) continue;
-    const file=resolveSubtreeFilePath(stub.fields.SubtreeFile);
-    if(!file || !existsSync(file)) continue;
-    const content=await readFile(file,'utf8');
-    const node=parseTreeNodeFields(content).find(n=>n.id===nodeId);
-    if(node) return {node,file,markdown:content,path:stub.fields.SubtreeFile};
-  }
-  return main ? {node:main,file:scope.filePath,markdown,path:scope.tree.path} : null;
+  return findLinkedTreeNode({projectRoot,treeFile:scope.tree.path,markdown},nodeId);
 }
 
 async function buildDeepSeekTaskTreeSystemPrompt({ nodeId = "", treeScope = null } = {}) {
@@ -4905,6 +4898,12 @@ const handleRequest = async (req, res) => {
       try {
         if (body.progress === true) {
           const resumeRun = body.resumeRunId ? directRuns.get(body.resumeRunId) : null;
+          const requestedReviewScope=body.reviewScopeFiles===undefined?resumeRun?.reviewScopeFiles:body.reviewScopeFiles;
+          let reviewScopeFiles;
+          if(requestedReviewScope!==undefined){
+            try {reviewScopeFiles=validateReviewScopeFiles(requestedReviewScope);}
+            catch(error){jsonResponse(res,400,{error:error.message});return;}
+          }
           const executionObjective = resumeRun?.prompt || prompt;
           const canResume = resumeRun?.recoveryPending || (['failed','stopped'].includes(resumeRun?.status)
             && resumeRun.checkpoint?.workerPath);
@@ -4985,6 +4984,7 @@ const handleRequest = async (req, res) => {
             checkpoint: isolated,
             recoveryPending: false,
             recoveryHistory: resumeRun?.recoveryHistory || [],
+            ...(reviewScopeFiles === undefined ? {} : {reviewScopeFiles}),
             createdAt: resumeRun?.createdAt || new Date().toISOString(),
             updatedAt: new Date().toISOString()
           };
@@ -5095,6 +5095,7 @@ const handleRequest = async (req, res) => {
                   nodeId, objective: executionObjective, output, status, threadId: tracked.threadId, signal: runController.signal,
                   historyMessages: modelMessages, dialogueContext: messages,
                   treeFile: selectedSource?.path || deepSeekTreeScope.tree.path,
+                  ...(reviewScopeFiles === undefined ? {} : {reviewScopeFiles}),
                   onTiming: sample => { (tracked.integrationTimings ||= []).push(sample); scheduleDirectStateFlush(); },
                   onNotification: message => {
                     const previousActivity=tracked.reviewActivity?.message;

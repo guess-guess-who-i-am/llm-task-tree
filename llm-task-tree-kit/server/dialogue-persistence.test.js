@@ -37,7 +37,7 @@ test('real HTTP execution publishes process metadata through host acceptance, AP
     if(body.tool_choice==='required'&&body.tools?.some(t=>t.function.name==='task_tree_continue_single')){
       res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({choices:[{finish_reason:'tool_calls',message:{tool_calls:[{id:'mode',type:'function',function:{name:'task_tree_continue_single',arguments:JSON.stringify({reason:'只读对话回归，无独立交付分支',nextCheckpoint:'读取当前树并回答'})}}]}}]}));return;
     }
-    const message=review?{tool_calls:[{id:'verdict',type:'function',function:{name:'completion_review_submit',arguments:JSON.stringify({verdict:'pass',reason:'只读回答已核对',evidence:['已读取任务树']})}}]}:
+    const message=review?{tool_calls:[{id:'verdict',type:'function',function:{name:'completion_review_submit',arguments:JSON.stringify({verdict:'pass',reason:'只读回答已核对',evidence:['已读取任务树'],dependencyScope:{complete:false,files:[]}})}}]}:
       ++calls===1?{content:'正在读取任务树。',tool_calls:[{id:'read',type:'function',function:{name:'read_file',arguments:'{"path":"task-tree.md"}'}}]}:{content:'正式回答：已核对当前树。'};
     res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({choices:[{message,finish_reason:message.tool_calls?'tool_calls':'stop'}]}));
   });

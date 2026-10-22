@@ -586,7 +586,7 @@ before(async () => {
     }
     if (body.messages.some(m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('【功能验收】'))) {
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({choices:[{finish_reason:'tool_calls',message:{tool_calls:[{id:'review-fixture',type:'function',function:{name:'completion_review_submit',arguments:JSON.stringify({verdict:'pass',reason:'夹具对话已交付',evidence:['夹具只读问答已核对']})}}]}}]}));
+      res.end(JSON.stringify({choices:[{finish_reason:'tool_calls',message:{tool_calls:[{id:'review-fixture',type:'function',function:{name:'completion_review_submit',arguments:JSON.stringify({verdict:'pass',reason:'夹具对话已交付',evidence:['夹具只读问答已核对'],dependencyScope:{complete:false,files:[]}})}}]}}]}));
       return;
     }
     attachmentModelRequests.push(body);
@@ -753,7 +753,10 @@ test('focus lens shows the full approach with line breaks on main and subtree at
     const file = path.join(root, mode === 'main' ? 'task-tree.md' : 'subtrees/N1.md');
     const original = await readFile(file, 'utf8');
     const marker = mode === 'main' ? '- Problem: 不应被修改' : '- Problem: 建立作息';
-    await writeFile(file, original.replace(marker, `${marker}\n- Approach:\n${approach.split('\n').map(line => '  ' + line).join('\n')}`));
+    // Previous UI saves can reformat fields; construct this case from its own fixture.
+    const fixture=mode==='main'?main:sub;
+    assert.ok(fixture.includes(marker),'the approach fixture must attach to its intended node');
+    await writeFile(file, fixture.replace(marker, `${marker}\n- Approach:\n${approach.split('\n').map(line => '  ' + line).join('\n')}`));
     try {
       const page = await pageFor(t);
       if (mode === 'subtree') await enter(page);

@@ -24,7 +24,7 @@ test('real IDE tool boundary rejects subtree-as-main and links correct subtree w
       return;
     }
     if(body.tools?.some(tool=>tool.function.name==='completion_review_submit')){
-      res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({choices:[{message:{content:null,tool_calls:[{id:'fixture-review',type:'function',function:{name:'completion_review_submit',arguments:JSON.stringify({verdict:'pass',reason:'隔离候选已核对',evidence:['工具回执与树文件一致']})}}]},finish_reason:'tool_calls'}]}));
+      res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({choices:[{message:{content:null,tool_calls:[{id:'fixture-review',type:'function',function:{name:'completion_review_submit',arguments:JSON.stringify({verdict:'pass',reason:'隔离候选已核对',evidence:['工具回执与树文件一致'],dependencyScope:{complete:false,files:[]}})}}]},finish_reason:'tool_calls'}]}));
       return;
     }
     const last=body.messages.at(-1);

@@ -2477,6 +2477,26 @@
       "outputs": [
         { "path": "docs/local-runtime-update-20261022.zh.md" }
       ]
+    },
+    {
+      "title": "机构认证验收失效循环、深层节点路由、流错误及直接范围恢复修复，原分析最终合入",
+      "functions": [
+        { "path": "server/review-input-watch.js", "name": "createReviewInputWatch / validateReviewDependencyScope" },
+        { "path": "server/tree-node-location.js", "name": "readLinkedTreeFiles / findLinkedTreeNode" },
+        { "path": "server/direct-node-workspace.js", "name": "check" },
+        { "path": "server/deepseek-run.js", "name": "startDeepSeekTurn" }
+      ],
+      "inputs": [
+        { "path": "server/nested-tree-execution.test.js" },
+        { "path": "server/review-input-watch.test.js" },
+        { "path": "server/review-input-scope.test.js" }
+      ],
+      "outputs": [
+        { "path": "docs/review-stall-20261022.zh.md" },
+        { "path": "docs/review-dependency-live-20261022-v2.json" },
+        { "path": "docs/review-dependency-live-20261022-v3.json" },
+        { "path": "docs/review-stall-business-final-20261022.json" }
+      ]
     }
   ]
 }

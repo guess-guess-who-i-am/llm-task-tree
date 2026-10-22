@@ -1,0 +1,1019 @@
+{
+  "ok": true,
+  "review": {
+    "verdict": "pass",
+    "reason": "已完成中文报告的事实对照验收。两类角色及职责边界与给定事实一致，未发现需修复的缺陷；不涉及业务实现，无需启动服务。线上权限行为不在本轮验收范围，未声称实测。",
+    "evidence": [
+      "逐句核对 facts.txt 第1—2行与 report.md：机构审核员仅审核所属机构申请；研究中心管理员负责指定中心入组与随访，不能仅凭该身份取得机构审核权。",
+      "读取实际 ROOT 节点：Problem 与报告主题一致，CurrentResult 所述报告完成、事实一致且不涉及业务实现，与实际产物相符。",
+      "本地核验命令退出码为0；git diff 与 git diff --cached 均为空，本轮未修改报告、任务树或业务代码。"
+    ],
+    "dependencyScope": {
+      "complete": true,
+      "files": [
+        "AGENTS.md",
+        "facts.txt",
+        "report.md",
+        "task-tree.md"
+      ]
+    },
+    "treeState": {
+      "status": "consistent",
+      "reason": "ROOT 所记录的交付物与事实一致性已独立核对，未发现结论或交付缺口不符；依项目要求不重复写树。"
+    }
+  },
+  "observedAt": "2026-10-22T07:40:09.526Z",
+  "model": "gpt-6.1-sol",
+  "fixture": "/var/folders/q1/fjylgh7x6cx04ljtdp550ls40000gn/T/review-dependency-live-Wjfuuq",
+  "wallMs": 90603.06025,
+  "reviews": 1,
+  "unrelatedEdits": 2,
+  "samples": [
+    {
+      "role": "review-stage",
+      "operation": "review.inputs",
+      "attempt": 0,
+      "candidateId": "apply-593892a6-115e-4014-b815-f15a5f3f93f8",
+      "durationMs": 0.63250000000005
+    },
+    {
+      "role": "review-stage",
+      "operation": "workspace.summarize",
+      "attempt": 0,
+      "candidateId": "apply-593892a6-115e-4014-b815-f15a5f3f93f8",
+      "durationMs": 49.28708300000005
+    },
+    {
+      "role": "review-scope",
+      "attempt": 0,
+      "candidateId": "apply-593892a6-115e-4014-b815-f15a5f3f93f8",
+      "changedFiles": [
+        "report.md"
+      ],
+      "branchCount": 0
+    },
+    {
+      "role": "review-stage",
+      "operation": "review.coordination-evidence",
+      "attempt": 0,
+      "candidateId": "apply-593892a6-115e-4014-b815-f15a5f3f93f8",
+      "durationMs": 0.04066699999998491
+    },
+    {
+      "role": "review-stage",
+      "operation": "review.prompt",
+      "attempt": 0,
+      "candidateId": "apply-593892a6-115e-4014-b815-f15a5f3f93f8",
+      "durationMs": 0.053291000000058375
+    },
+    {
+      "role": "review-input",
+      "attempt": 0,
+      "candidateId": "apply-593892a6-115e-4014-b815-f15a5f3f93f8",
+      "promptChars": 633,
+      "promptBytes": 1479,
+      "changedFiles": 1,
+      "deferredFiles": 0
+    },
+    {
+      "role": "review-stage",
+      "operation": "review.dependencies.snapshot",
+      "attempt": 0,
+      "candidateId": "apply-593892a6-115e-4014-b815-f15a5f3f93f8",
+      "durationMs": 14.713292000000024
+    },
+    {
+      "role": "review-dependencies",
+      "attempt": 0,
+      "candidateId": "apply-593892a6-115e-4014-b815-f15a5f3f93f8",
+      "strategy": "conservative-project-content"
+    },
+    {
+      "role": "review-stage",
+      "operation": "review.turn",
+      "attempt": 0,
+      "candidateId": "apply-593892a6-115e-4014-b815-f15a5f3f93f8",
+      "durationMs": 89651.73416699999
+    },
+    {
+      "role": "review-stage",
+      "operation": "review.parse",
+      "attempt": 0,
+      "candidateId": "apply-593892a6-115e-4014-b815-f15a5f3f93f8",
+      "durationMs": 0.22158300000592135
+    },
+    {
+      "role": "review-dependency-receipt",
+      "attempt": 0,
+      "candidateId": "apply-593892a6-115e-4014-b815-f15a5f3f93f8",
+      "dependencyScope": {
+        "complete": true,
+        "files": [
+          "AGENTS.md",
+          "facts.txt",
+          "report.md",
+          "task-tree.md"
+        ]
+      }
+    },
+    {
+      "role": "review-stage",
+      "operation": "review.dependencies.validate",
+      "attempt": 0,
+      "candidateId": "apply-593892a6-115e-4014-b815-f15a5f3f93f8",
+      "durationMs": 16.127999999996973
+    },
+    {
+      "role": "review",
+      "attempt": 0,
+      "candidateId": "apply-593892a6-115e-4014-b815-f15a5f3f93f8",
+      "timing": {
+        "startedAt": "2026-10-22T07:38:39.650Z",
+        "requestMs": 34058,
+        "totalMs": 89652,
+        "provider": "deepseek",
+        "initialModel": "gpt-6.1-sol",
+        "model": "gpt-6.1-sol",
+        "contextBudget": {
+          "windowTokens": 270000,
+          "windowSource": "default",
+          "compactionThresholdTokens": 200000,
+          "thresholdSource": "default"
+        },
+        "rounds": [
+          {
+            "round": 1,
+            "startedAt": "2026-10-22T07:39:05.174Z",
+            "requestMs": 8534,
+            "streamMs": 2470,
+            "totalMs": 11008,
+            "toolCalls": 3,
+            "contextInput": {
+              "rawEstimateTokens": 37843,
+              "estimatedInputTokens": 37843,
+              "windowTokens": 270000,
+              "compactionThresholdTokens": 200000,
+              "responseReserveTokens": 4000,
+              "basis": "local-estimate"
+            },
+            "requestBytes": 75827,
+            "model": "gpt-6.1-sol",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://ai.duckduckport.top/v1",
+                "model": "gpt-6.1-sol",
+                "headersTimeoutMs": 60000,
+                "startedAt": "2026-10-22T07:39:05.176Z",
+                "status": 200,
+                "requestMs": 8532,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a4e6d8a1ec1035c9-NRT",
+                  "x-request-id": "a53b9b5d-8494-4afb-bd68-2a8f7995f89c, ee644141-1a62-4b40-a5e4-f525b9c7df69, cfd5548f-2216-48b8-9083-4dee52fb5848, 37502e94-4f5a-4e5a-8844-dcdda7ee6a44, req_643120fc56bca6efd0cbd39fe2c737e1"
+                },
+                "totalMs": 11002
+              }
+            ],
+            "firstDeltaMs": 8536,
+            "finishReason": "tool_calls",
+            "tokenUsage": {
+              "inputTokens": 15649,
+              "outputTokens": 172,
+              "totalTokens": 15821,
+              "updatedAt": "2026-10-22T07:39:16.169Z"
+            },
+            "outputChars": 86,
+            "reasoningChars": 0
+          },
+          {
+            "round": 2,
+            "startedAt": "2026-10-22T07:39:16.193Z",
+            "requestMs": 9800,
+            "streamMs": 1,
+            "totalMs": 9803,
+            "toolCalls": 1,
+            "contextInput": {
+              "rawEstimateTokens": 43627,
+              "estimatedInputTokens": 21433,
+              "windowTokens": 270000,
+              "compactionThresholdTokens": 200000,
+              "responseReserveTokens": 4000,
+              "basis": "accepted-usage-plus-estimated-delta"
+            },
+            "requestBytes": 87395,
+            "model": "gpt-6.1-sol",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://ai.duckduckport.top/v1",
+                "model": "gpt-6.1-sol",
+                "headersTimeoutMs": 60000,
+                "startedAt": "2026-10-22T07:39:16.195Z",
+                "status": 200,
+                "requestMs": 9798,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a4e6d8e52eeadb50-NRT",
+                  "x-request-id": "4412b4fd-06c2-4477-8c2d-5ffca0896053, 2aac2922-a82e-4d28-9f42-e93ab2754993, 1635b188-d309-464f-bb13-9d4cb262e078, 07684edb-e78d-4b09-8e53-536f72005379, req_7b80f3c6f8cb0c35aa40946b35e85c4c"
+                },
+                "totalMs": 9799
+              }
+            ],
+            "finishReason": "tool_calls",
+            "tokenUsage": {
+              "inputTokens": 17960,
+              "outputTokens": 15,
+              "totalTokens": 17975,
+              "updatedAt": "2026-10-22T07:39:25.994Z"
+            },
+            "outputChars": 0,
+            "reasoningChars": 0
+          },
+          {
+            "round": 3,
+            "startedAt": "2026-10-22T07:39:26.007Z",
+            "requestMs": 12405,
+            "streamMs": 54,
+            "totalMs": 12463,
+            "toolCalls": 2,
+            "contextInput": {
+              "rawEstimateTokens": 44387,
+              "estimatedInputTokens": 18720,
+              "windowTokens": 270000,
+              "compactionThresholdTokens": 200000,
+              "responseReserveTokens": 4000,
+              "basis": "accepted-usage-plus-estimated-delta"
+            },
+            "requestBytes": 88915,
+            "model": "gpt-6.1-sol",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://ai.duckduckport.top/v1",
+                "model": "gpt-6.1-sol",
+                "headersTimeoutMs": 60000,
+                "startedAt": "2026-10-22T07:39:26.009Z",
+                "status": 200,
+                "requestMs": 12403,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a4e6d922a8cfae34-NRT",
+                  "x-request-id": "61cb88ae-f710-4ea3-9a56-5c29e5a49863, fc552084-8370-448b-a54d-984f748782ee, 796627ca-f160-4ae3-a002-c1927574ef2f, 7f7a85a2-69ce-4cde-8e29-c229439ecaf7, req_00e0cce356a827caf2b3f1885c9f1506"
+                },
+                "totalMs": 12457
+              }
+            ],
+            "finishReason": "tool_calls",
+            "tokenUsage": {
+              "inputTokens": 18272,
+              "outputTokens": 144,
+              "totalTokens": 18416,
+              "updatedAt": "2026-10-22T07:39:38.465Z"
+            },
+            "outputChars": 0,
+            "reasoningChars": 0
+          },
+          {
+            "round": 4,
+            "startedAt": "2026-10-22T07:39:38.534Z",
+            "requestMs": 10660,
+            "streamMs": 3679,
+            "totalMs": 14341,
+            "toolCalls": 3,
+            "contextInput": {
+              "rawEstimateTokens": 45624,
+              "estimatedInputTokens": 19509,
+              "windowTokens": 270000,
+              "compactionThresholdTokens": 200000,
+              "responseReserveTokens": 4000,
+              "basis": "accepted-usage-plus-estimated-delta"
+            },
+            "requestBytes": 91389,
+            "model": "gpt-6.1-sol",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://ai.duckduckport.top/v1",
+                "model": "gpt-6.1-sol",
+                "headersTimeoutMs": 60000,
+                "startedAt": "2026-10-22T07:39:38.536Z",
+                "status": 200,
+                "requestMs": 10658,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a4e6d9718c669ce5-NRT",
+                  "x-request-id": "cc58418f-1c69-4e80-9e1e-775ef0d812ca, 022cbddc-8c48-4ad8-b85a-01b6fd0cb76c, 421bf272-7543-4ef2-98d9-3e023f7b1577, 1249e47a-f6b1-45a4-9422-3add281db165, req_0f656ad1aa9c8bdc2e180ffac4f8a33b"
+                },
+                "totalMs": 14337
+              }
+            ],
+            "firstDeltaMs": 10660,
+            "finishReason": "tool_calls",
+            "tokenUsage": {
+              "inputTokens": 18852,
+              "outputTokens": 377,
+              "totalTokens": 19229,
+              "updatedAt": "2026-10-22T07:39:52.872Z"
+            },
+            "outputChars": 117,
+            "reasoningChars": 0
+          },
+          {
+            "round": 5,
+            "startedAt": "2026-10-22T07:39:52.938Z",
+            "requestMs": 10545,
+            "streamMs": 5812,
+            "totalMs": 16359,
+            "toolCalls": 1,
+            "contextInput": {
+              "rawEstimateTokens": 47504,
+              "estimatedInputTokens": 20732,
+              "windowTokens": 270000,
+              "compactionThresholdTokens": 200000,
+              "responseReserveTokens": 4000,
+              "basis": "accepted-usage-plus-estimated-delta"
+            },
+            "requestBytes": 95150,
+            "model": "gpt-6.1-sol",
+            "attempts": [
+              {
+                "attempt": 1,
+                "endpoint": "https://ai.duckduckport.top/v1",
+                "model": "gpt-6.1-sol",
+                "headersTimeoutMs": 60000,
+                "startedAt": "2026-10-22T07:39:52.940Z",
+                "status": 200,
+                "requestMs": 10543,
+                "responseHeaders": {
+                  "server": "cloudflare",
+                  "cf-ray": "a4e6d9cadb594881-NRT",
+                  "x-request-id": "7a838584-7fcd-4119-bb56-a990c1c8635b, 9d3733d7-8b7f-49df-88b9-048ce1b968c6, 301da5b9-b26b-4029-ac23-07ce774df725, 4fcb36eb-2c38-4695-96a2-909f7cd0a6e6, req_57971e5911407adc2716d5f05129ea11"
+                },
+                "totalMs": 16355
+              }
+            ],
+            "finishReason": "tool_calls",
+            "tokenUsage": {
+              "inputTokens": 19679,
+              "outputTokens": 331,
+              "totalTokens": 20010,
+              "updatedAt": "2026-10-22T07:40:09.294Z"
+            },
+            "outputChars": 0,
+            "reasoningChars": 0
+          }
+        ],
+        "tools": [
+          {
+            "round": 1,
+            "toolCallId": "call_N352UIeosvsov84CzhAzgUOL",
+            "toolName": "skills_read",
+            "startedAt": "2026-10-22T07:39:16.183Z",
+            "preHookMs": 2,
+            "executeMs": 4,
+            "postHookMs": 1,
+            "durationMs": 7,
+            "imageSource": "skills_read",
+            "imageInputs": 0,
+            "endedAt": "2026-10-22T07:39:16.190Z"
+          },
+          {
+            "round": 1,
+            "toolCallId": "call_yBwCOxChvn5z1iSjHIaVGK0v",
+            "toolName": "skills_read",
+            "startedAt": "2026-10-22T07:39:16.183Z",
+            "preHookMs": 4,
+            "executeMs": 2,
+            "postHookMs": 2,
+            "durationMs": 8,
+            "imageSource": "skills_read",
+            "imageInputs": 0,
+            "endedAt": "2026-10-22T07:39:16.191Z"
+          },
+          {
+            "round": 1,
+            "toolCallId": "call_AjLG3e9FV3sEh8oyzk33gMW9",
+            "toolName": "skills_read",
+            "startedAt": "2026-10-22T07:39:16.183Z",
+            "preHookMs": 5,
+            "executeMs": 3,
+            "postHookMs": 0,
+            "durationMs": 8,
+            "imageSource": "skills_read",
+            "imageInputs": 0,
+            "endedAt": "2026-10-22T07:39:16.191Z"
+          },
+          {
+            "round": 2,
+            "toolCallId": "call_vFxaIHuFkeWC2Z1VXHp6dKlP",
+            "toolName": "task_tree_focus",
+            "startedAt": "2026-10-22T07:39:25.996Z",
+            "preHookMs": 3,
+            "executeMs": 6,
+            "postHookMs": 0,
+            "durationMs": 9,
+            "imageSource": "task_tree_focus",
+            "imageInputs": 0,
+            "endedAt": "2026-10-22T07:39:26.005Z"
+          },
+          {
+            "round": 3,
+            "toolCallId": "call_eVbornnwNg1wNGGoB3F7yUqq",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-22T07:39:38.470Z",
+            "preHookMs": 4,
+            "executeMs": 57,
+            "postHookMs": 0,
+            "durationMs": 61,
+            "imageSource": "exec_command",
+            "imageInputs": 0,
+            "endedAt": "2026-10-22T07:39:38.531Z"
+          },
+          {
+            "round": 3,
+            "toolCallId": "call_NUStDcVmMXZXH39JqbkLGQwQ",
+            "toolName": "skills_read",
+            "startedAt": "2026-10-22T07:39:38.532Z",
+            "preHookMs": 0,
+            "executeMs": 0,
+            "postHookMs": 0,
+            "durationMs": 0,
+            "endedAt": "2026-10-22T07:39:38.532Z"
+          },
+          {
+            "round": 4,
+            "toolCallId": "call_F4eGnDAYy8RhYT2rnjUC6XxR",
+            "toolName": "read_file",
+            "startedAt": "2026-10-22T07:39:52.875Z",
+            "preHookMs": 2,
+            "executeMs": 3,
+            "postHookMs": 1,
+            "durationMs": 6,
+            "imageSource": "read_file",
+            "imageInputs": 0,
+            "endedAt": "2026-10-22T07:39:52.881Z"
+          },
+          {
+            "round": 4,
+            "toolCallId": "call_Mp4VVgVZYbzxBoYfNBz9JUHR",
+            "toolName": "exec_command",
+            "startedAt": "2026-10-22T07:39:52.881Z",
+            "preHookMs": 1,
+            "executeMs": 52,
+            "postHookMs": 0,
+            "durationMs": 53,
+            "imageSource": "exec_command",
+            "imageInputs": 0,
+            "endedAt": "2026-10-22T07:39:52.934Z"
+          },
+          {
+            "round": 4,
+            "toolCallId": "call_AmWnbaUE1gs0W6md5J5RSyvu",
+            "toolName": "task_tree_node",
+            "startedAt": "2026-10-22T07:39:52.934Z",
+            "preHookMs": 1,
+            "executeMs": 1,
+            "postHookMs": 1,
+            "durationMs": 3,
+            "imageSource": "task_tree_node",
+            "imageInputs": 0,
+            "endedAt": "2026-10-22T07:39:52.937Z"
+          }
+        ],
+        "runtimeMs": 116,
+        "workerPid": 45203,
+        "hooks": [
+          {
+            "event": "SessionStart",
+            "toolCallId": null,
+            "durationMs": 129,
+            "reports": [
+              {
+                "source": "/Users/pku1727/.codex/hooks.json",
+                "event": "SessionStart",
+                "ok": true,
+                "blocked": false,
+                "startedAt": "2026-10-22T07:38:39.767Z",
+                "endedAt": "2026-10-22T07:38:39.895Z",
+                "durationMs": 128
+              }
+            ]
+          },
+          {
+            "event": "UserPromptSubmit",
+            "toolCallId": null,
+            "durationMs": 25271,
+            "reports": [
+              {
+                "source": "/Users/pku1727/.codex/hooks.json",
+                "event": "UserPromptSubmit",
+                "ok": true,
+                "blocked": false,
+                "startedAt": "2026-10-22T07:38:39.897Z",
+                "endedAt": "2026-10-22T07:39:05.163Z",
+                "durationMs": 25266
+              }
+            ]
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_N352UIeosvsov84CzhAzgUOL",
+            "durationMs": 2,
+            "reports": []
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_yBwCOxChvn5z1iSjHIaVGK0v",
+            "durationMs": 4,
+            "reports": []
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_AjLG3e9FV3sEh8oyzk33gMW9",
+            "durationMs": 5,
+            "reports": []
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_N352UIeosvsov84CzhAzgUOL",
+            "durationMs": 1,
+            "reports": []
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_yBwCOxChvn5z1iSjHIaVGK0v",
+            "durationMs": 2,
+            "reports": []
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_AjLG3e9FV3sEh8oyzk33gMW9",
+            "durationMs": 0,
+            "reports": []
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_vFxaIHuFkeWC2Z1VXHp6dKlP",
+            "durationMs": 3,
+            "reports": []
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_vFxaIHuFkeWC2Z1VXHp6dKlP",
+            "durationMs": 0,
+            "reports": []
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_eVbornnwNg1wNGGoB3F7yUqq",
+            "durationMs": 4,
+            "reports": []
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_eVbornnwNg1wNGGoB3F7yUqq",
+            "durationMs": 0,
+            "reports": []
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_NUStDcVmMXZXH39JqbkLGQwQ",
+            "durationMs": 0,
+            "reports": []
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_F4eGnDAYy8RhYT2rnjUC6XxR",
+            "durationMs": 2,
+            "reports": []
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_F4eGnDAYy8RhYT2rnjUC6XxR",
+            "durationMs": 1,
+            "reports": []
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_Mp4VVgVZYbzxBoYfNBz9JUHR",
+            "durationMs": 1,
+            "reports": []
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_Mp4VVgVZYbzxBoYfNBz9JUHR",
+            "durationMs": 0,
+            "reports": []
+          },
+          {
+            "event": "PreToolUse",
+            "toolCallId": "call_AmWnbaUE1gs0W6md5J5RSyvu",
+            "durationMs": 1,
+            "reports": []
+          },
+          {
+            "event": "PostToolUse",
+            "toolCallId": "call_AmWnbaUE1gs0W6md5J5RSyvu",
+            "durationMs": 1,
+            "reports": []
+          },
+          {
+            "event": "Stop",
+            "toolCallId": null,
+            "durationMs": 4,
+            "reports": []
+          }
+        ],
+        "historyProjection": {
+          "policy": "tree-user-history/v1",
+          "sourceMessages": 2,
+          "projectedMessages": 2,
+          "sourceBytes": 52427,
+          "projectedBytes": 52427,
+          "treeStatus": "included",
+          "durationMs": 3
+        },
+        "inputPrepared": {
+          "contextBudget": {
+            "windowTokens": 270000,
+            "windowSource": "default",
+            "compactionThresholdTokens": 200000,
+            "thresholdSource": "default"
+          },
+          "components": {
+            "runtimeRulesBytes": 22249,
+            "sessionHookBytes": 11167,
+            "promptHookBytes": 16407,
+            "archivedDialogueBytes": 1530,
+            "ephemeralInputBytes": 2,
+            "executionScopeBytes": 0
+          },
+          "messageBytes": 53996,
+          "toolDefinitionBytes": 21667,
+          "roleBytes": {
+            "system": 52467,
+            "user": 1530,
+            "assistant": 2,
+            "tool": 2
+          }
+        },
+        "readWaves": [
+          {
+            "round": 1,
+            "wave": 1,
+            "mode": "rolling",
+            "width": 3,
+            "concurrency": 3,
+            "itemCount": 3,
+            "itemIds": [
+              "call_N352UIeosvsov84CzhAzgUOL",
+              "call_yBwCOxChvn5z1iSjHIaVGK0v",
+              "call_AjLG3e9FV3sEh8oyzk33gMW9"
+            ],
+            "startedAt": "2026-10-22T07:39:16.183Z",
+            "endedAt": "2026-10-22T07:39:16.191Z",
+            "durationMs": 8.72937500000262,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "call_N352UIeosvsov84CzhAzgUOL",
+                "index": 0,
+                "startedAt": "2026-10-22T07:39:16.183Z",
+                "status": "fulfilled",
+                "failed": false,
+                "endedAt": "2026-10-22T07:39:16.190Z",
+                "durationMs": 7.745291999999608
+              },
+              {
+                "itemId": "call_yBwCOxChvn5z1iSjHIaVGK0v",
+                "index": 1,
+                "startedAt": "2026-10-22T07:39:16.183Z",
+                "status": "fulfilled",
+                "failed": false,
+                "endedAt": "2026-10-22T07:39:16.191Z",
+                "durationMs": 7.472166999999899
+              },
+              {
+                "itemId": "call_AjLG3e9FV3sEh8oyzk33gMW9",
+                "index": 2,
+                "startedAt": "2026-10-22T07:39:16.183Z",
+                "status": "fulfilled",
+                "failed": false,
+                "endedAt": "2026-10-22T07:39:16.191Z",
+                "durationMs": 7.894957999997132
+              }
+            ]
+          },
+          {
+            "round": 2,
+            "wave": 1,
+            "mode": "rolling",
+            "width": 1,
+            "concurrency": 1,
+            "itemCount": 1,
+            "itemIds": [
+              "call_vFxaIHuFkeWC2Z1VXHp6dKlP"
+            ],
+            "startedAt": "2026-10-22T07:39:25.996Z",
+            "endedAt": "2026-10-22T07:39:26.005Z",
+            "durationMs": 9.296999999998661,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "call_vFxaIHuFkeWC2Z1VXHp6dKlP",
+                "index": 0,
+                "startedAt": "2026-10-22T07:39:25.996Z",
+                "status": "fulfilled",
+                "failed": false,
+                "endedAt": "2026-10-22T07:39:26.005Z",
+                "durationMs": 9.279583000003186
+              }
+            ]
+          },
+          {
+            "round": 3,
+            "wave": 1,
+            "mode": "rolling",
+            "width": 1,
+            "concurrency": 1,
+            "itemCount": 1,
+            "itemIds": [
+              "call_NUStDcVmMXZXH39JqbkLGQwQ"
+            ],
+            "startedAt": "2026-10-22T07:39:38.532Z",
+            "endedAt": "2026-10-22T07:39:38.532Z",
+            "durationMs": 0.7761249999966822,
+            "failed": 1,
+            "executions": [
+              {
+                "itemId": "call_NUStDcVmMXZXH39JqbkLGQwQ",
+                "index": 0,
+                "startedAt": "2026-10-22T07:39:38.532Z",
+                "status": "fulfilled",
+                "failed": true,
+                "endedAt": "2026-10-22T07:39:38.532Z",
+                "durationMs": 0.6595000000015716
+              }
+            ]
+          },
+          {
+            "round": 4,
+            "wave": 1,
+            "mode": "rolling",
+            "width": 1,
+            "concurrency": 1,
+            "itemCount": 1,
+            "itemIds": [
+              "call_F4eGnDAYy8RhYT2rnjUC6XxR"
+            ],
+            "startedAt": "2026-10-22T07:39:52.875Z",
+            "endedAt": "2026-10-22T07:39:52.881Z",
+            "durationMs": 5.994416999994428,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "call_F4eGnDAYy8RhYT2rnjUC6XxR",
+                "index": 0,
+                "startedAt": "2026-10-22T07:39:52.875Z",
+                "status": "fulfilled",
+                "failed": false,
+                "endedAt": "2026-10-22T07:39:52.881Z",
+                "durationMs": 5.966249999997672
+              }
+            ]
+          },
+          {
+            "round": 4,
+            "wave": 1,
+            "mode": "rolling",
+            "width": 1,
+            "concurrency": 1,
+            "itemCount": 1,
+            "itemIds": [
+              "call_AmWnbaUE1gs0W6md5J5RSyvu"
+            ],
+            "startedAt": "2026-10-22T07:39:52.934Z",
+            "endedAt": "2026-10-22T07:39:52.937Z",
+            "durationMs": 2.403667000005953,
+            "failed": 0,
+            "executions": [
+              {
+                "itemId": "call_AmWnbaUE1gs0W6md5J5RSyvu",
+                "index": 0,
+                "startedAt": "2026-10-22T07:39:52.934Z",
+                "status": "fulfilled",
+                "failed": false,
+                "endedAt": "2026-10-22T07:39:52.937Z",
+                "durationMs": 2.3887090000062017
+              }
+            ]
+          }
+        ]
+      },
+      "status": "completed"
+    },
+    {
+      "role": "review-stage",
+      "operation": "review.tree-assert",
+      "attempt": 0,
+      "candidateId": "apply-593892a6-115e-4014-b815-f15a5f3f93f8",
+      "durationMs": 37.40950000000885
+    },
+    {
+      "role": "review-stage",
+      "operation": "workspace.commitCandidateRepairs",
+      "attempt": 0,
+      "candidateId": "apply-593892a6-115e-4014-b815-f15a5f3f93f8",
+      "durationMs": 47.67574999999488
+    }
+  ],
+  "events": [
+    {
+      "at": "2026-10-22T07:38:39.896Z",
+      "method": "hook/completed",
+      "event": "SessionStart"
+    },
+    {
+      "at": "2026-10-22T07:39:05.167Z",
+      "method": "hook/completed",
+      "event": "UserPromptSubmit"
+    },
+    {
+      "at": "2026-10-22T07:39:05.174Z",
+      "method": "model/request-started",
+      "round": 1
+    },
+    {
+      "at": "2026-10-22T07:39:16.185Z",
+      "method": "hook/completed",
+      "event": "PreToolUse"
+    },
+    {
+      "at": "2026-10-22T07:39:16.187Z",
+      "method": "hook/completed",
+      "event": "PreToolUse"
+    },
+    {
+      "at": "2026-10-22T07:39:16.188Z",
+      "method": "hook/completed",
+      "event": "PreToolUse"
+    },
+    {
+      "at": "2026-10-22T07:39:16.190Z",
+      "method": "hook/completed",
+      "event": "PostToolUse"
+    },
+    {
+      "at": "2026-10-22T07:39:16.190Z",
+      "method": "tool/completed",
+      "toolName": "skills_read",
+      "durationMs": 7
+    },
+    {
+      "at": "2026-10-22T07:39:16.191Z",
+      "method": "hook/completed",
+      "event": "PostToolUse"
+    },
+    {
+      "at": "2026-10-22T07:39:16.191Z",
+      "method": "tool/completed",
+      "toolName": "skills_read",
+      "durationMs": 8
+    },
+    {
+      "at": "2026-10-22T07:39:16.191Z",
+      "method": "hook/completed",
+      "event": "PostToolUse"
+    },
+    {
+      "at": "2026-10-22T07:39:16.191Z",
+      "method": "tool/completed",
+      "toolName": "skills_read",
+      "durationMs": 8
+    },
+    {
+      "at": "2026-10-22T07:39:16.194Z",
+      "method": "model/request-started",
+      "round": 2
+    },
+    {
+      "at": "2026-10-22T07:39:25.999Z",
+      "method": "hook/completed",
+      "event": "PreToolUse"
+    },
+    {
+      "at": "2026-10-22T07:39:26.005Z",
+      "method": "hook/completed",
+      "event": "PostToolUse"
+    },
+    {
+      "at": "2026-10-22T07:39:26.005Z",
+      "method": "tool/completed",
+      "toolName": "task_tree_focus",
+      "durationMs": 9
+    },
+    {
+      "at": "2026-10-22T07:39:26.008Z",
+      "method": "model/request-started",
+      "round": 3
+    },
+    {
+      "at": "2026-10-22T07:39:38.474Z",
+      "method": "hook/completed",
+      "event": "PreToolUse"
+    },
+    {
+      "at": "2026-10-22T07:39:38.531Z",
+      "method": "hook/completed",
+      "event": "PostToolUse"
+    },
+    {
+      "at": "2026-10-22T07:39:38.531Z",
+      "method": "tool/completed",
+      "toolName": "exec_command",
+      "durationMs": 61
+    },
+    {
+      "at": "2026-10-22T07:39:38.532Z",
+      "method": "hook/completed",
+      "event": "PreToolUse"
+    },
+    {
+      "at": "2026-10-22T07:39:38.532Z",
+      "method": "tool/completed",
+      "toolName": "skills_read",
+      "durationMs": 0
+    },
+    {
+      "at": "2026-10-22T07:39:38.535Z",
+      "method": "model/request-started",
+      "round": 4
+    },
+    {
+      "at": "2026-10-22T07:39:52.877Z",
+      "method": "hook/completed",
+      "event": "PreToolUse"
+    },
+    {
+      "at": "2026-10-22T07:39:52.881Z",
+      "method": "hook/completed",
+      "event": "PostToolUse"
+    },
+    {
+      "at": "2026-10-22T07:39:52.881Z",
+      "method": "tool/completed",
+      "toolName": "read_file",
+      "durationMs": 6
+    },
+    {
+      "at": "2026-10-22T07:39:52.882Z",
+      "method": "hook/completed",
+      "event": "PreToolUse"
+    },
+    {
+      "at": "2026-10-22T07:39:52.934Z",
+      "method": "hook/completed",
+      "event": "PostToolUse"
+    },
+    {
+      "at": "2026-10-22T07:39:52.934Z",
+      "method": "tool/completed",
+      "toolName": "exec_command",
+      "durationMs": 53
+    },
+    {
+      "at": "2026-10-22T07:39:52.935Z",
+      "method": "hook/completed",
+      "event": "PreToolUse"
+    },
+    {
+      "at": "2026-10-22T07:39:52.937Z",
+      "method": "hook/completed",
+      "event": "PostToolUse"
+    },
+    {
+      "at": "2026-10-22T07:39:52.937Z",
+      "method": "tool/completed",
+      "toolName": "task_tree_node",
+      "durationMs": 3
+    },
+    {
+      "at": "2026-10-22T07:39:52.940Z",
+      "method": "model/request-started",
+      "round": 5
+    },
+    {
+      "at": "2026-10-22T07:40:09.302Z",
+      "method": "hook/completed",
+      "event": "Stop"
+    }
+  ],
+  "modelResults": [
+    {
+      "status": "completed",
+      "output": "本轮复用已有材料，仅核对 `facts.txt`、`report.md` 与 ROOT 节点是否一致；不联网、不启动业务服务。若发现事实或职责边界错误，将修正报告并复核。\n两类角色的核心边界一致：机构审核员仅审核本机构申请；研究中心管理员负责指定中心的入组与随访，该身份不自动授予机构审核权。报告也未声称已实测权限。验证参考文档未被 Skill 接口识别，接下来用文件接口读取；这不影响已取得的业务事实。\n"
+    }
+  ],
+  "limitation": "同模型真实单次小型分析验收，保留正常全局Hook；并发无关编辑受控注入。不是原业务整轮复跑或普遍提速/成功率证明。"
+}

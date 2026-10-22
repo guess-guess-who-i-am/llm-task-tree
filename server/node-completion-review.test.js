@@ -7,6 +7,15 @@ test('review acceptance follows the requested artifact instead of inventing a ru
  assert.match(prompt,/验收范围以用户目标和交付合同为准/);
  assert.match(prompt,/说明.*不.*启动.*业务服务/);
 });
+test('dependency inventory is optional for older reviewers and complete for new declarations',()=>{
+ const schema=COMPLETION_REVIEW_TOOL.function.parameters;
+ assert.ok(!schema.required.includes('dependencyScope'));
+ assert.deepEqual(schema.properties.dependencyScope.required,['complete','files']);
+ assert.equal(schema.properties.dependencyScope.properties.complete.type,'boolean');
+ const receipt={...verdict,dependencyScope:{complete:true,files:['docs/report.md','src/auth']}};
+ assert.deepEqual(parseCompletionReview(JSON.stringify(receipt)),receipt);
+ assert.deepEqual(parseCompletionReview(JSON.stringify(verdict)),verdict);
+});
 test('worker and final-review outputs have no character caps or host-derived file inventories',()=>{
  const worker=WORKER_RESULT_SCHEMA.properties;
  assert.equal(worker.evidence.maxLength,undefined);

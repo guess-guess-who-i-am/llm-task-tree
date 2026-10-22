@@ -742,6 +742,61 @@ test('folded-root lens can enter the independent subtree and navigate its childr
   assert.equal(await page.locator('.focusLensNodeId').innerText(), 'N1_A');
 });
 
+test('focus lens shows the full approach with line breaks on main and subtree at desktop and mobile widths', async t => {
+  const approach = [
+    '因为需要看清完整思路，所以不能只保留开头。'.repeat(12),
+    '第二段保留换行，标签按文字显示：<img src=x onerror=alert(1)> & <计划>',
+    '连续内容也需要换行：' + 'LongUnbrokenText'.repeat(20),
+    '最后一段：这是完整思路的结尾，必须可以滚动读到。'
+  ].join('\n');
+  for (const mode of ['main', 'subtree']) {
+    const file = path.join(root, mode === 'main' ? 'task-tree.md' : 'subtrees/N1.md');
+    const original = await readFile(file, 'utf8');
+    const marker = mode === 'main' ? '- Problem: 不应被修改' : '- Problem: 建立作息';
+    await writeFile(file, original.replace(marker, `${marker}\n- Approach:\n${approach.split('\n').map(line => '  ' + line).join('\n')}`));
+    try {
+      const page = await pageFor(t);
+      if (mode === 'subtree') await enter(page);
+      const nodeId = mode === 'main' ? 'N2' : 'N1_A';
+      await page.locator(`[data-node-id="${nodeId}"] [data-action="set-next"]`).dispatchEvent('click');
+      await page.locator('#focusLensOpenBtn').click();
+      const text = page.locator('.focusLensField--approach p');
+      assert.equal(await text.textContent(), approach, 'approach must not lose text or line breaks');
+      assert.equal(await text.locator('img').count(), 0, 'node text must remain escaped');
+      for (const width of [1440, 390, 320]) {
+        await page.setViewportSize({ width, height: 844 });
+        await text.scrollIntoViewIfNeeded();
+        const layout = await text.evaluate(el => {
+          const style = getComputedStyle(el);
+          return { whiteSpace: style.whiteSpace, height: el.clientHeight, fullHeight: el.scrollHeight, width: el.clientWidth, fullWidth: el.scrollWidth };
+        });
+        assert.equal(layout.whiteSpace, 'pre-wrap', 'line breaks must be visible');
+        assert.ok(layout.fullHeight <= layout.height + 1, 'all lines must fit the paragraph');
+        assert.ok(layout.fullWidth <= layout.width + 1, 'unbroken text must wrap');
+        assert.equal(await page.locator('.focusLensBody').evaluate(el => el.scrollWidth <= el.clientWidth + 1), true);
+        await text.evaluate(el => {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          range.setStart(el.firstChild, el.textContent.length - 25);
+          const rect = range.getBoundingClientRect();
+          el.closest('.focusLensBody').scrollTop += rect.bottom - el.closest('.focusLensBody').getBoundingClientRect().bottom + 20;
+        });
+        assert.equal(await text.evaluate(el => {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          range.setStart(el.firstChild, el.textContent.length - 25);
+          const rect = range.getBoundingClientRect(), body = el.closest('.focusLensBody').getBoundingClientRect();
+          return rect.top >= body.top && rect.bottom <= body.bottom;
+        }), true, 'the tail must be reachable by scrolling');
+        if (mode === 'main' && width === 390) await page.screenshot({ path: path.join(os.tmpdir(), 'task-tree-focus-lens-full-approach.png') });
+      }
+      await page.close();
+    } finally {
+      await writeFile(file, original);
+    }
+  }
+});
+
 test('subtree controls remain clickable in macro zoom and use the delegated handler', async t => {
   const page = await pageFor(t);
   t.after(async () => {

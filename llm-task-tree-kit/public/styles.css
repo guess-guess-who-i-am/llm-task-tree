@@ -1859,6 +1859,10 @@ button.chainAddBtn.active {
   border-left: 4px solid #4c7185;
 }
 
+.focusLensField--approach p {
+  white-space: pre-wrap;
+}
+
 .focusLensField--result {
   border-left: 4px solid #2f7661;
 }

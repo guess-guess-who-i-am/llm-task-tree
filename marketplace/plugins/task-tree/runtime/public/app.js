@@ -1093,7 +1093,7 @@ function renderFocusLens() {
         </section>
         <section class="focusLensField focusLensField--approach">
           <h3>思路</h3>
-          <p>${escapeHtml(focusLensText(node.approach, "尚未记录解决思路。", 180))}</p>
+          <p>${focusLensFullText(node.approach, "尚未记录解决思路。")}</p>
         </section>
         <section class="focusLensField focusLensField--result">
           <h3>结果</h3>

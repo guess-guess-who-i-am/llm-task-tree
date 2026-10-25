@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -10,8 +10,149 @@ import { createGitWorkspaceManager } from './parallel-worktree.js';
 import { createTaskTreeAgentTools } from './task-tree-agent-tools.js';
 import { createAdaptiveNodeExecution, NODE_EXECUTION_TOOL } from './adaptive-node-execution.js';
 
+test('a text-only correction returns to execution then rechecks the actual corrected answer without fabricating files',async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'direct-answer-repair-'));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  await writeFile(path.join(root,'task-tree.md'),tree());
+  let reviews=0,repairs=0;
+  const executor=createDirectNodeWorkspace({projectRoot:root,reviewTurn:async options=>{
+    reviews++;
+    if(reviews===1){assert.match(options.prompt,/2\+2=5/);return {status:'completed',output:'{"verdict":"failed","reason":"wrong arithmetic"}'};}
+    assert.match(options.prompt,/2\+2=4/);assert.doesNotMatch(options.prompt,/执行者交付[^]*2\+2=5/);
+    return {status:'completed',output:'{"verdict":"pass","reason":"correct answer"}'};
+  },repairTurn:async()=>{repairs++;return {status:'completed',output:'2+2=4'};}});
+  const state=await executor.prepare('answer-repair');
+  const receipt=await executor.finish(state,{status:'completed',nodeId:'A',objective:'只回答2+2，不修改文件',output:'2+2=5'});
+  assert.equal(reviews,2);assert.equal(repairs,1);assert.equal(receipt.delivery.output,'2+2=4');assert.deepEqual(receipt.appliedFiles,[]);
+});
+
 const exec = promisify(execFile);
-test('final checker preserves IDE advisory mode when repairing an oversized selected subtree through real MCP', {timeout:30000}, async t => {
+test('file repair cannot count a changed apology as progress or discard its checkpoint',async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'direct-zero-repair-'));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  await writeFile(path.join(root,'task-tree.md'),tree());
+  await writeFile(path.join(root,'result.txt'),'broken');
+  let reviews=0,repairs=0;const retained=[];
+  const executor=createDirectNodeWorkspace({projectRoot:root,
+    reviewTurn:async()=>{reviews++;return {status:'completed',output:JSON.stringify({verdict:'failed',reason:'actual file unchanged',issues:[{id:'value',problem:'result.txt must be fixed',files:['result.txt'],acceptanceCriteria:'fixed'}]})};},
+    repairTurn:async()=>{repairs++;return {status:'completed',output:`无法修复，第${repairs}次报告，零修改`};}});
+  const state=await executor.prepare('zero-repair');
+  await assert.rejects(executor.finish(state,{status:'completed',nodeId:'A',objective:'修复result.txt',output:'old',onRetainedWorkspace:r=>retained.push(r)}),
+    e=>e.code==='COMPLETION_REVIEW_FAILED'&&e.review.repairStatus==='no-progress');
+  assert.equal(repairs,1);assert.equal(reviews,1,'no progress must not trigger another expensive review');
+  const repair=retained.find(r=>r.role==='repair-worker');
+  assert.ok(repair);assert.equal(await readFile(path.join(repair.workspacePath,'result.txt'),'utf8'),'broken');
+});
+
+test('repairing an implementation dependency counts even when the reported verification file stays unchanged',async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'direct-dependency-repair-'));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  await writeFile(path.join(root,'task-tree.md'),tree());
+  await writeFile(path.join(root,'implementation.txt'),'broken');
+  await writeFile(path.join(root,'verification.txt'),'assert implementation is fixed');
+  let reviews=0;
+  const executor=createDirectNodeWorkspace({projectRoot:root,
+    reviewTurn:async options=>{reviews++;const fixed=await readFile(path.join(options.cwd,'implementation.txt'),'utf8')==='fixed';
+      return {status:'completed',output:JSON.stringify(fixed?{verdict:'pass',reason:'verified dependency'}:
+        {verdict:'failed',reason:'assertion fails',issues:[{id:'dependency',problem:'implementation fails verification',files:['verification.txt'],acceptanceCriteria:'implementation is fixed'}]})};},
+    repairTurn:async options=>{await writeFile(path.join(options.cwd,'implementation.txt'),'fixed');return {status:'completed',output:'dependency fixed'};}});
+  const state=await executor.prepare('dependency-repair');
+  await executor.finish(state,{status:'completed',nodeId:'A',objective:'修复实现使既有断言通过'});
+  assert.equal(reviews,2);assert.equal(await readFile(path.join(root,'implementation.txt'),'utf8'),'fixed');
+});
+
+test('delegation checkpoint bypasses retained conflicted integration and can publish subsequent work without replay', {timeout:30000}, async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'delegation-old-conflict-'));
+  t.after(()=>rm(root,{recursive:true,force:true,maxRetries:3,retryDelay:50}));
+  await writeFile(path.join(root,'task-tree.md'),tree());
+  await writeFile(path.join(root,'shared.txt'),'base\n');
+  const workspace=createGitWorkspaceManager({projectRoot:root});
+  const executor=createDirectNodeWorkspace({projectRoot:root,workspace,reviewTurn:null});
+  const state=await executor.prepare('old-integration');
+  await writeFile(path.join(state.integrationPath,'shared.txt'),'old integration\n');
+  await exec('git',['add','shared.txt'],{cwd:state.integrationPath});
+  await exec('git',['-c','user.name=Test','-c','user.email=test@local','commit','-qm','old integration'],{cwd:state.integrationPath});
+  const other=await workspace.createWorker('old-integration','incoming',state.snapshotCommit);
+  await writeFile(path.join(other,'shared.txt'),'old incoming\n');
+  const oldCommit=await workspace.commit(other,'old incoming',state.snapshotCommit);
+  await assert.rejects(workspace.integrate(state.integrationPath,oldCommit,state.snapshotCommit),{code:'CHERRY_PICK_CONFLICT'});
+  const before=(await exec('git',['ls-files','-u'],{cwd:state.integrationPath})).stdout;
+  assert.ok(before.length);
+  const candidate=await workspace.createWorker('continued-candidate','review',state.snapshotCommit);
+  state.workerPath=candidate;
+  await writeFile(path.join(candidate,'preserved.txt'),'original retained work');
+  await writeFile(path.join(candidate,'new.txt'),'new independent inputs');
+  const baseline=state.snapshotCommit;
+  const first=await executor.checkpoint(state,{nodeId:'ROOT',objective:'continue retained work'});
+  assert.equal(first.status,'completed');
+  assert.equal(await readFile(path.join(root,'preserved.txt'),'utf8'),'original retained work');
+  assert.equal(await readFile(path.join(root,'new.txt'),'utf8'),'new independent inputs');
+  await writeFile(path.join(candidate,'later.txt'),'next checkpoint');
+  const second=await executor.checkpoint(state,{nodeId:'ROOT',objective:'continue remaining work'});
+  assert.equal(second.status,'completed');
+  assert.equal(await readFile(path.join(root,'later.txt'),'utf8'),'next checkpoint');
+  assert.equal(await readFile(path.join(candidate,'preserved.txt'),'utf8'),'original retained work');
+  assert.equal(state.snapshotCommit,baseline,'whole-goal review baseline must not move');
+  assert.equal((await exec('git',['ls-files','-u'],{cwd:state.integrationPath})).stdout,before,'old conflict and all its evidence remain untouched');
+  await writeFile(path.join(candidate,'final.txt'),'direct completion also bypasses stale integration');
+  const final=await executor.finish(state,{status:'completed',keepWorkspace:true,nodeId:'ROOT'});
+  assert.equal(final.status,'completed');
+  assert.equal(await readFile(path.join(root,'final.txt'),'utf8'),'direct completion also bypasses stale integration');
+  assert.equal((await exec('git',['ls-files','-u'],{cwd:state.integrationPath})).stdout,before);
+  const {createParallelCodexCoordinator}=await import('./codex-coordinator.js');
+  let active=0,peak=0,reviews=0,release;
+  const bothStarted=new Promise(resolve=>{release=resolve;});
+  t.after(()=>release());
+  const coordinator=createParallelCodexCoordinator({projectRoot:root,workspace,startTurn:async options=>{
+    const id=options.prompt.match(/^Task id: (left|right)$/m)?.[1];assert.ok(id);
+    assert.equal(await readFile(path.join(options.cwd,'preserved.txt'),'utf8'),'original retained work');
+    active++;peak=Math.max(peak,active);if(active===2)release();await bothStarted;
+    await writeFile(path.join(options.cwd,`${id}.txt`),id);active--;
+    return {status:'completed',output:JSON.stringify({event:'completed',evidence:`${id}.txt saved`})};
+  },reviewTurn:async options=>{
+    reviews++;assert.equal(options.completionReview,true);
+    assert.deepEqual(await Promise.all(['left','right'].map(id=>readFile(path.join(options.cwd,`${id}.txt`),'utf8'))),['left','right']);
+    assert.equal(await readFile(path.join(options.cwd,'preserved.txt'),'utf8'),'original retained work');
+    return {status:'completed',output:JSON.stringify({verdict:'pass',reason:'old work and both concurrent outputs retained'})};
+  }});
+  const handler=createAdaptiveNodeExecution({coordinator,workspace:executor,state,nodeId:'ROOT',treeScope:{tree:{id:'method',path:'task-tree.md'}},objective:'reuse retained work and produce left/right'});
+  const result=await handler(NODE_EXECUTION_TOOL.function.name,{reason:'two independent outputs',jobs:['left','right'].map(taskId=>({taskId,title:taskId,instruction:`write ${taskId}.txt`,writeSet:[`${taskId}.txt`]}))});
+  assert.equal(result.ok,true,result.error);assert.equal(peak,2);assert.equal(reviews,1);
+  assert.deepEqual(await Promise.all(['left','right'].map(id=>readFile(path.join(root,`${id}.txt`),'utf8'))),['left','right']);
+  assert.equal((await exec('git',['ls-files','-u'],{cwd:state.integrationPath})).stdout,before);
+});
+
+test('nested dangling extraction links do not crash delivery and the final checker receives the exclusion',async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'direct-extraction-symlink-'));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  await writeFile(path.join(root,'task-tree.md'),tree());
+  const relative='workbuddy-extraction/experts-full/chuangye-manor/skills/knowledge-business/references/创业可以学.md';
+  const foreign=path.join(root,'nonexistent-foreign-workspace/创业可以学.md');
+  let checks=0;
+  const executor=createDirectNodeWorkspace({projectRoot:root,reviewTurn:async options=>{
+    checks++;
+    assert.ok(options.prompt.includes(relative));
+    assert.match(options.prompt,/安全排除/);
+    assert.match(options.prompt,/不能.*完整/);
+    assert.equal(await readlink(path.join(options.cwd,relative)),foreign);
+    await assert.rejects(stat(path.join(options.cwd,relative)),{code:'ENOENT'});
+    assert.equal(await readFile(path.join(options.cwd,'workbuddy-extraction/正常.md'),'utf8'),'regular output');
+    return {status:'completed',output:JSON.stringify({verdict:'pass',reason:'原样资源和软链接均保留，缺失链接内容明确披露，不代表全部资源可用'})};
+  }});
+  const state=await executor.prepare('extraction-link');
+  await mkdir(path.dirname(path.join(state.workerPath,relative)),{recursive:true});
+  await symlink(foreign,path.join(state.workerPath,relative));
+  await writeFile(path.join(state.workerPath,'workbuddy-extraction/正常.md'),'regular output');
+  await writeFile(path.join(state.workerPath,'.task-tree-review-inputs.json'),JSON.stringify({schema:1,paths:['workbuddy-extraction']}));
+  const receipt=await executor.finish(state,{status:'completed',nodeId:'ROOT',objective:'原样保留资源并披露缺失链接，不宣称全部资源可用'});
+  assert.equal(checks,1);
+  assert.equal(receipt.status,'completed');
+  assert.ok(receipt.appliedFiles.includes(relative));
+  assert.equal(await readlink(path.join(root,relative)),foreign);
+  assert.equal(await readFile(path.join(root,'workbuddy-extraction/正常.md'),'utf8'),'regular output');
+});
+
+test('execution repair preserves IDE advisory mode for an oversized subtree before fresh review through real MCP', {timeout:30000}, async t => {
   const root=await mkdtemp(path.join(os.tmpdir(),'review-advisory-subtree-'));
   t.after(()=>rm(root,{recursive:true,force:true}));
   await mkdir(path.join(root,'subtrees'));
@@ -22,6 +163,12 @@ test('final checker preserves IDE advisory mode when repairing an oversized sele
   let checks=0;
   const executor=createDirectNodeWorkspace({projectRoot:root,reviewTurn:async options=>{
     checks++;
+    const content=await readFile(path.join(options.cwd,file),'utf8');
+    if(checks===1)return {status:'completed',output:JSON.stringify({verdict:'failed',reason:'指定节点缺少入组说明',evidence:['CurrentResult 尚未写入']})};
+    assert.match(content,/因为需要筛选适合研究的人/);
+    return {status:'completed',output:JSON.stringify({verdict:'pass',reason:'指定节点说明已回写，原有事实完整保留',evidence:['MCP实际回执与候选文件一致']})};
+  },repairTurn:async options=>{
+    assert.equal(options.completionReview,undefined);
     const bridge=await createTaskTreeAgentTools({cwd:options.cwd,environment:options.environment});
     try {
       const saved=await bridge.call('task_tree_write',{nodeId:'A',fields:{CurrentResult:'因为需要筛选适合研究的人，所以先按条件判断能否入组。'},reason:'只修复指定医生节点'});
@@ -34,12 +181,12 @@ test('final checker preserves IDE advisory mode when repairing an oversized sele
       const pid=Number(await readFile(path.join(options.cwd,'.task-tree-server.pid'),'utf8').catch(()=>0));
       if(pid)try{process.kill(pid,'SIGTERM');}catch{}
     }
-    return {status:'completed',output:JSON.stringify({verdict:'pass',reason:'指定节点说明已回写，原有事实完整保留',evidence:['MCP实际回执与候选文件一致']})};
+    return {status:'completed',output:'指定节点说明已回写，等候只读验收'};
   }});
   const state=await executor.prepare('advisory-check');
   try {
     const result=await executor.finish(state,{nodeId:'A',treeFile:file,objective:'在节点中解释入组，不修改软件功能',status:'completed'});
-    assert.equal(checks,1);
+    assert.equal(checks,2);
     assert.ok(result.appliedFiles.includes(file));
     const persisted=await readFile(path.join(root,file),'utf8');
     assert.ok(persisted.includes('已有其他节点的完整事实。'.repeat(600)));
@@ -122,13 +269,13 @@ test('integrated final check uses branch snapshots after branch deletion and nev
   await workspace.removeWorker(worker);
   const executor=createDirectNodeWorkspace({projectRoot:root,workspace,reviewTurn:async options=>{
     assert.equal(await readFile(path.join(options.cwd,'local-data/input.json'),'utf8'),'branch input');
-    await writeFile(path.join(options.cwd,'result.txt'),'review repaired');
-    return {status:'completed',output:'{"verdict":"pass","reason":"分支输入可用，完成最终修复"}'};
+    return {status:'completed',output:JSON.stringify({verdict:await readFile(path.join(options.cwd,'result.txt'),'utf8')==='execution repaired'?'pass':'failed',reason:'分支输入可用，核对最终产物'})};
   }});
   try {
-    const receipt=await executor.reviewIntegrated({...state,runId:'branch-input'},{nodeId:'A',objective:'完成result.txt',reviewInputs});
+    const receipt=await executor.reviewIntegrated({...state,runId:'branch-input'},{nodeId:'A',objective:'完成result.txt',reviewInputs,
+      repairCandidate:async ({candidatePath})=>{await writeFile(path.join(candidatePath,'result.txt'),'execution repaired');}});
     assert.deepEqual(receipt.appliedFiles,['result.txt']);
-    assert.equal(await readFile(path.join(root,'result.txt'),'utf8'),'review repaired');
+    assert.equal(await readFile(path.join(root,'result.txt'),'utf8'),'execution repaired');
     await assert.rejects(readFile(path.join(root,'local-data/input.json')),{code:'ENOENT'});
   }finally{await workspace.cleanup({...state,runId:'branch-input'});}
 });
@@ -253,7 +400,7 @@ test('text-only worker cannot bypass final goal checking when it changed no file
   const root=await mkdtemp(path.join(os.tmpdir(),'direct-text-only-'));
   t.after(()=>rm(root,{recursive:true,force:true}));
   let checks=0;
-  const executor=createDirectNodeWorkspace({projectRoot:root,reviewTurn:async()=>{
+  const executor=createDirectNodeWorkspace({projectRoot:root,repairTurn:null,reviewTurn:async()=>{
     checks++;
     return {status:'completed',output:JSON.stringify({verdict:'failed',reason:'只有计划，没有交付指定文件',evidence:['result.txt 不存在']})};
   }});
@@ -263,18 +410,20 @@ test('text-only worker cannot bypass final goal checking when it changed no file
   await assert.rejects(readFile(path.join(root,'result.txt')),{code:'ENOENT'});
   await executor.abandon(state);
 });
-test('no-diff worker final checker repairs are applied once and reported to the user',async t=>{
+test('no-diff worker returns missing output to execution then freshly reviews and applies it once',async t=>{
   const root=await mkdtemp(path.join(os.tmpdir(),'direct-no-diff-repair-'));
   t.after(()=>rm(root,{recursive:true,force:true}));
   let checks=0;
   const executor=createDirectNodeWorkspace({projectRoot:root,reviewTurn:async options=>{
     checks++;
-    await writeFile(path.join(options.cwd,'result.txt'),'实际交付');
+    if(checks===1)return {status:'completed',output:'{"verdict":"failed","reason":"缺失 result.txt"}'};
+    assert.equal(await readFile(path.join(options.cwd,'result.txt'),'utf8'),'实际交付');
     return {status:'completed',output:'{"verdict":"pass","reason":"已补齐缺失产物","evidence":["result.txt 已写入并读回"]}'};
   }});
   const state=await executor.prepare('no-diff-repair');
-  const receipt=await executor.finish(state,{nodeId:'A',objective:'创建 result.txt',output:'准备写入',status:'completed'});
-  assert.equal(checks,1);
+  const receipt=await executor.finish(state,{nodeId:'A',objective:'创建 result.txt',output:'准备写入',status:'completed',
+    repairCandidate:async ({candidatePath})=>{await writeFile(path.join(candidatePath,'result.txt'),'实际交付');}});
+  assert.equal(checks,2);
   assert.equal(receipt.review.verdict,'pass');
   assert.deepEqual(receipt.appliedFiles,['result.txt']);
   assert.deepEqual(receipt.changedFiles,['result.txt']);
@@ -342,7 +491,7 @@ const tree = (a = '', b = '') => [
 ].join('\n');
 
 test('final repairs rebase after accept input changes instead of failing or accepting stale review',async()=>{
-  let snapshot=0,checks=0,accepts=0,cleanups=0;
+  let snapshot=0,checks=0,accepts=0,cleanups=0,repairs=0;
   const workspace={
     prepare:async()=>({snapshotCommit:`base-${++snapshot}`,integrationPath:`integration-${snapshot}`}),
     createWorker:async()=>`worker-${snapshot}`,
@@ -354,10 +503,13 @@ test('final repairs rebase after accept input changes instead of failing or acce
   };
   // Real tree validation uses only task-tree files; repair.txt needs no tree read.
   const executor=createDirectNodeWorkspace({projectRoot:os.tmpdir(),workspace,reviewTurn:async()=>{
-    checks++;return {status:'completed',output:'{"verdict":"pass","reason":"当前基线验证通过"}'};
+    checks++;return {status:'completed',output:JSON.stringify(checks%2
+      ?{verdict:'failed',reason:'当前新基线需要执行阶段补齐修复'}
+      :{verdict:'pass',reason:'当前基线修复后验证通过'})};
   }});
-  const receipt=await executor.reviewIntegrated({runId:'rebase',snapshotCommit:'original'},{nodeId:'A',objective:'交付',output:'完成'});
-  assert.equal(checks,2);assert.equal(accepts,2);
+  const receipt=await executor.reviewIntegrated({runId:'rebase',snapshotCommit:'original'},{nodeId:'A',objective:'交付',output:'完成',
+    repairCandidate:async()=>{repairs++;}});
+  assert.equal(checks,4);assert.equal(accepts,2);assert.equal(repairs,2);
   assert.deepEqual(receipt.appliedFiles,['repair.txt']);
   assert.equal(cleanups,2);
 });
@@ -483,28 +635,123 @@ test('malformed final review fails once instead of repeating the whole review', 
   await assert.rejects(readFile(path.join(root, 'a.txt')), { code: 'ENOENT' });
 });
 
-test('the final reviewer can repair and verify code in one turn before applying it', { timeout: 30000 }, async t => {
+test('direct failed review returns real Git candidate to execution and a fresh read-only review verifies it', { timeout: 30000 }, async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'final-review-repair-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await writeFile(path.join(root, 'task-tree.md'), tree());
-  let turns = 0;
+  let turns = 0,repairs=0;
+  const reviewOptions=[];
   const executor = createDirectNodeWorkspace({ projectRoot: root, reviewTurn: async options => {
     turns++;
+    reviewOptions.push(options);
     assert.notDeepEqual(options.runtimeToolNames, [], 'reviewer must retain Skill and verification tools');
-    assert.match(options.prompt, /有缺陷就修复并复验/);
+    assert.match(options.prompt, /只读/);
+    assert.doesNotMatch(options.prompt, /有缺陷就修复并复验/);
     assert.doesNotMatch(options.prompt, /示例|教程/);
-    await writeFile(path.join(options.cwd, 'result.mjs'), 'export default () => 42;\n');
+    assert.equal(options.completionReview,true);
+    assert.equal(options.forceNewThread,true);
+    if(turns===1){
+      assert.equal(await readFile(path.join(options.cwd,'result.mjs'),'utf8'),'export default () => 0;\n');
+      return {status:'completed',output:JSON.stringify({verdict:'failed',reason:'实际返回0，不满足42',evidence:['result.mjs 返回0'],solution:'执行阶段修复返回值为42'})};
+    }
     assert.equal((await exec(process.execPath, ['--input-type=module', '-e', "import f from './result.mjs'; if(f()!==42)process.exit(1)"], { cwd: options.cwd })).stderr, '');
     return { status: 'completed', output: '{"verdict":"pass","reason":"已修复并验证返回42","evidence":["实际执行返回值验证通过"]}' };
-  }, startTurn: async () => { throw new Error('must not launch a second repair Agent'); } });
+  }, repairTurn:async options=>{
+    repairs++;
+    assert.equal(options.completionReview,undefined);
+    assert.equal(options.threadId,'original-execution-thread');
+    assert.match(options.prompt,/实际返回0/);
+    assert.ok(options.tools.some(tool=>tool.function.name===NODE_EXECUTION_TOOL.function.name),'execution repair retains adaptive delegation');
+    assert.equal(await readFile(path.join(options.cwd,'result.mjs'),'utf8'),'export default () => 0;\n');
+    assert.equal(await readFile(path.join(options.cwd,'preserved.txt'),'utf8'),'已有成果，不重做');
+    await assert.rejects(readFile(path.join(root,'result.mjs')),{code:'ENOENT'});
+    await writeFile(path.join(options.cwd,'result.mjs'),'export default () => 42;\n');
+    return {status:'completed',output:'修复已完成，交回只读验收'};
+  } });
   const state = await executor.prepare('repair-once');
   await writeFile(path.join(state.workerPath, 'result.mjs'), 'export default () => 0;\n');
-  const receipt = await executor.finish(state, { nodeId: 'A', objective: '返回42', status: 'completed' });
-  assert.equal(turns, 1);
+  await writeFile(path.join(state.workerPath,'preserved.txt'),'已有成果，不重做');
+  const receipt = await executor.finish(state, { nodeId: 'A', objective: '返回42', status: 'completed',threadId:'original-execution-thread' });
+  assert.equal(turns, 2);assert.equal(repairs,1);
+  assert.notEqual(reviewOptions[0],reviewOptions[1]);
   assert.equal(receipt.status, 'completed');
   assert.equal(receipt.review.verdict, 'pass');
   assert.deepEqual(receipt.review.evidence, ['实际执行返回值验证通过']);
   assert.equal(await readFile(path.join(root, 'result.mjs'), 'utf8'), 'export default () => 42;\n');
+  assert.equal(await readFile(path.join(root,'preserved.txt'),'utf8'),'已有成果，不重做');
+});
+
+test('execution handback can delegate concurrent repairs with a custom method tree id and no default method', {timeout:30000}, async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'direct-repair-custom-tree-'));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  const treeId='workbuddy-custom-method';
+  await writeFile(path.join(root,'task-tree.md'),tree());
+  await writeFile(path.join(root,'task-trees.json'),JSON.stringify({schema:'task-tree-registry/v1',activeMethod:treeId,
+    trees:[{id:treeId,role:'method',path:'task-tree.md',title:'自定义方法树'}]}));
+  let reviews=0,repairs=0,active=0,peak=0,release;
+  const ready=new Promise(resolve=>{release=resolve;});
+  t.after(()=>release());
+  const executor=createDirectNodeWorkspace({projectRoot:root,reviewTurn:async options=>{
+    reviews++;
+    if(reviews===1)return {status:'completed',output:JSON.stringify({verdict:'failed',reason:'两个独立文件缺陷',
+      issues:['a','b'].map(id=>({id,problem:`${id}内容错误`,files:[`${id}.txt`]}))})};
+    assert.deepEqual(await Promise.all(['a','b'].map(id=>readFile(path.join(options.cwd,`${id}.txt`),'utf8'))),['fixed','fixed']);
+    return {status:'completed',output:'{"verdict":"pass","reason":"自定义树的两个并发修复通过"}'};
+  },repairTurn:async options=>{
+    if(options.tools?.some(tool=>tool.function.name===NODE_EXECUTION_TOOL.function.name)){
+      repairs++;
+      assert.equal(options.threadId,'original-custom-owner');
+      const registry=JSON.parse(await readFile(path.join(options.cwd,'task-trees.json'),'utf8'));
+      assert.equal(registry.activeMethod,treeId);assert.ok(!registry.trees.some(item=>item.id==='method'));
+      const result=await options.toolHandler(NODE_EXECUTION_TOOL.function.name,{reason:'两个独立问题并行修复',jobs:['a','b'].map(id=>({
+        taskId:id,title:id,instruction:`只修复${id}.txt为fixed`,writeSet:[`${id}.txt`]}))});
+      assert.equal(result.ok,true,result.error);
+      return {status:'completed',output:'两个原成果已并行修复，交回验收'};
+    }
+    const id=options.prompt.match(/^Task id: ([ab])$/m)?.[1];
+    assert.ok(id,'repair children execute scoped branch tasks');
+    active++;peak=Math.max(peak,active);if(active===2)release();await ready;
+    assert.equal(await readFile(path.join(options.cwd,`${id}.txt`),'utf8'),'bad');
+    await writeFile(path.join(options.cwd,`${id}.txt`),'fixed');active--;
+    return {status:'completed',output:JSON.stringify({event:'completed',evidence:`${id}.txt已修复`})};
+  }});
+  const state=await executor.prepare('custom-tree-repair');
+  await Promise.all(['a','b'].map(id=>writeFile(path.join(state.workerPath,`${id}.txt`),'bad')));
+  const receipt=await executor.finish(state,{nodeId:'A',treeId,treeFile:'task-tree.md',objective:'保留成果并修复两个独立问题',status:'completed',threadId:'original-custom-owner'});
+  assert.equal(receipt.status,'completed');assert.equal(reviews,2);assert.equal(repairs,1);assert.equal(peak,2);
+  assert.deepEqual(await Promise.all(['a','b'].map(id=>readFile(path.join(root,`${id}.txt`),'utf8'))),['fixed','fixed']);
+});
+
+test('resuming final acceptance merges retained repair candidate with current live output before read-only review and applies only afterwards', {timeout:30000}, async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'direct-resume-review-candidate-'));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  await writeFile(path.join(root,'task-tree.md'),tree());
+  const workspace=createGitWorkspaceManager({projectRoot:root});
+  const state={...await workspace.prepare('original-completed'),runId:'original-completed'};
+  const retainedPath=await workspace.createWorker('retained-final-review','repairs',state.snapshotCommit);
+  await writeFile(path.join(retainedPath,'worker-output.txt'),'前阶段已完成的运行产物');
+  await writeFile(path.join(retainedPath,'review-recovery.txt'),'旧验收阶段补全的珍贵成果');
+  await writeFile(path.join(root,'worker-output.txt'),'前阶段已完成的运行产物');
+  await writeFile(path.join(root,'live-concurrent.txt'),'候选建立后的用户修改');
+  let checks=0;
+  const executor=createDirectNodeWorkspace({projectRoot:root,workspace,repairTurn:null,reviewTurn:async options=>{
+    checks++;
+    assert.notEqual(options.cwd,root);assert.notEqual(options.cwd,retainedPath,'fresh review uses a new isolated merged candidate');
+    assert.equal(options.completionReview,true);assert.equal(options.forceNewThread,true);
+    assert.equal(await readFile(path.join(options.cwd,'worker-output.txt'),'utf8'),'前阶段已完成的运行产物');
+    assert.equal(await readFile(path.join(options.cwd,'review-recovery.txt'),'utf8'),'旧验收阶段补全的珍贵成果');
+    assert.equal(await readFile(path.join(options.cwd,'live-concurrent.txt'),'utf8'),'候选建立后的用户修改');
+    await assert.rejects(readFile(path.join(root,'review-recovery.txt')),{code:'ENOENT'},'retained repair must not apply before acceptance');
+    return {status:'completed',output:'{"verdict":"pass","reason":"当前运行成果与保留修复成果均完整，复验通过"}'};
+  }});
+  const receipt=await executor.reviewIntegrated(state,{nodeId:'A',objective:'从已有产物续接，只读验收通过后合入',
+    resumeCandidate:{workspacePath:retainedPath,snapshotCommit:state.snapshotCommit}});
+  assert.equal(checks,1);assert.equal(receipt.review.verdict,'pass');
+  assert.ok(receipt.appliedFiles.includes('review-recovery.txt'));
+  assert.equal(await readFile(path.join(root,'worker-output.txt'),'utf8'),'前阶段已完成的运行产物');
+  assert.equal(await readFile(path.join(root,'review-recovery.txt'),'utf8'),'旧验收阶段补全的珍贵成果');
+  assert.equal(await readFile(path.join(root,'live-concurrent.txt'),'utf8'),'候选建立后的用户修改');
+  assert.equal(await readFile(path.join(retainedPath,'review-recovery.txt'),'utf8'),'旧验收阶段补全的珍贵成果','successful resume must not delete the retained source');
 });
 
 test('review runtime failure is final, preserves candidate and cannot fall back to parent repair', async t => {
@@ -530,7 +777,7 @@ test('direct final-check wrapper preserves maintenance diagnostics from the turn
   t.after(()=>rm(root,{recursive:true,force:true}));
   await writeFile(path.join(root,'task-tree.md'),tree());
   const details={message:'TREE_NOT_UPDATED: 未更新指定节点',code:'STOP_HOOK_BLOCKED',stage:'postflight',maintenanceOnly:true,maintenanceIssues:['TREE_NOT_UPDATED'],nonMaintenanceBlockers:[],hookReports:[{event:'Stop',source:'project-hook',blocked:true}]};
-  const executor=createDirectNodeWorkspace({projectRoot:root,reviewTurn:async()=>({status:'failed',error:details})});
+  const executor=createDirectNodeWorkspace({projectRoot:root,repairTurn:null,reviewTurn:async()=>({status:'failed',error:details})});
   const state=await executor.prepare('maintenance-roundtrip');
   await writeFile(path.join(state.workerPath,'draft.txt'),'保留候选');
   await assert.rejects(executor.finish(state,{nodeId:'A',status:'completed'}),error=>{
@@ -544,20 +791,22 @@ test('direct final-check wrapper preserves maintenance diagnostics from the turn
   await assert.rejects(readFile(path.join(root,'draft.txt')),{code:'ENOENT'});
 });
 
-test('final reviewer can repair a malformed tree before the post-repair render check', async t => {
+test('failed review hands malformed tree back to execution before the post-repair render check', async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'final-review-tree-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await writeFile(path.join(root, 'task-tree.md'), tree());
   let reviews = 0;
   const executor = createDirectNodeWorkspace({ projectRoot: root, reviewTurn: async options => {
     reviews++;
-    await writeFile(path.join(options.cwd, 'task-tree.md'), tree('已修复并验证'));
+    if(reviews===1)return {status:'completed',output:'{"verdict":"failed","reason":"节点A缺失，图结构需要修复"}'};
+    assert.equal(await readFile(path.join(options.cwd,'task-tree.md'),'utf8'),tree('已修复并验证'));
     return { status: 'completed', output: '{"verdict":"pass","reason":"修复图结构"}' };
   } });
   const state = await executor.prepare('tree-repair');
   await writeFile(path.join(state.workerPath, 'task-tree.md'), tree().replace('## A -', '## A.1 -'));
-  const receipt = await executor.finish(state, { nodeId: 'A', status: 'completed' });
-  assert.equal(reviews, 1); assert.equal(receipt.review.verdict, 'pass');
+  const receipt = await executor.finish(state, { nodeId: 'A', status: 'completed',
+    repairCandidate:async({candidatePath})=>{await writeFile(path.join(candidatePath,'task-tree.md'),tree('已修复并验证'));} });
+  assert.equal(reviews, 2); assert.equal(receipt.review.verdict, 'pass');
   assert.equal(await readFile(path.join(root, 'task-tree.md'), 'utf8'), tree('已修复并验证'));
 });
 
@@ -566,9 +815,9 @@ test('failed reviewer reports its case study and stops without another repair or
   t.after(() => rm(root, { recursive: true, force: true }));
   await writeFile(path.join(root, 'task-tree.md'), tree());
   let reviews = 0, repairs = 0;
-  const executor = createDirectNodeWorkspace({ projectRoot: root, reviewTurn: async options => {
+  const executor = createDirectNodeWorkspace({ projectRoot: root,repairTurn:null, reviewTurn: async options => {
     reviews++;
-    await writeFile(path.join(options.cwd, 'draft.txt'), '失败的修复草稿');
+    assert.equal(await readFile(path.join(options.cwd,'draft.txt'),'utf8'),'原草稿');
     return { status: 'completed', output: JSON.stringify({ verdict: 'failed', reason: '修复后仍失败', rootCause: '本地依赖缺失', caseStudy: '复现调用失败，定位模块加载而非任务拆分', sources: [{ url: 'https://nodejs.org/api/modules.html', finding: '模块解析规则' }], solution: '安装正确依赖再重试', evidence: ['MODULE_NOT_FOUND'] }) };
   }, startTurn: async () => { repairs++; throw new Error('unexpected repair'); } });
   const state = await executor.prepare('failed-final');
@@ -581,7 +830,7 @@ test('failed reviewer reports its case study and stops without another repair or
   assert.match(failure.message, /https:\/\/nodejs.org/);
   assert.equal(reviews, 1); assert.equal(repairs, 0);
   await assert.rejects(readFile(path.join(root, 'draft.txt')), { code: 'ENOENT' });
-  assert.equal(await readFile(path.join(failure.workspacePath, 'draft.txt'), 'utf8'), '失败的修复草稿');
+  assert.equal(await readFile(path.join(failure.workspacePath, 'draft.txt'), 'utf8'), '原草稿');
 });
 
 test('a failed direct turn keeps unmerged work recoverable', { timeout: 30000 }, async t => {
@@ -597,6 +846,65 @@ test('a failed direct turn keeps unmerged work recoverable', { timeout: 30000 },
   assert.equal(await readFile(path.join(state.workerPath, 'draft.txt'), 'utf8'), '草稿');
   await assert.rejects(readFile(path.join(root, 'draft.txt')), { code: 'ENOENT' });
   await executor.abandon(state);
+});
+
+test('cancelling execution repair retains the repaired candidate and original worker without applying either', {timeout:30000}, async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'direct-repair-cancel-'));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  await writeFile(path.join(root,'task-tree.md'),tree());
+  const controller=new AbortController();
+  let checks=0,repairPath;
+  const executor=createDirectNodeWorkspace({projectRoot:root,reviewTurn:async()=>{
+    checks++;
+    return {status:'completed',output:'{"verdict":"failed","reason":"缺少补充产物"}'};
+  },repairTurn:null});
+  const state=await executor.prepare('cancel-repair');
+  await writeFile(path.join(state.workerPath,'original.txt'),'已有运行成果');
+  let failure;
+  try{
+    await executor.finish(state,{nodeId:'A',objective:'保留原成果并补充产物',status:'completed',signal:controller.signal,
+      repairCandidate:async({candidatePath})=>{
+        repairPath=candidatePath;
+        assert.notEqual(candidatePath,root);
+        await writeFile(path.join(candidatePath,'repair-draft.txt'),'修复中已保存的成果');
+        controller.abort(new Error('用户要求暂停'));
+      }});
+  }catch(error){failure=error;}
+  assert.match(failure?.message,/用户要求暂停/);
+  assert.equal(checks,1,'cancel must not start the next reviewer');
+  assert.equal(failure.workspacePath,repairPath,'failure receipt must locate the newest repair candidate');
+  assert.equal(await readFile(path.join(repairPath,'original.txt'),'utf8'),'已有运行成果');
+  assert.equal(await readFile(path.join(repairPath,'repair-draft.txt'),'utf8'),'修复中已保存的成果');
+  assert.equal(await readFile(path.join(state.workerPath,'original.txt'),'utf8'),'已有运行成果');
+  await assert.rejects(readFile(path.join(root,'original.txt')),{code:'ENOENT'});
+  await assert.rejects(readFile(path.join(root,'repair-draft.txt')),{code:'ENOENT'});
+});
+
+for(const changed of [true,false])test(`stopped execution repair exposes newest nested worker for ${changed?'changed':'no-diff'} execution`, {timeout:30000}, async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'direct-nested-repair-stop-'));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  await writeFile(path.join(root,'task-tree.md'),tree());
+  if(!changed)await writeFile(path.join(root,'original.txt'),'上一阶段产物');
+  let repairPath,checks=0;
+  const executor=createDirectNodeWorkspace({projectRoot:root,reviewTurn:async()=>{
+    checks++;return {status:'completed',output:'{"verdict":"failed","reason":"缺少修复文件"}'};
+  },repairTurn:async options=>{
+    repairPath=options.cwd;
+    await writeFile(path.join(repairPath,'repair-draft.txt'),'执行阶段已保存的新成果');
+    return {status:'stopped'};
+  }});
+  const state=await executor.prepare('nested-repair-stop');
+  if(changed)await writeFile(path.join(state.workerPath,'original.txt'),'上一阶段产物');
+  let failure;
+  try{await executor.finish(state,{nodeId:'A',objective:'补齐修复文件',status:'completed'});}
+  catch(error){failure=error;}
+  assert.equal(checks,1);
+  assert.equal(failure?.workspacePath,repairPath);
+  assert.ok(failure.retainedWorkspaces.some(item=>item.workspacePath===repairPath&&item.role==='repair-worker'));
+  assert.equal(await readFile(path.join(repairPath,'repair-draft.txt'),'utf8'),'执行阶段已保存的新成果');
+  assert.equal(await readFile(path.join(repairPath,'original.txt'),'utf8'),'上一阶段产物');
+  assert.equal(await readFile(path.join(state.workerPath,'original.txt'),'utf8'),'上一阶段产物');
+  await assert.rejects(readFile(path.join(root,'repair-draft.txt')),{code:'ENOENT'});
 });
 
 test('overlapping edits to the same tree field require one resolver and a review of the rebased result', { timeout: 30000 }, async t => {
@@ -688,7 +996,7 @@ test('six independent modules with identical registry creation need exactly one 
   assert.equal(checks, 6, 'byte-identical concurrent registry writes must not invalidate an already reviewed independent module');
 });
 
-test('reviewer-created thread-list cache does not replace host cache or trigger another check', async t => {
+test('reviewer runtime cache and execution repair preserve host cache and need only one fresh review', async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'review-runtime-filter-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await writeFile(path.join(root, 'task-tree.md'), tree());
@@ -699,14 +1007,19 @@ test('reviewer-created thread-list cache does not replace host cache or trigger 
     checks++;
     await writeFile(path.join(options.cwd, '.task-tree-port'), '5194\n');
     if (checks === 1) await writeFile(path.join(options.cwd, '.task-tree-threads.json'), JSON.stringify({ fetchedAt: 2, threads: [] }));
-    await writeFile(path.join(options.cwd, 'repair.txt'), 'necessary repair');
-    await writeFile(path.join(options.cwd, 'task-tree.md'), tree('A完成'));
+    if(checks===1)return {status:'completed',output:'{"verdict":"failed","reason":"缺少修复产物与节点汇报"}'};
+    assert.equal(await readFile(path.join(options.cwd,'repair.txt'),'utf8'),'necessary repair');
+    assert.equal(await readFile(path.join(options.cwd,'task-tree.md'),'utf8'),tree('A完成'));
     return { status: 'completed', output: '{"verdict":"pass","reason":"实际修复并验证"}' };
   } });
   const state = await executor.prepare('runtime');
   await writeFile(path.join(state.workerPath, 'result.txt'), 'result');
-  const receipt = await executor.finish(state, { nodeId: 'A', objective: '完成A', status: 'completed' });
-  assert.equal(checks, 1, 'reviewer runtime cache refresh must not cause another model check');
+  const receipt = await executor.finish(state, { nodeId: 'A', objective: '完成A', status: 'completed',
+    repairCandidate:async({candidatePath})=>{
+      await writeFile(path.join(candidatePath,'repair.txt'),'necessary repair');
+      await writeFile(path.join(candidatePath,'task-tree.md'),tree('A完成'));
+    } });
+  assert.equal(checks, 2, 'cache refresh must not add checks beyond the required post-repair review');
   assert.deepEqual(receipt.appliedFiles.sort(), ['repair.txt', 'result.txt', 'task-tree.md']);
   assert.equal(await readFile(path.join(root, '.task-tree-threads.json'), 'utf8'), cache);
   await assert.rejects(readFile(path.join(root, '.task-tree-port')), { code: 'ENOENT' });
@@ -724,12 +1037,12 @@ test('semantically identical registry serializations retain one check and live b
   const executor = createDirectNodeWorkspace({ projectRoot: root, reviewTurn: async options => {
     checks++;
     if (checks === 1) {
-      await writeFile(path.join(options.cwd, 'task-trees.json'), JSON.stringify({ activeMethod: 'a', schema: before.schema, trees: before.trees }, null, 2));
       await writeFile(path.join(root, 'task-trees.json'), JSON.stringify(live));
     }
     return { status: 'completed', output: '{"verdict":"pass","reason":"只改变序列化，模块正确"}' };
   } });
   const state = await executor.prepare('registry-order');
+  await writeFile(path.join(state.workerPath,'task-trees.json'),JSON.stringify({activeMethod:'a',schema:before.schema,trees:before.trees},null,2));
   await writeFile(path.join(state.workerPath, 'result.txt'), 'result');
   const receipt = await executor.finish(state, { nodeId: 'A', status: 'completed' });
   assert.equal(checks, 1);
@@ -779,7 +1092,7 @@ test('a rejected integrated candidate never reaches the live project and remains
   const root = await mkdtemp(path.join(os.tmpdir(), 'direct-rejected-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await writeFile(path.join(root, 'task-tree.md'), tree());
-  const executor = createDirectNodeWorkspace({ projectRoot: root, startTurn: async () => ({
+  const executor = createDirectNodeWorkspace({ projectRoot: root,repairTurn:null, startTurn: async () => ({
     status: 'completed', output: '{"verdict":"failed","reason":"成果尚未满足目标，修复无法实施"}'
   }) });
   const state = await executor.prepare('rejected');
@@ -790,26 +1103,116 @@ test('a rejected integrated candidate never reaches the live project and remains
   await executor.abandon(state);
 });
 
-test('a direct candidate receives final checker repairs without another review turn', { timeout: 30000 }, async t => {
+test('a direct candidate retains original output through execution handback and fresh final review', { timeout: 30000 }, async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'direct-repair-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await writeFile(path.join(root, 'task-tree.md'), tree());
-  let checks = 0;
+  let checks = 0,repairs=0;
   const executor = createDirectNodeWorkspace({ projectRoot: root, startTurn: async options => {
     if (options.prompt.includes('【功能验收】')) {
       checks++;
-      await writeFile(path.join(options.cwd, 'repair.txt'), '补齐\n');
+      if(checks===1)return {status:'completed',output:'{"verdict":"failed","reason":"缺少repair.txt"}'};
+      assert.equal(await readFile(path.join(options.cwd,'repair.txt'),'utf8'),'补齐\n');
       return { status: 'completed', output: '{"verdict":"pass","reason":"已经补齐并复验"}' };
     }
     throw new Error('unexpected turn');
   } });
   const state = await executor.prepare('repair');
   await writeFile(path.join(state.workerPath, 'original.txt'), '原成果\n');
-  const result = await executor.finish(state, { nodeId: 'A', objective: '完成并补齐A', status: 'completed' });
-  assert.equal(checks, 1);
+  const result = await executor.finish(state, { nodeId: 'A', objective: '完成并补齐A', status: 'completed',
+    repairCandidate:async({candidatePath,review})=>{
+      repairs++;assert.match(review.reason,/缺少repair/);
+      assert.equal(await readFile(path.join(candidatePath,'original.txt'),'utf8'),'原成果\n');
+      await writeFile(path.join(candidatePath,'repair.txt'),'补齐\n');
+    } });
+  assert.equal(checks, 2);assert.equal(repairs,1);
   assert.deepEqual(result.appliedFiles.sort(), ['original.txt', 'repair.txt']);
   assert.equal(await readFile(path.join(root, 'original.txt'), 'utf8'), '原成果\n');
   assert.equal(await readFile(path.join(root, 'repair.txt'), 'utf8'), '补齐\n');
+});
+
+test('direct review repair receives explicitly identified ignored source inputs and keeps them out of delivery', { timeout: 30000 }, async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'direct-review-input-handoff-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(path.join(root, 'task-tree.md'), tree());
+  await writeFile(path.join(root, '.gitignore'), 'intake/\n');
+  await mkdir(path.join(root, 'intake/normalized/wechat'), { recursive: true });
+  await writeFile(path.join(root, 'intake/normalized/wechat/messages.txt'), '原始聊天输入\n');
+  let checks = 0;
+  const executor = createDirectNodeWorkspace({ projectRoot: root, reviewTurn: async options => {
+    checks++;
+    if (checks === 1) return { status: 'completed', output: JSON.stringify({
+      verdict: 'failed', reason: '核心聊天核查未执行', evidence: ['来源输入未交接'],
+      issues: [{ id: 'F1', problem: '须先交接 intake/normalized/wechat 后逐条核验',
+        inputPaths: ['intake/normalized/wechat'], acceptanceCriteria: '基于原消息完成核查并更新结果' }]
+    }) };
+    assert.equal(await readFile(path.join(options.cwd, 'intake/normalized/wechat/messages.txt'), 'utf8'), '原始聊天输入\n');
+    assert.equal(await readFile(path.join(options.cwd, 'analysis.md'), 'utf8'), '基于原消息完成核查\n');
+    return { status: 'completed', output: JSON.stringify({ verdict: 'pass', reason: '已逐条核验', evidence: ['分析已写入'] }) };
+  }, repairTurn: async options => {
+    assert.equal(await readFile(path.resolve(options.cwd, 'intake/normalized/wechat/messages.txt'), 'utf8'), '原始聊天输入\n');
+    await writeFile(path.join(options.cwd, 'analysis.md'), '基于原消息完成核查\n');
+    return { status: 'completed', output: '已依据原消息完成核查' };
+  }});
+  const state = await executor.prepare('review-input-handoff');
+  await writeFile(path.join(state.workerPath, 'analysis.md'), '待补充\n');
+  const result = await executor.finish(state, { nodeId: 'F1', objective: '基于聊天原文完成核查', status: 'completed' });
+  assert.equal(checks, 2);
+  assert.ok(result.appliedFiles.includes('analysis.md'));
+  assert.ok(!result.appliedFiles.some(file => file.startsWith('intake/')));
+  assert.ok(result.reviewInputs.some(receipt=>receipt.paths?.includes('intake/normalized/wechat')),
+    'successful delivery must retain the newly recovered input receipt');
+  assert.equal(await readFile(path.join(root, 'analysis.md'), 'utf8'), '基于原消息完成核查\n');
+});
+
+test('direct repair combines original-source input with candidate-only input instead of selecting one source for both',async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'direct-review-mixed-input-'));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  await writeFile(path.join(root,'task-tree.md'),tree());
+  await writeFile(path.join(root,'.gitignore'),'source/\nderived/\n');
+  await mkdir(path.join(root,'source'));
+  await writeFile(path.join(root,'source/raw.txt'),'source original');
+  let reviews=0;
+  const executor=createDirectNodeWorkspace({projectRoot:root,reviewTurn:async options=>{
+    if(++reviews===1)return {status:'completed',output:JSON.stringify({verdict:'failed',reason:'输入缺口',
+      issues:[{id:'F1',problem:'修复分析',inputPaths:['source/raw.txt','derived/normalized.txt']}],evidence:['候选分析未完成']})};
+    assert.equal(await readFile(path.join(options.cwd,'analysis.md'),'utf8'),'source original + candidate derived');
+    return {status:'completed',output:JSON.stringify({verdict:'pass',reason:'两个来源均已核验'})};
+  },repairTurn:async options=>{
+    const raw=await readFile(path.join(options.cwd,'source/raw.txt'),'utf8');
+    const normalized=await readFile(path.join(options.cwd,'derived/normalized.txt'),'utf8');
+    await writeFile(path.join(options.cwd,'analysis.md'),`${raw} + ${normalized}`);
+    return {status:'completed',output:'已修复'};
+  }});
+  const state=await executor.prepare('mixed-input');
+  await mkdir(path.join(state.workerPath,'derived'));
+  await writeFile(path.join(state.workerPath,'derived/normalized.txt'),'candidate derived');
+  await writeFile(path.join(state.workerPath,'.task-tree-review-inputs.json'),JSON.stringify({schema:1,paths:['derived/normalized.txt']}));
+  await writeFile(path.join(state.workerPath,'analysis.md'),'待解决');
+  const result=await executor.finish(state,{nodeId:'A',objective:'消费两个来源完成分析',status:'completed'});
+  assert.equal(reviews,2);
+  assert.deepEqual(result.appliedFiles,['analysis.md']);
+  assert.equal(await readFile(path.join(root,'analysis.md'),'utf8'),'source original + candidate derived');
+});
+
+test('direct repair does not start a model or fabricate delivery when the exact input is absent from both known sources',async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'direct-review-missing-input-'));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  await writeFile(path.join(root,'task-tree.md'),tree());
+  let repairs=0;
+  const executor=createDirectNodeWorkspace({projectRoot:root,reviewTurn:async()=>({status:'completed',output:JSON.stringify({
+    verdict:'failed',reason:'原文尚未核验',issues:[{id:'F1',problem:'原文未交接',inputPaths:['intake/missing.txt']}]
+  })}),repairTurn:async()=>{repairs++;throw new Error('must not launch without the input');}});
+  const state=await executor.prepare('truly-missing-input');
+  await writeFile(path.join(state.workerPath,'analysis.md'),'原成果保留');
+  await assert.rejects(executor.finish(state,{nodeId:'A',objective:'核验原文',status:'completed'}),error=>{
+    assert.equal(error.review.causeCode,'TASK_INPUT_UNAVAILABLE');
+    assert.equal(error.review.stage,'input-handoff');
+    return true;
+  });
+  assert.equal(repairs,0);
+  assert.equal(await readFile(path.join(state.workerPath,'analysis.md'),'utf8'),'原成果保留');
+  await assert.rejects(readFile(path.join(root,'analysis.md')),{code:'ENOENT'});
 });
 
 test('an actual node tree-tool write stays isolated until the direct run is accepted', { timeout: 30000 }, async t => {

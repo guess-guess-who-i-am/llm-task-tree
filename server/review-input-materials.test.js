@@ -1,9 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdir,mkdtemp,readFile,rm,stat,symlink,writeFile} from 'node:fs/promises';
+import {lstat,mkdir,mkdtemp,readFile,readlink,rm,stat,symlink,writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {registerReviewInputs,captureReviewInputs,materializeReviewInputs,REVIEW_INPUTS_TOOL} from './review-input-materials.js';
+import {registerReviewInputs,captureReviewInputs,materializeReviewInputs,reviewRequiredInputPaths,REVIEW_INPUTS_TOOL} from './review-input-materials.js';
+
+test('review repair recovers only explicitly named handoff paths from older prose receipts',()=>{
+  assert.deepEqual(reviewRequiredInputPaths([
+    {problem:'需要交接 intake/normalized/wechat 后逐条核对'},
+    {problem:'handoff docs/source.md before resuming'},
+    {problem:'目录可能在 data/archive 下，但没有要求交接'}
+  ]),['intake/normalized/wechat','docs/source.md']);
+  assert.deepEqual(reviewRequiredInputPaths({
+    issues:[{id:'F1',problem:'所需聊天输入未交接'}],
+    evidence:['候选记录显示 intake/normalized/wechat 未交接']
+  }),['intake/normalized/wechat']);
+});
 
 async function fixture(t) {
   const base=await mkdtemp(path.join(os.tmpdir(),'review-inputs-'));
@@ -41,6 +53,20 @@ test('source changes after capture do not mutate final review input',async t=>{
   assert.equal(await readFile(path.join(f.candidatePath,'dataset.txt'),'utf8'),'version one');
 });
 
+test('explicit task inputs snapshot without editing or expanding the source registration',async t=>{
+  const f=await fixture(t);
+  await mkdir(path.join(f.sourceRoot,'intake/normalized/wechat'),{recursive:true});
+  await writeFile(path.join(f.sourceRoot,'intake/normalized/wechat/messages.json'),'declared data');
+  await writeFile(path.join(f.sourceRoot,'other.txt'),'unrelated data');
+  const receipt=await captureReviewInputs({...f,paths:['intake/normalized/wechat']});
+  assert.equal(receipt.fileCount,1);
+  await materializeReviewInputs({candidatePath:f.candidatePath,receipts:[receipt]});
+  assert.equal(await readFile(path.join(f.candidatePath,'intake/normalized/wechat/messages.json'),'utf8'),'declared data');
+  await assert.rejects(readFile(path.join(f.candidatePath,'other.txt')),{code:'ENOENT'});
+  await assert.rejects(readFile(path.join(f.sourceRoot,'.task-tree-review-inputs.json')),{code:'ENOENT'});
+  await assert.rejects(captureReviewInputs({...f,paths:['../other.txt']}),{code:'REVIEW_INPUT_PATH_INVALID'});
+});
+
 test('registration rejects missing paths, traversal, root selection and symlink escape',async t=>{
   const f=await fixture(t);
   await writeFile(path.join(f.base,'outside'),'not scoped');
@@ -59,12 +85,97 @@ test('nested symlink or credential files are not copied from a registered direct
   await writeFile(path.join(f.sourceRoot,'data/.env'),'SECRET');
   await symlink(f.base,path.join(f.sourceRoot,'data/escape'));
   await registerReviewInputs(f.sourceRoot,{action:'register',paths:['data']});
-  await assert.rejects(captureReviewInputs(f),{code:'REVIEW_INPUT_SYMLINK'});
-  await rm(path.join(f.sourceRoot,'data/escape'));
   const receipt=await captureReviewInputs(f);
-  await materializeReviewInputs({candidatePath:f.candidatePath,receipts:[receipt]});
+  assert.deepEqual(receipt.excluded,['data/.env','data/escape']);
+  const result=await materializeReviewInputs({candidatePath:f.candidatePath,receipts:[receipt]});
   await assert.rejects(readFile(path.join(f.candidatePath,'data/.env')),{code:'ENOENT'});
+  await assert.rejects(lstat(path.join(f.candidatePath,'data/escape')),{code:'ENOENT'});
+  assert.equal(await readlink(path.join(f.sourceRoot,'data/escape')),f.base);
+  assert.match(result.prompt,/安全排除/);
+  assert.match(result.prompt,/data\/escape/);
+  assert.match(result.prompt,/不能.*完整/);
   assert.equal(await readFile(path.join(f.candidatePath,'data/ok.txt'),'utf8'),'ok');
+});
+
+test('a directory with a foreign dangling link snapshots other files and preserves the exclusion through serialized receipts',async t=>{
+  const f=await fixture(t);
+  const directory='workbuddy-extraction/experts-full/chuangye-manor/skills/knowledge-business/references';
+  const link=`${directory}/创业可以学.md`,target=path.join(f.base,'foreign-machine/missing/创业可以学.md');
+  await mkdir(path.join(f.sourceRoot,directory),{recursive:true});
+  await symlink(target,path.join(f.sourceRoot,link));
+  await writeFile(path.join(f.sourceRoot,directory,'可用.md'),'available material');
+  await registerReviewInputs(f.sourceRoot,{action:'register',paths:['workbuddy-extraction']});
+  const receipt=JSON.parse(JSON.stringify(await captureReviewInputs(f)));
+  assert.equal(receipt.fileCount,1);
+  assert.deepEqual(receipt.excluded,[link]);
+  assert.deepEqual(JSON.parse(await readFile(receipt.manifestPath,'utf8')).excluded,[link]);
+  const result=await materializeReviewInputs({candidatePath:f.candidatePath,receipts:[receipt]});
+  assert.equal(await readFile(path.join(f.candidatePath,directory,'可用.md'),'utf8'),'available material');
+  await assert.rejects(lstat(path.join(f.candidatePath,link)),{code:'ENOENT'});
+  assert.equal(await readlink(path.join(f.sourceRoot,link)),target);
+  assert.ok(result.prompt.includes(link));
+  assert.match(result.prompt,/缺失/);
+});
+
+test('directory capture never follows internal links, symlink cycles or links into credentials',async t=>{
+  const f=await fixture(t);
+  await mkdir(path.join(f.sourceRoot,'data'));
+  await writeFile(path.join(f.sourceRoot,'data/normal.txt'),'normal');
+  await writeFile(path.join(f.sourceRoot,'.env'),'DO_NOT_COPY_SECRET');
+  for(const [name,target]of [['alias','normal.txt'],['cycle','.'],['secret','../.env']])
+    await symlink(target,path.join(f.sourceRoot,'data',name));
+  await registerReviewInputs(f.sourceRoot,{action:'register',paths:['data']});
+  const receipt=await captureReviewInputs(f);
+  assert.equal(receipt.fileCount,1);
+  assert.deepEqual(receipt.excluded,['data/alias','data/cycle','data/secret']);
+  await materializeReviewInputs({candidatePath:f.candidatePath,receipts:[receipt]});
+  for(const file of ['alias','cycle','secret'])await assert.rejects(lstat(path.join(f.candidatePath,'data',file)),{code:'ENOENT'});
+  assert.equal(await readFile(path.join(f.candidatePath,'data/normal.txt'),'utf8'),'normal');
+});
+
+test('an explicitly required symlink still fails rather than silently omitting the requested input',async t=>{
+  const f=await fixture(t);
+  await writeFile(path.join(f.sourceRoot,'real.txt'),'real');
+  await registerReviewInputs(f.sourceRoot,{action:'register',paths:['real.txt']});
+  await rm(path.join(f.sourceRoot,'real.txt'));
+  await symlink('missing.txt',path.join(f.sourceRoot,'real.txt'));
+  await assert.rejects(captureReviewInputs(f),{code:'REVIEW_INPUT_SYMLINK',file:'real.txt'});
+});
+
+test('overlapping directory registration cannot hide an explicitly required file replaced by a symlink',async t=>{
+  const f=await fixture(t);
+  await mkdir(path.join(f.sourceRoot,'data'));
+  await writeFile(path.join(f.sourceRoot,'data/input.txt'),'required input');
+  await registerReviewInputs(f.sourceRoot,{action:'register',paths:['data','data/input.txt']});
+  await rm(path.join(f.sourceRoot,'data/input.txt'));
+  await symlink('missing.txt',path.join(f.sourceRoot,'data/input.txt'));
+  await assert.rejects(captureReviewInputs(f),{code:'REVIEW_INPUT_SYMLINK',file:'data/input.txt'});
+});
+
+test('an all-symlink directory still gives the checker a warning when no regular input is restored',async t=>{
+  const f=await fixture(t);
+  await mkdir(path.join(f.sourceRoot,'data'));
+  await symlink('missing.txt',path.join(f.sourceRoot,'data/missing'));
+  await registerReviewInputs(f.sourceRoot,{action:'register',paths:['data']});
+  const receipt=await captureReviewInputs(f);
+  assert.equal(receipt.fileCount,0);
+  const result=await materializeReviewInputs({candidatePath:f.candidatePath,receipts:[receipt]});
+  assert.match(result.exclusionNotice,/data\/missing/);
+  assert.match(result.exclusionNotice,/内容未验证/);
+});
+
+test('legacy schema-1 manifests without exclusions still restore without inventing warnings',async t=>{
+  const f=await fixture(t);
+  await writeFile(path.join(f.sourceRoot,'normal.txt'),'normal');
+  await registerReviewInputs(f.sourceRoot,{action:'register',paths:['normal.txt']});
+  const receipt=await captureReviewInputs(f);
+  const manifest=JSON.parse(await readFile(receipt.manifestPath,'utf8'));
+  delete manifest.excluded;
+  const legacyManifest=path.join(f.base,'legacy-manifest.json');
+  await writeFile(legacyManifest,JSON.stringify(manifest));
+  const result=await materializeReviewInputs({candidatePath:f.candidatePath,receipts:[{...receipt,manifestPath:legacyManifest}]});
+  assert.equal(result.exclusionNotice,'');
+  assert.equal(await readFile(path.join(f.candidatePath,'normal.txt'),'utf8'),'normal');
 });
 
 test('candidate code and conflicting branch inputs cannot be silently overwritten',async t=>{

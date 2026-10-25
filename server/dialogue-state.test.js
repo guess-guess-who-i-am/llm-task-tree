@@ -3,6 +3,58 @@ import { dialogueWithCompletionReceipt } from './dialogue-state.js';
 import assert from 'node:assert/strict';
 import { dialogueMessages, serializeDialogueState, restoreDialogueState } from './dialogue-state.js';
 
+test('stopped candidate and actionable review handback survive restart and receipt',()=>{
+  const retainedWorkspaces=[{workspacePath:'/reserve/review',sourcePath:'/old/review',role:'review-candidate',private:'PRIVATE'}];
+  const run={id:'r',status:'stopped',workspacePath:'/reserve/review',checkpoint:{workerPath:'/reserve/worker'},retainedWorkspaces,
+    review:{verdict:'failed',reason:'bad',issues:[{id:'one',problem:'bad output',files:['one.txt'],acceptanceCriteria:'good output'}],repairStatus:'no-progress'}};
+  const restored=restoreDialogueState(serializeDialogueState({runs:[run]})).runs[0];
+  assert.equal(restored.retainedWorkspaces[0].workspacePath,'/reserve/review');
+  assert.equal(restored.retainedWorkspaces[0].private,undefined);
+  assert.deepEqual(restored.review.issues,run.review.issues);
+  assert.equal(restored.review.repairStatus,'no-progress');
+  const receipt=dialogueWithCompletionReceipt([],restored).at(-1).content;
+  assert.match(receipt,/reserve\/review/);assert.match(receipt,/reserve\/worker/);
+});
+
+test('failed review keeps exact missing input paths available for a later continuation',()=>{
+  const run={id:'r',status:'failed',review:{verdict:'failed',reason:'核心原文核查未执行',issues:[{
+    id:'F1',problem:'须交接 intake/normalized/wechat 后逐条核验',inputPaths:['intake/normalized/wechat']
+  }]}};
+  const restored=restoreDialogueState(JSON.parse(JSON.stringify(serializeDialogueState({runs:[run]})))).runs[0];
+  assert.deepEqual(restored.review.issues[0].inputPaths,['intake/normalized/wechat']);
+});
+
+test('restart preserves review invalidation and numeric function metrics without tool bodies, prompts or reasoning',()=>{
+  const timing={totalMs:1200,runtimeMs:2,model:'gpt-6.1-sol',
+    rounds:[{round:0,totalMs:1100,requestMs:1000,streamMs:100,toolCalls:1,prompt:'PRIVATE_PROMPT',tokenUsage:{inputTokens:12,outputTokens:3},attempts:[{status:200,endpoint:'PRIVATE_URL'}]}],
+    tools:[{round:0,toolCallId:'PRIVATE_CALL_ID',toolName:'exec_command',executeMs:10,durationMs:15,arguments:'PRIVATE_CMD',result:'PRIVATE_BODY'}],
+    hooks:[{event:'Stop',durationMs:5,reports:[{source:'hook-file',durationMs:5,stdout:'PRIVATE_HOOK'}]}],reasoning:'PRIVATE_THOUGHT'};
+  timing.formatCorrections=[{round:3,detail:'PRIVATE_BAD_OUTPUT'}];
+  timing.receiptProjections=[{round:2,savedBytes:800000,duplicateReceipts:2,durationMs:3}];
+  timing.summaryRequests=[{totalMs:4000,purpose:'tool-results',status:'completed',tokenUsage:{inputTokens:20000,outputTokens:1000},output:'PRIVATE_SUMMARY'}];
+  timing.rounds[0].contextInput={estimatedInputTokens:200,rawEstimateTokens:210,basis:'local-estimate',prompt:'PRIVATE_CONTEXT'};
+  const sample={role:'review-invalidated',attempt:0,candidateId:'candidate',file:'src/changed.js',reason:'输入内容变化',private:'PRIVATE_EXTRA'};
+  const run={id:'r',status:'completed',timing,integrationTimings:[sample,{role:'review',attempt:0,status:'cancelled',durationMs:1200,timing}],
+    review:{verdict:'pass',reason:'verified',dependencyScope:{complete:true,files:['facts.txt']}}};
+  const restored=restoreDialogueState(JSON.parse(JSON.stringify(serializeDialogueState({runs:[run]})))).runs[0];
+  assert.equal(restored.timing.rounds[0].requestMs,1000);
+  assert.equal(restored.integrationTimings[0].file,'src/changed.js');
+  assert.equal(restored.integrationTimings[1].timing.tools[0].executeMs,10);
+  assert.equal(restored.integrationTimings[1].timing.hooks[0].durationMs,5);
+  assert.equal(restored.timing.formatCorrections[0].round,3);
+  assert.equal(restored.timing.receiptProjections[0].savedBytes,800000);
+  assert.equal(restored.timing.summaryRequests[0].tokenUsage.inputTokens,20000);
+  assert.equal(restored.timing.rounds[0].contextInput.estimatedInputTokens,200);
+  assert.deepEqual(restored.review.dependencyScope,{complete:true,files:['facts.txt']});
+  assert.doesNotMatch(JSON.stringify(restored),/PRIVATE_/);
+});
+
+test('old malformed timing arrays cannot prevent dialogue recovery',()=>{
+  const run={id:'bad-metrics',status:'completed',timing:{rounds:{},tools:{},hooks:{},compactions:{}},
+    integrationTimings:[{role:'review-dependency-receipt',dependencyScope:{complete:false,files:{}}}]};
+  assert.doesNotThrow(()=>restoreDialogueState(serializeDialogueState({runs:[run]})));
+});
+
 test('presentation survives disk roundtrip without leaking reasoning or changing raw text',()=>{
   const message={role:'assistant',content:'正式回答\n\n【实际交付回执】\n完整差异',presentation:{process:'先读取。再修改。',answer:'正式回答',reasoning:'PRIVATE'}};
   const clean=dialogueMessages([message])[0];
@@ -25,6 +77,40 @@ test('tree validation diagnostics retain their stage and cause across restart',(
   assert.equal(restored.review.failureCategory,review.failureCategory);
   assert.equal(restored.review.stage,review.stage);
   assert.equal(restored.review.causeCode,review.causeCode);
+});
+
+test('restart preserves a validated pending delegation plan without runtime payloads',()=>{
+  const pendingDelegation={
+    reason:'两个独立交付物可同时完成',
+    sharedContract:'共享错误码与验收边界',
+    acceptanceCriteria:['两个结果都通过实际检查'],
+    jobs:[{
+      taskId:'left',nodeId:'N3',title:'左侧成果',instruction:'读取输入并写入结果',workEstimate:'中等',
+      writeSet:['docs/left.md'],dependsOn:[],deliverables:[{path:'docs/left.md',mode:'update',nodeIds:['N3']}],
+      acceptanceCriteria:['文件存在且内容完整'],privatePrompt:'SECRET_PROMPT'
+    },{
+      taskId:'right',nodeId:'N3',title:'右侧成果',instruction:'读取输入并写入结果',workEstimate:'中等',
+      writeSet:['docs/right.md'],dependsOn:[],deliverables:[{path:'docs/right.md',mode:'update'}],
+      acceptanceCriteria:['文件存在且内容完整']
+    }],
+    status:'preparing',stage:'delegation-checkpoint',runId:'',
+    error:{code:'DELEGATION_PREPARATION_FAILED',causeCode:'EACCES',message:'保留候选'},
+    workspacePath:'/tmp/worker',retainedWorkspaces:[{workspacePath:'/tmp/candidate',sourcePath:'/tmp/source',role:'review-candidate',private:'SECRET_PATH'}],
+    runtimePayload:{toolResult:'SECRET_TOOL',reasoning:'SECRET_REASONING'}
+  };
+  const checkpoint={runId:'r',workerPath:'/tmp/worker',integrationPath:'/tmp/integration',snapshotCommit:'abc',runDir:'/tmp/run',indexPath:'/tmp/index',pendingDelegation};
+  const saved=serializeDialogueState({runs:[{id:'r',status:'running',checkpoint}]});
+  assert.deepEqual(saved.runs[0].checkpoint.pendingDelegation,{
+    reason:pendingDelegation.reason,sharedContract:pendingDelegation.sharedContract,
+    acceptanceCriteria:pendingDelegation.acceptanceCriteria,
+    jobs:pendingDelegation.jobs.map(({privatePrompt,...job})=>job),
+    status:'preparing',stage:'delegation-checkpoint',runId:'',
+    error:pendingDelegation.error,workspacePath:'/tmp/worker',
+    retainedWorkspaces:[{workspacePath:'/tmp/candidate',sourcePath:'/tmp/source',role:'review-candidate'}]
+  });
+  assert.doesNotMatch(JSON.stringify(saved),/SECRET_/);
+  const restored=restoreDialogueState(saved).runs[0];
+  assert.deepEqual(restored.checkpoint.pendingDelegation,saved.runs[0].checkpoint.pendingDelegation);
 });
 
 test('lightweight acceptance phase survives restart without persisting tool bodies or private thoughts',()=>{
@@ -172,6 +258,19 @@ test('final dialogue and export include actual checker repairs, not just the wor
   assert.match(readOnly.at(-1).content,/本轮未修改文件/);
   const legacy=restoreDialogueState({runs:[{status:'completed',appliedFiles:['task-tree.md'],review:{verdict:'pass',reason:'旧记录'}}]}).runs[0];
   assert.match(dialogueWithCompletionReceipt(source,legacy).at(-1).content,/旧记录未保存节点差异/);
+});
+
+test('failed and stopped workspace receipts survive into dialogue without claiming delivery',()=>{
+  for(const status of ['failed','stopped']){
+    const source=[{role:'user',content:'保存产物'},{role:'assistant',content:'产物已经写好'}];
+    const run={id:'retained-run',status,projectRoot:'/project',checkpoint:{workerPath:'/project/备用/worker'},appliedFiles:[]};
+    const restored=restoreDialogueState(serializeDialogueState({runs:[run]})).runs[0];
+    const result=dialogueWithCompletionReceipt(source,restored);
+    assert.match(result.at(-1).content,/未合入成果回执/);
+    assert.ok(result.at(-1).content.includes('/project/备用/worker'));
+    assert.match(result.at(-1).content,/不能代表.*合入/);
+    assert.equal(source.at(-1).content,'产物已经写好');
+  }
 });
 
 test('host receipt names the owning project/tree and actual persisted node fields across restart',()=>{

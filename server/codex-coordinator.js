@@ -14,13 +14,23 @@ import { materializeParallelBranches, readParallelSource, recordParallelBranchRe
 import { assertWorkspaceTreeFiles } from './tree-write-safety.js';
 import { createDirectNodeWorkspace } from './direct-node-workspace.js';
 import { createPeerMailbox, PEER_EXCHANGE_TOOL } from './peer-mailbox.js';
+import {agentControls} from './agent-controls.js';
+import {createAgentDirectory,retainedAgentId,AGENT_DIRECTORY_TOOLS} from './agent-directory.js';
+import {loadAttachment, attachmentReference, materializeAttachments} from './chat-attachments.js';
 import { recordAgentActivity } from './agent-activity.js';
-import { buildCompletionReviewPrompt, parseCompletionReview, completionReviewFailure, completionReviewInterruption, WORKER_RESULT_SCHEMA } from './node-completion-review.js';
+import { buildCompletionReviewPrompt, buildReviewRepairPrompt, parseCompletionReview, completionReviewFailure, completionReviewInterruption, WORKER_RESULT_SCHEMA } from './node-completion-review.js';
+import { runReviewRepairCycle } from './review-repair-cycle.js';
 import {executionErrorDetails} from './execution-error.js';
+import {createMergeConflictSession} from './merge-conflict-session.js';
+import {recordWorkerIntegrationPhase} from './execution-progress.js';
 import {WORKER_SPLIT_TOOL} from './adaptive-node-execution.js';
+import {assertSplitProgress} from './agent-evidence.js';
+import {MAX_ACTIVE_AGENTS,withSuspendedAgentSlot} from './agent-capacity.js';
+import {presentedJobState} from './agent-outcomes.js';
+import {assertTaskInputs,missingTaskInputs,reviewRequiredInputPaths} from './review-input-materials.js';
 import {validateReviewScopeFiles} from './review-input-watch.js';
 import {readLinkedTreeFiles} from './tree-node-location.js';
-import {JOB_DELIVERY_PROPERTIES,normalizeDeliveryContract,snapshotDeliverables,inspectDeliverables,recoveryDecision,coordinationEvidence,stageCoordinationEvidence} from './execution-coordination.js';
+import {assertDistinctTaskScopes,assertMeaningfulTask,JOB_DELIVERY_PROPERTIES,DELIVERY_BLOCKER_TOOL,DELIVERY_REPAIR_TOOL,needsDeliveryContractRepair,repairDeliveryContract,createWorkerDeliveryGuard,normalizeDeliveryContract,snapshotDeliverables,inspectDeliverables,recoveryDecision,coordinationEvidence,stageCoordinationEvidence} from './execution-coordination.js';
 
 // Planner context is supplied explicitly in the prompt. Reusing an ever-growing
 // conversation made the first response increasingly slow. Keep context concise;
@@ -32,21 +42,96 @@ const PLANNER_MODEL = String(process.env.TASK_TREE_PLANNER_MODEL || "gpt-6.1-sol
 const PLANNER_REASONING_EFFORT = String(process.env.TASK_TREE_PLANNER_REASONING_EFFORT || "low").trim();
 const WORKER_HANDOFF_PATH = ".task-tree-context/handoff.json";
 const CONTEXT_POLICIES = new Set(["reuse", "new", "selected"]);
-export const MAX_DYNAMIC_SPLIT_DEPTH = 1;
+const retainedRepairReceipt=receipt=>({workspacePath:receipt.workspacePath,role:'repair-worker',taskId:receipt.taskId,
+  sourceTaskId:receipt.sourceTaskId,issueIds:receipt.issueIds,status:receipt.status,attempt:receipt.attempt,
+  baseCommit:receipt.baseCommit,commit:receipt.commit,changedFiles:receipt.changedFiles,candidatePath:receipt.candidatePath});
 
+// Issue ownership is inferred from the actual execution receipts, not from a
+// new implementation plan. Unknown/shared files stay in one repair lane.
+export function assignReviewRepairJobs(jobs, review) {
+  const workers=jobs.filter(job=>!job.splitChildren?.length);
+  if(!workers.length)throw new Error('验收修复缺少原执行者，成果保留等待恢复');
+  const issues=review.issues?.length?review.issues:[{id:'review',problem:review.reason||'验收未通过',
+    ...(review.evidence?.length?{acceptanceCriteria:review.evidence.join('\n')}:{})}];
+  const matches=(values,file)=>values.some(value=>{const prefix=String(value||'').split('*')[0].replace(/\/$/,'');return prefix&&(file===prefix||file.startsWith(`${prefix}/`));});
+  const fileOwners=file=>{
+    const actual=workers.filter(job=>matches(job.changedFiles||[],file));
+    return actual.length?actual:workers.filter(job=>matches([...(job.writeSet||[]),...(job.deliverables||[]).map(item=>item.path)],file));
+  };
+  const groups=[];
+  for(const issue of issues){
+    const owners=issue.files?.length?workers.filter(job=>issue.files.some(file=>fileOwners(file).includes(job))):workers;
+    const unknown=!issue.files?.length||issue.files.some(file=>!fileOwners(file).length);
+    const ownerIds=new Set((unknown?workers:owners).map(job=>job.taskId));
+    const overlapping=groups.filter(group=>[...group.ownerIds].some(id=>ownerIds.has(id)));
+    const group={owner:(owners[0]||workers.at(-1)),ownerIds,issues:[issue]};
+    for(const previous of overlapping){
+      previous.ownerIds.forEach(id=>group.ownerIds.add(id));
+      group.issues.unshift(...previous.issues);
+      group.owner=previous.owner;
+      groups.splice(groups.indexOf(previous),1);
+    }
+    groups.push(group);
+  }
+  return groups.map(({owner,issues})=>({owner,issues}));
+}
 export function canWorkerSplit(job, jobs = []) {
+  if(['completed','failed','stopped','blocked'].includes(job?.status)||job?.splitChildren?.length)return false;
   const byId = new Map(jobs.map((item) => [item.taskId, item]));
-  let depth = 0;
   let parentTaskId = job?.parentTaskId || "";
-  const seen = new Set();
-  while (parentTaskId && !seen.has(parentTaskId)) {
+  const seen = new Set([job?.taskId]);
+  while (parentTaskId) {
+    if(seen.has(parentTaskId))return false;
     seen.add(parentTaskId);
     const parent = byId.get(parentTaskId);
     if (!parent) break;
-    depth += 1;
     parentTaskId = parent.parentTaskId || "";
   }
-  return depth < MAX_DYNAMIC_SPLIT_DEPTH;
+  return true;
+}
+
+// A planner can omit an edge even when a downstream instruction explicitly
+// consumes another branch's result.  That creates isolated worktrees and
+// causes the downstream worker to redo the upstream work.  Repair only
+// evidence-backed references; unrelated parallel tasks stay parallel.
+export function inferParallelDependencies(input = [], {existingJobs=[]}={}) {
+  if (!Array.isArray(input)) return { jobs: input, repairs: [] };
+  const jobs = input.map((job, index) => ({ ...job, __planIndex: index }));
+  const repairs = [];
+  const consumer = /(基于|依据|根据|读取|使用|消费|汇总|依赖|前置|上游|based on|consume|using|read|depends on)/i;
+  const textOf = job => [job.title, job.instruction, job.summary, job.acceptancePrompt]
+    .map(value => String(value || '')).join('\n');
+  const mentions=(text,ref)=>{
+    const escaped=ref.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    return /^[\w-]+$/.test(ref)?new RegExp(`(^|[^\\w-])${escaped}($|[^\\w-])`,'i').test(text):text.includes(ref);
+  };
+  const pathsOf = job => (Array.isArray(job.deliverables) ? job.deliverables : [])
+    .filter(item => item?.mode !== 'delete').map(item => String(item?.path || '').replace(/\\/g,'/').replace(/^\.\//,'').replace(/\/$/,'')).filter(Boolean);
+  for (const downstream of jobs) {
+    const existing = new Set((Array.isArray(downstream.dependsOn) ? downstream.dependsOn : []).map(String));
+    // Negated references and names embedded in other identifiers do not imply
+    // a dependency. Only a consuming clause or declared file contract does.
+    const text = textOf(downstream).split(/[\n。；;，,]/).filter(clause=>consumer.test(clause)
+      && !/(无需|不必|不依赖|不需要|不使用|without|does not depend|independent of)/i.test(clause)).join('\n');
+    const ordinals = new Set([...text.matchAll(/(?:任务|task)\s*(\d+(?:\s*[和及、/,&]\s*\d+)*)/gi)]
+      .flatMap(match=>match[1].split(/\D+/).map(Number)));
+    const candidates = [...existingJobs,...jobs].filter(upstream => upstream !== downstream && !existing.has(String(upstream.taskId || upstream.id || '')))
+      .filter(upstream => {
+        const refs = [upstream.taskId, upstream.id, upstream.title]
+          .map(value => String(value || '').trim()).filter(value => value.length >= 3);
+        const explicit = refs.some(ref => mentions(text,ref));
+        const ordinalReference = Number.isInteger(upstream.__planIndex)&&ordinals.has(upstream.__planIndex+1);
+        const inputReference = (Array.isArray(downstream.inputPaths)?downstream.inputPaths:[]).some(input=> {
+          const normalized=String(input).replace(/\\/g,'/').replace(/^\.\//,'').replace(/\/$/,'');
+          return pathsOf(upstream).some(output=>normalized===output || output.startsWith(`${normalized}/`) || normalized.startsWith(`${output}/`));
+        });
+        return explicit || ordinalReference || inputReference;
+      });
+    if (!candidates.length) continue;
+    downstream.dependsOn = [...new Set([...(downstream.dependsOn || []), ...candidates.map(job => job.taskId || job.id)])];
+    repairs.push({ taskId: downstream.taskId || downstream.id, added: candidates.map(job => job.taskId || job.id) });
+  }
+  return { jobs: jobs.map(({ __planIndex, ...job }) => job), repairs };
 }
 
 function assertTurnCompleted(result) {
@@ -57,6 +142,26 @@ function assertTurnCompleted(result) {
   }
 }
 
+function inheritedReviewInputs(run, job) {
+  const byId=new Map((run.jobs||[]).map(item=>[item.taskId,item]));
+  const visited=new Set(),pending=[...(job.dependsOn||[]),job.parentTaskId].filter(Boolean);
+  while(pending.length){
+    const id=String(pending.pop());
+    if(visited.has(id))continue;
+    visited.add(id);
+    const upstream=byId.get(id);
+    if(upstream)pending.push(...(upstream.dependsOn||[]),upstream.parentTaskId);
+  }
+  const receipts=[run.workspace?.reviewInputs,run.initialReceipt?.reviewInputs,job.reviewInputs,
+    ...[...visited].map(id=>byId.get(id)?.reviewInputs)].flat().filter(Boolean);
+  const seen=new Set();
+  return receipts.filter(receipt=>{
+    const key=receipt.manifestPath||`${receipt.sourceRoot||''}:${(receipt.paths||[]).join('|')}:${receipt.snapshotRoot||''}`;
+    if(seen.has(key))return false;
+    seen.add(key);return true;
+  });
+}
+
 async function deepSeekPlannerConfig(projectRoot) {
   try { return loadDeepSeekConfig(projectRoot, { role: 'planner' }); }
   catch (error) {
@@ -65,15 +170,17 @@ async function deepSeekPlannerConfig(projectRoot) {
   }
 }
 
-export async function requestDeepSeekPlanner({ projectRoot, prompt, outputSchema, onNotification, contextMessages = [], historyMessages = [], dialogueContext = historyMessages, sourceTree }) {
+export async function requestDeepSeekPlanner({ projectRoot, prompt, outputSchema, onNotification, contextMessages = [], historyMessages = [], dialogueContext = historyMessages, sourceTree, signal }) {
+  signal?.throwIfAborted();
   const config = await deepSeekPlannerConfig(projectRoot);
   if (!config) return null;
   const startedAt = Date.now();
     const result = await startDeepSeekTurn({
-      cwd: projectRoot, prompt, model: config.model, contextMessages,
+      cwd: projectRoot, prompt, model: config.model, role: 'planner', contextMessages,
       ...(historyMessages.length ? { messages: [...historyMessages, { role: 'user', content: prompt }] } : {}),
       ...(dialogueContext.length ? { dialogueContext: [...dialogueContext, { role: 'user', content: prompt }] } : {}),
       environment: { MODEL_AGENT_MAIN_BASE_URL: config.baseUrl, MODEL_AGENT_MAIN_API_KEY: config.apiKey, MODEL_AGENT_MAIN_MODEL: config.model,
+        MODEL_AGENT_MAIN_REASONING_EFFORT: config.reasoningEffort, TASK_TREE_PLANNER_REASONING_EFFORT: config.reasoningEffort,
         TASK_TREE_QUALITY_MODE: 'advisory',
         MODEL_AGENT_MAIN_FALLBACK_BASE_URLS: config.baseUrls.slice(1).join(','),
         MODEL_AGENT_MAIN_FALLBACK_MODELS: config.fallbackModels.join(','),
@@ -84,7 +191,7 @@ export async function requestDeepSeekPlanner({ projectRoot, prompt, outputSchema
       runtimeToolNames: ['skills_list', 'skills_read', 'read_file', 'task_tree_focus', 'task_tree_node'],
       tools: TREE_CONTEXT_TOOLS, toolHandler: treeContextHandler(projectRoot, sourceTree),
       outputSchema, temperature: 0.1,
-      waitForCompletion: true, onNotification
+      waitForCompletion: true, onNotification, signal
     });
     assertTurnCompleted(result);
     const output = String(result.structuredOutput || result.messages?.at(-1)?.content || result.output || '').trim();
@@ -479,6 +586,9 @@ export function validateParallelJobs(input, { minimum = 1, knownTaskIds = [], ex
     throw new Error(minimum <= 1 ? "至少需要 1 个 worker" : "并行运行至少需要 2 个 worker");
   }
 
+  // Reconcile declared input/output contracts at every entry, including direct
+  // execution and recursive appends, not only the separate planner route.
+  input=inferParallelDependencies(input,{existingJobs}).jobs;
   const seenTasks = new Set();
   const jobs = input.map((job, index) => {
     const nodeId = cleanId(job?.nodeId);
@@ -487,6 +597,7 @@ export function validateParallelJobs(input, { minimum = 1, knownTaskIds = [], ex
     if (!nodeId) throw new Error(`worker ${index + 1} 缺少 nodeId`);
     if (seenTasks.has(taskId.toLowerCase())) throw new Error(`任务不能重复：${taskId}`);
     if (!instruction) throw new Error(`worker ${taskId} 缺少任务说明`);
+    assertMeaningfulTask({...job,instruction});
     seenTasks.add(taskId.toLowerCase());
 
     const writeSet = [...new Set((Array.isArray(job.writeSet) ? job.writeSet : []).map(normalizeScope).filter(Boolean))];
@@ -528,6 +639,7 @@ export function validateParallelJobs(input, { minimum = 1, knownTaskIds = [], ex
     if (job.dependsOn.includes(job.taskId)) throw new Error(`任务不能依赖自己：${job.taskId}`);
   }
   assertAcyclic([...(Array.isArray(existingJobs) ? existingJobs : []), ...jobs]);
+  assertDistinctTaskScopes(jobs);
   return jobs;
 }
 
@@ -748,14 +860,15 @@ export function buildPlannerPrompt(markdown, objective = "", history = [], treeS
     "【Task Tree · Automatic Parallel Planner】",
     "只做任务拆分，用 structured_result_submit 一次提交完整计划，JSON由宿主序列化；不要写测试命令。先使用所给摘要；只有需要更多信息时才调用只读工具。task_tree_read 可读完整主树，read_file 可读指定子树；折叠不等于丢失，勿无条件展开所有子树。",
     "覆盖：先把每个明确目标或验收条件写入 coverage，并映射到至少一个 taskId，不能漏项。",
-    "并行：有两个以上分别需要分析、推导、实现或撰写的独立成果，默认主动并行；尽早发布共享接口并委派主要成果，最大化有用的就绪前沿。共享字段、术语或风格不等于强依赖，固定公共约定再委派；仅必须消费他支尚未产生的实际结果才写 dependsOn。能一次写完或规格具体不等于微小；只有短标签机械替换这类微小操作、确实不可拆的任务是单人例外。若只有一个不可再分的结果，保留一个任务；独立结果有多少就保留多少，不设 Worker 上限，不递归拆分微任务。",
+    "并行：两个以上分别需要分析、推导、实现或撰写的独立成果，预期节省超过上下文token、交接和整合成本时才主动分工；尽早发布共享接口并委派主要成果。共享字段、术语或风格不等于强依赖，固定公共约定再委派；仅必须消费尚未产生的实际结果才写dependsOn。微任务、真实依赖或协调成本超过收益时保留单人，不原样转派、不造占位任务。允许递归，跨项目各层合计最多20个执行中Agent，超额排队，20不是目标；独立工具批量调用优先于新增Agent。",
     "粒度：现有树是项目框架；本轮只丰富所选节点形成可验证交付物。每个任务有清楚输入、成果和负责节点；强耦合步骤放在同一个任务，低耦合结果分开。可跨文件，文件相同也不自动视为依赖。最终由 Worker 将真实成果写回自己的节点或必要子节点，逐步丰富整棵树。",
     '负载均衡：除总体协调者外，以每个Agent约10–15分钟可交付的连贯成果为分工软目标，不是执行期限；不要把布局、画像、生成器、测试等多个模块全留给最长分支。同一份文档中需分别分析和论证的章节按统一提纲并行撰写；同一产物按模块或数据分片，约定输入输出后各自产出片段再组装。Worker在执行中继续拆分较大的独立剩余范围，不因估时超出而停止。',
     "冲突：writeSet 只是提示，可重叠，可包含 task-tree.md、项目元数据或明确要求的外部路径；最终合并处理真实冲突。",
     "边界：不要仅因任务图里存在相关节点就创建任务；只拆本轮目标直接需要的交付物。基线、测试、评审、文档只有在本轮明确要求它们成为交付物时才单独成 Worker。",
     "字段：title 用简短中文；instruction 写完整可执行结果；dependsOn 只用 taskId。branchContext 和依赖说明由宿主补齐，不重复生成。为实际文件/树修改填写 deliverables（实际所属路径、update/present/delete，树再给nodeIds）和 acceptanceCriteria（可观察的业务完成依据）；只读论证不强造文件。宿主核对落盘，独立检查Agent判定语义质量。coverage只是目标分工映射，不是已完成证据。",
+    '真实产物依赖：每个消费者在 inputPaths 声明实际读取的项目相对路径，并在 dependsOn 填写本轮生产者 taskId；生产者在 deliverables 声明同一路径。下载/解包等公共输入只设一个生产者，下游复用已合入的真实输入，不各自重新下载。已有输入不强造生产者；没有明确产物依赖的独立论证保持并行。宿主可纠正明确引用和路径合同中的漏边，不能猜测模糊隐含依赖。',
     '接口与工作量：有跨分支接口时，在 sharedContract 一次约定调用形状、字段、失败语义、接口负责人；协调器把相同原文发给全部 Worker。instruction 明确输入、成果、边界、完成依据和回写节点。workEstimate 写相对工作量及理由，按工作量与耦合分组，合并多个小操作，复杂独立交付单列；不按文件数平均，不保证精确耗时。',
-    'one-shot 示例：最终只交付一份 docs/guide.md，不等于只建一个任务。sharedContract="沿用既有API；片段均用##章标题；最终检查在同一会话按接口章、运维章顺序组装为docs/guide.md"；接口章 instruction="分析兼容与错误边界，写api.md"、workEstimate="中：接口论证"；运维章 instruction="分析监控与回滚，写ops.md"、workEstimate="中：恢复论证"；二者无dependsOn，全部正文并行产出，片段不是最终交付。示例路径和约定须换为本轮实际值。',
+    'one-shot 示例：最终只交付一份 docs/guide.md，不等于只建一个任务。sharedContract="沿用既有API；片段均用##章标题；执行阶段按接口章、运维章顺序组装为docs/guide.md"；接口章 instruction="分析兼容与错误边界，写api.md"、workEstimate="中：接口论证"；运维章 instruction="分析监控与回滚，写ops.md"、workEstimate="中：恢复论证"；二者无dependsOn，全部正文并行产出；另建组装执行任务，dependsOn为这两章，负责最终文件，片段不是最终交付。最终验收只读，不替执行者组装或修复。示例路径和约定须换为本轮实际值。',
     "当前相关任务图上下文：",
     JSON.stringify(context),
     '完整主树地图（摘要，不含折叠后代；可按需读取主树原文）：',
@@ -769,16 +882,20 @@ export function buildPlannerPrompt(markdown, objective = "", history = [], treeS
 }
 
 export function buildBranchInputContext(job, { markdown = '', goal = {}, history = [], treeSummary = buildTreeSummary(markdown) } = {}) {
+  const anchors=new Set(['ROOT',goal.stageNodeId,job.nodeId]);
+  const scoped={...treeSummary,nodes:treeSummary.nodes.filter(node=>anchors.has(node.id)),
+    edges:(treeSummary.edges||[]).filter(edge=>(edge.endpoints||[]).every(id=>anchors.has(id))),
+    omittedNodeCount:treeSummary.nodes.filter(node=>!anchors.has(node.id)).length};
   return [
     '【任务树分支上下文：摘要优先】',
     `根目标：${goal.root || '(未记录)'}`,
     `当前阶段（${goal.stageNodeId || 'ROOT'}）：${goal.stage || '(未记录)'}`,
     `本轮目标：${goal.immediate || '(未记录)'}`,
     `本分支来源节点：${job.nodeId}`,
-    '主树地图摘要（由最新文件生成；不含折叠后代）：', JSON.stringify(treeSummary),
+    '目标、阶段及本分支摘要（其它节点保留在原树，按需读取）：', JSON.stringify(scoped),
     '最近运行索引（完整结果按需从共享运行元数据读取，不重复投入历史正文）：',
     JSON.stringify(history.slice(-3).map(item=>({runId:item.runId,status:item.status,goal:item.immediate}))),
-    '按需展开：task_tree_read 读完整主树；task_tree_node(nodeId) 读指定节点；task_tree_subtree(action=read,path) 读指定子树。整文件写入前先读取最新原文，字段补丁无需读全部。',
+    '按需展开：task_tree_summary 读完整地图；task_tree_read 读完整主树；task_tree_node(nodeId) 读指定节点；task_tree_subtree(action=read,path) 读指定子树。整文件写入前先读取最新原文，字段补丁无需读全部。',
     job.branchContext && !job.branchContext.startsWith('【任务树分支上下文：摘要优先】') ? `调用方额外分支要求：\n${job.branchContext}` : ''
   ].join('\n');
 }
@@ -803,6 +920,8 @@ function enrichPlannedJobs(jobs, { markdown = "", goal = {}, history = [], treeS
 }
 
 export function buildWorkerPrompt(job, handoffPath = "", peerJobs = []) {
+  const supplement=job.recovery?.action==='complete-delivery';
+  const missing=(job.deliveryReceipt||[]).filter(item=>item.status!=='satisfied');
   // Restored runs may still contain the old generated copies of the full task.
   const branchContext=String(job.branchContext||'(none)').replace(`本分支任务：${job.instruction}\n`,'');
   const acceptance=String(job.acceptancePrompt||'state the solved problem, evidence, and remaining gap')
@@ -819,9 +938,10 @@ export function buildWorkerPrompt(job, handoffPath = "", peerJobs = []) {
     ...(job.subtreeFile ? [
       `Execution node: ${job.executionNodeId}`,
       `Branch subtree: ${job.subtreeFile}`,
-      `本轮按分配任务执行，不执行全局 GraphState.Next。分支子树已经建立，上述分支节点用于执行汇报，汇报不能替代业务交付；Task或交付合同要求改业务树时，修改隔离工作区中实际所属树文件和节点，不能只改汇报节点。完成后用 task_tree_write(nodeId=${job.executionNodeId},fields=需要更新的字段,reason=原因) 简要回写实际结果，不整份覆盖子树。多个分支可修改来源树，真实冲突由Git合并处理。`
+      `本轮按分配任务执行，不执行全局 GraphState.Next。分支子树已经建立，上述分支节点用于执行汇报，汇报不能替代业务交付；Task或交付合同要求改业务树时，只修改隔离工作区中实际所属树文件和节点。完成后用 task_tree_write(nodeId=${job.executionNodeId},fields=需要更新的字段,reason=原因) 简要回写实际结果，不整份覆盖子树。默认禁止修改来源主树、其它业务树和其它分支；只有任务交付合同明确指定这些路径时，才先用 task_tree_registry(action=list) 确认 treeId 后显式写入。`
     ] : []),
-    `Task: ${job.instruction}`,
+    `Task: ${supplement ? `补齐当前交付缺口：${missing.length?JSON.stringify(missing.map(({path,reason})=>({path,reason}))):job.retryReason}。复用已完成实现，先补缺失的测试、验证及证据；仅在验证失败时修复相关实现，不重启原任务。` : job.instruction}`,
+    ...(supplement ? [`原始任务按需参考：${job.taskFile || '当前分支任务树及现有成果'}；背景不替代当前补交任务。`] : []),
     ...(job.deliverables?.length ? [`交付合同（必须实际落盘，不是仅在聊天展示）：${JSON.stringify(job.deliverables)}`] : []),
     ...(job.acceptanceCriteria?.length ? [`完成依据：${JSON.stringify(job.acceptanceCriteria)}`] : []),
     ...(job.recovery?.action==='complete-delivery' ? [`协调器定点补交：${job.retryReason}。保留已完成成果，只补当前缺口；不要再次仅输出完成旁白。`] : []),
@@ -831,9 +951,9 @@ export function buildWorkerPrompt(job, handoffPath = "", peerJobs = []) {
     `Dependency note: ${job.dependencyPrompt || "none recorded; verify prerequisites before coding"}`,
     `Acceptance note: ${acceptance}`,
     job.dependsOn?.length ? `Dependencies already integrated: ${job.dependsOn.join(", ")}` : "Dependencies: none",
-    `Prior branch description: ${job.contextPreview || "(none)"}`,
+    `Prior branch description: ${supplement ? '(按需读取，不重放旧实现方向)' : job.contextPreview || "(none)"}`,
     'Prior branch result: use the summary above; complete saved output is available in the shared run metadata if needed.',
-    `Branch input context (summary first): ${branchContext}`,
+    `Branch input context (summary first): ${supplement ? '(复用当前树和已保存成果)' : branchContext}`,
     `Shared run metadata directory (direct shared state, not Git-isolated): ${job.runtimeMetadataPath || "(not available)"}`,
     peerRoster ? `Peer branches that may be consulted by taskId:\n${peerRoster}` : "Peer branches: none have a visible conversation yet; use the taskId from this run if consultation is needed.",
     `Branch context generation: ${Number(job.contextGeneration) || 1}`,
@@ -844,12 +964,14 @@ export function buildWorkerPrompt(job, handoffPath = "", peerJobs = []) {
     '生成器或测试需要但Git忽略的本地输入，用 task_tree_review_inputs({action:"register",paths:["corpus/normalized"]}) 登记实际项目相对路径；宿主交接时快照供最终检查原路径复用，无需登记已追踪代码、提交数据或再次调用检查模型。',
     '树回写 one-shot：实际实现并验证后，一次 task_tree_write(nodeId=上述Execution node,fields={Completion:"已完成",CurrentResult:"附件保存已实现；成功与失败用例通过，证据见 docs/attachment-test.md，无本轮缺口。",NextIdea:"本轮已完成。"},reason="回写实际成果")；只按持久化 changes 报告，不把原始命令、数据或 Evidence 子字段写进状态，成功后不为措辞反复回读或重写。',
     "You may edit task-tree.md, task-trees.json, tracked flow JSON, versions, run metadata, and any project file required by the task. Project edits are merged like ordinary Git changes; shared run metadata edits are direct concurrent effects.",
-    `剩余范围确实包含两个以上可独立交付的主要成果时，才调用 task_tree_split_work；本 worker 只允许再拆一层，子任务必须直接完成各自范围，禁止递归拆分微任务。不能仅因有多个子主题就拆分；先判断能否在当前会话用一次源码调查和一次树/文档写入完成。拆分后端到端任务数可能增长，优先保证每个分支能交付，不能为了并行度制造更小任务。共享字段、术语或风格不等于强依赖，固定公共约定再委派；仅必须消费他支尚未产生的实际结果才有依赖。以约10–15分钟可交付成果为分工软目标，不是停止期限；宿主保存已有成果，子分支沿用共享接口，最后统一验收一次。同文档各章节分别分析、统一提纲并行撰写，片段由最终检查同一会话组装为用户指定文件；同产物按模块分。只拆自己未完成的范围，不重复其他分支。独立搜索、读取和下载批量调用，脚本用并发池。`,
+    `先完成本支实际调查或实现；剩余范围有两个以上可独立交付的主要成果且并行收益超过新增上下文token和整合成本时，主动调用 task_tree_split_work。子分支同样可以继续拆分，但跨层级、跨项目合计最多20个执行中Agent，超额排队，20不是目标。不能只转发原任务或重复兄弟任务，不为凑并发制造微任务。共享字段、术语或风格不等于强依赖，固定公共约定再委派；仅必须消费他支尚未产生的实际结果才有依赖。以约10–15分钟可交付成果为分工软目标，不是停止期限；宿主保存已有成果，子分支沿用共享接口，最后统一验收。同文档各章节分别分析、统一提纲并行撰写，片段由执行阶段组装为用户指定文件；同产物按模块分。最终验收只读判定，问题回原执行者修复并重验。只拆自己未完成的范围，不重复其他分支。`,
+    '测试和证据是交付的一部分，可以持续深入实现，但结束前要实际完成相关测试并保存结果。宿主反馈缺项时，在当前会话补齐，不把缺项当作终止理由。只有调查证实确实无法完成时才用 task_tree_delivery_blocked 提交具体原因和真实证据；普通未完成、还没测试或格式错误不能据此放弃。',
     "The advisory file context is not an enforcement boundary. Modify outside-worktree paths only when the task explicitly calls for those paths; report them as direct effects, since Git cannot merge them.",
     "执行中有真实的接口、边界或集成疑问时，尽早用 task_tree_peer_exchange 将同一接收分支的多个问题合成一条发送；实现中可批量通报接口决定和证据。发送时记录 resume（自己当前进度和下一动作），之后继续不依赖答案的工作；消息在现有轮次边界送达，不打断工具、不另开同会话回答。回复后回到自己的检查点，不接管对方任务，不把咨询当重复验收。",
     job.singleFinalReview
       ? '交付后用中文简要说明状态、关键验证和未完成项（如有）；无需复述任务背景。'
-      : '完成后单独调用 structured_result_submit 提交 event、简短 evidence 和必要 peerRequests；未完成时提交 blocked 与具体缺口。'
+      : '完成后单独调用 structured_result_submit 提交 event、简短 evidence 和必要 peerRequests；未完成时提交 blocked 与具体缺口。',
+    '工具调度：默认把已就绪的独立读取、搜索和检查放在同一轮；独立命令同批各标记 parallel:true，批处理脚本内部也要实际并发，不藏进串行 for/&&。依赖操作和共享写入保持顺序，原生高效批量接口优先，不为凑并发拆微任务。'
   ].filter(Boolean).join("\n");
 }
 
@@ -946,6 +1068,7 @@ export function buildBranchPlannerPrompt(markdown, nodeId, objective = "", exist
     "从根目标、当前阶段和所选节点推导一个具体可执行结果；不要重复现有分支。writeSet 可与现有分支重叠。",
     "branchContext、依赖说明和验收说明由协调器补齐，Planner 不要生成。",
     'instruction 必须包含输入、交付物、接口职责、边界、完成依据和回写节点；沿用现有分支共享接口，并写相对工作量及理由，不修改已经发布给其它分支的约定。',
+    '若消费其它任务实际产物，填写 inputPaths、dependsOn，生产者用 deliverables 声明路径；已有公共输入直接复用，不再独立下载或重复生产。',
     `已发布公共接口原文：${sharedContract || existingJobs.find(job => job.sharedContract)?.sharedContract || '(无)'}`,
     "当前相关上下文：",
     JSON.stringify({
@@ -977,7 +1100,8 @@ function normalizeBranchPlan(output, markdown, nodeId, objective = "", existingJ
 function normalizePlan(output, markdown, objective = "", { minimum = 1 } = {}) {
   const parsed = parseJsonObject(output);
   if (!parsed?.jobs) throw new Error("规划结果不是有效 JSON，缺少 jobs");
-  const jobs = validateParallelJobs(parsed.jobs, { minimum });
+  const inferred = inferParallelDependencies(parsed.jobs);
+  const jobs = validateParallelJobs(inferred.jobs, { minimum });
   const readyJobs = jobs.filter((job) => job.dependsOn.length === 0);
   if (!readyJobs.length) {
     throw new Error("自动计划至少需要一个可立即执行的任务");
@@ -987,14 +1111,15 @@ function normalizePlan(output, markdown, objective = "", { minimum = 1 } = {}) {
     sharedContract: String(parsed.sharedContract || ''),
     acceptanceCriteria: normalizeDeliveryContract({acceptanceCriteria:parsed.acceptanceCriteria}).acceptanceCriteria,
     jobs,
-    coverage: Array.isArray(parsed.coverage) ? parsed.coverage : []
+    coverage: Array.isArray(parsed.coverage) ? parsed.coverage : [],
+    ...(inferred.repairs.length ? { dependencyRepairs: inferred.repairs } : {})
   };
 }
 
 export { normalizePlan as normalizeParallelPlan };
 
-function publicJob({ workerPath, commit, sourceCommit, ...job }) {
-  return {...job, reportChars: job.output?.length || 0, deepLink: job.threadId ? threadDeepLink(job.threadId) : ''};
+function publicJob({ workerPath, commit, sourceCommit, ...job }, jobs=[]) {
+  return {...job,...presentedJobState(job,jobs), reportChars: job.output?.length || 0, deepLink: job.threadId ? threadDeepLink(job.threadId) : ''};
 }
 
 // Progress is an explicit projection, built directly from the cached run before
@@ -1006,8 +1131,9 @@ function progressRun(run) {
     ...pick(run,['id','status','objective','summary','createdAt','updatedAt','finishedAt','acceptedAt','completedAt','totalDurationMs','error','branchTree','coordination']),
     goal:run.goal?pick(run.goal,['immediate','stageNodeId']):null,
     result:run.result?{cleanup:run.result.cleanup?pick(run.result.cleanup,['status']):null}:null,
-    jobs:(run.jobs||[]).map(job=>({...pick(job,['taskId','nodeId','title','status','summary','error','activity','acceptingGuidance','startedAt','finishedAt','completedTools','activeTools','contextResumed','contextGeneration']),
-      summary:job.summary||job.instruction||'',reportChars:job.output?.length||0}))
+    jobs:(run.jobs||[]).map(job=>({...pick(job,['taskId','parentTaskId','nodeId','title','status','summary','error','activity','deliveryActivity','communication','executionStrategy','contextActivity','requestActivity','modelUsage','acceptingGuidance','startedAt','finishedAt','completedTools','activeTools','contextResumed','contextGeneration','workerCompleted','acceptanceStatus','integrationPhase']),
+      ...presentedJobState(job,run.jobs),...(job.splitChildren?.length?{splitChildren:job.splitChildren}:{}),
+      summary:job.summary||job.instruction||'',reportChars:job.output?.length||0,controls:agentControls(run,job)}))
   };
 }
 
@@ -1034,7 +1160,9 @@ function publicRun(run, {view} = {}) {
     sourceTree: run.sourceTree || null,
     branchTree: run.branchTree || null,
     planner: run.planner || null,
-    jobs: (run.jobs || []).map(publicJob),
+    jobs: (run.jobs || []).map(job=>({...publicJob(job,run.jobs),controls:agentControls(run,job)})),
+    parentExecution:run.parentExecution || null,
+    followups:run.followups || [],
     peerMessages: (run.peerMessages || []).map((message) => ({
       ...message,
       fromDeepLink: message.fromThreadId ? threadDeepLink(message.fromThreadId) : "",
@@ -1044,6 +1172,8 @@ function publicRun(run, {view} = {}) {
     contextOptions: run.contextOptions || [],
     mergeConflicts: run.mergeConflicts || [],
     review: run.review || null,
+    reviewRepairs: run.reviewRepairs || [],
+    retainedWorkspaces: run.retainedWorkspaces || [],
     coverage: run.coverage || [],
     workspaceTimings: run.workspaceTimings || {},
     gitCommandTimings: run.gitCommandTimings || null,
@@ -1150,6 +1280,25 @@ export function createParallelCodexCoordinator({
   const registerWorkspaceRun = (run) => workspaceRuns.set(run.id, run);
   const runs = new Map();
   const executionOptions = new Map();
+  // Cancellation belongs to the whole run, including standalone/recovered
+  // runs. A transient parent HTTP/model session is not the cancellation owner.
+  const runControllers = new Map();
+  function setRunOptions(run, options = {}, { restart = false } = {}) {
+    const previous = executionOptions.get(run.id) || {};
+    if (restart || !runControllers.has(run.id)) runControllers.set(run.id, new AbortController());
+    const parent = options.signal || (!restart ? previous.signal : undefined);
+    const controller = runControllers.get(run.id);
+    if (run.stopRequested) controller.abort(new DOMException('用户已停止本轮执行', 'AbortError'));
+    executionOptions.set(run.id, {...previous, ...options,
+      signal: parent ? AbortSignal.any([controller.signal, parent]) : controller.signal});
+    return executionOptions.get(run.id).signal;
+  }
+  function runSignal(run) { return executionOptions.get(run.id)?.signal || setRunOptions(run); }
+  function startRunTurn(run, options) {
+    const signal = options.signal ? AbortSignal.any([runSignal(run), options.signal]) : runSignal(run);
+    signal.throwIfAborted();
+    return startTurn({...options, signal});
+  }
   const incrementalWorkspace = createDirectNodeWorkspace({ projectRoot, workspace, startTurn, reviewTurn: independentReview });
   const unreviewedWorkspace = createDirectNodeWorkspace({ projectRoot, workspace, startTurn, reviewTurn: null });
   const pending = new Map();
@@ -1159,6 +1308,14 @@ export function createParallelCodexCoordinator({
   const mailboxes = new Map();
   const activityTimers = new Map();
   const workerSplits = new Map();
+  const workerControllers = new Map();
+  const inputCaptures = new Map();
+  const followupRequests = new Map();
+  const agentDirectory=createAgentDirectory({projectRoot,loadRun:load,persistRun:persist,
+    sendMessage:(id,body)=>api.sendAgentMessage(id,body)});
+  const attachmentScope = (run,job) => ({projectRoot,...agentControls(run,job).attachmentScope});
+  const createMailbox = run => createPeerMailbox(run,{persist,onEvent:(type,detail)=>event(run,type,detail),
+    materializeUserMessage: (message,job) => materializeAttachments([message],attachmentScope(run,job)).then(messages=>messages[0])});
   function expandDependencies(run,ids){
     const byId=new Map(run.jobs.map(job=>[job.taskId,job]));
     const expand=id=>byId.get(id)?.splitChildren?.length?byId.get(id).splitChildren.flatMap(expand):[id];
@@ -1167,7 +1324,7 @@ export function createParallelCodexCoordinator({
   function workerNotification(run, job, message) {
     const trace=recordAgentActivity(job, message);
     if(trace)event(run,'worker_execution',{taskId:job.taskId,...trace});
-    executionOptions.get(run.id)?.onProgress?.({id:run.id,taskId:job.taskId,notification:message,jobs:run.jobs});
+    executionOptions.get(run.id)?.onProgress?.({id:run.id,taskId:job.taskId,notification:message,jobs:progressRun(run).jobs});
     if(!activityTimers.has(run.id))activityTimers.set(run.id,setTimeout(()=>{
       activityTimers.delete(run.id);
       void persist(run).catch(error=>{run.progressSaveWarning=error.message;});
@@ -1253,14 +1410,21 @@ export function createParallelCodexCoordinator({
   }
 
   function event(run, type, data = {}) {
+    const job=data.taskId&&(run.jobs||[]).find(item=>item.taskId===data.taskId);
+    if(job){
+      if(type==='worker_phase')recordWorkerIntegrationPhase(job,data.phase,data.message);
+      if(type==='merge_conflict_detected')recordWorkerIntegrationPhase(job,'merging',`执行者已交付，正在处理 ${data.files.length} 个 Git 合并冲突（尚未验收）`);
+      if(type==='completed')recordWorkerIntegrationPhase(job,'completed','分支成果已整合，最终验收状态单独显示');
+    }
     const options = executionOptions.get(run.id);
-    options?.onProgress?.({ id: run.id, status: run.status, jobs: run.jobs, coordination: run.coordination, event: type, detail: data });
+    options?.onProgress?.({ id: run.id, status: run.status, jobs: progressRun(run).jobs, coordination: run.coordination, event: type, detail: data });
     run.events ||= [];
     run.events.push({ id: randomUUID(), at: new Date().toISOString(), type, ...data });
   }
 
   function persist(run) {
     run.updatedAt = new Date().toISOString();
+    const agentSnapshot=agentDirectory.capture(run);
     const snapshot = `${JSON.stringify(run, null, 2)}\n`;
     const executionTreeSnapshot = `${JSON.stringify(runtimeTree(run), null, 2)}\n`;
     const next = persistQueue.catch(() => {}).then(async () => {
@@ -1272,6 +1436,7 @@ export function createParallelCodexCoordinator({
       for (let attempt = 0; attempt < 5; attempt += 1) {
         try {
           await rename(temporary, target);
+          agentDirectory.record(agentSnapshot);
           const executionTreeDir = path.join(runsDir, run.id);
           await mkdir(executionTreeDir, { recursive: true });
           await writeFile(path.join(executionTreeDir, "execution-tree.json"), executionTreeSnapshot, "utf8");
@@ -1287,6 +1452,7 @@ export function createParallelCodexCoordinator({
         for (let attempt = 0; attempt < 3; attempt += 1) {
           try {
             await writeFile(target, snapshot, "utf8");
+            agentDirectory.record(agentSnapshot);
             await updateContextIndex(run).catch(() => {});
             await unlink(temporary).catch(() => {});
             return;
@@ -1344,6 +1510,7 @@ export function createParallelCodexCoordinator({
   }
 
   async function integrateWorkerOutput(run,job,integrate) {
+    event(run,'worker_phase',{taskId:job.taskId,phase:'integrating',message:'执行者已交付，正在准备整合；尚未通过最终验收'});
     if(workspace.captureReviewInputs)job.reviewInputs=await workspace.captureReviewInputs(job.workerPath);
     const inspected = await workspace.inspectChanges(job.workerPath, job.sourceCommit, job.writeSet);
     job.changedFiles = inspected.changedFiles;
@@ -1395,9 +1562,16 @@ export function createParallelCodexCoordinator({
       const signal=executionOptions.get(run.id)?.signal;
       signal?.throwIfAborted();
       if(!run.incremental || !run.finalReviewOnly)throw new Error('继续拆分需要本轮统一整合及一次最终验收');
-      if(!canWorkerSplit(job, run.jobs))throw new Error(`动态拆分最多允许 ${MAX_DYNAMIC_SPLIT_DEPTH} 层；请在当前任务内完成剩余子主题`);
+      if(!canWorkerSplit(job, run.jobs))throw new Error('任务父子关系存在循环，不能继续拆分；请修正该关系');
       const input=args.jobs;
       if(!Array.isArray(input)||input.length<2)throw new Error('请至少提供两个可独立交付的剩余任务');
+      const ancestors=[];let ancestor=job;
+      while(ancestor){ancestors.push(ancestor.instruction);ancestor=run.jobs.find(item=>item.taskId===ancestor.parentTaskId);}
+      assertDistinctTaskScopes(input,ancestors);
+      if(!job.substantiveToolCount){
+        const changes=await workspace.inspectChanges(job.workerPath,job.sourceCommit,job.writeSet);
+        assertSplitProgress(job,changes.changedFiles);
+      }
       const idMap=new Map(input.map(child=>[String(child.taskId),`${job.taskId}.${cleanId(child.taskId)}`]));
       const jobs=validateParallelJobs(input.map(child=>({...child,taskId:idMap.get(String(child.taskId)),nodeId:job.nodeId,parentTaskId:job.taskId,
         dependsOn:expandDependencies(run,(child.dependsOn||[]).filter(id=>id!==job.taskId).map(id=>idMap.get(id)||id)),
@@ -1422,9 +1596,45 @@ export function createParallelCodexCoordinator({
     workerSplits.set(key,pendingSplit);return pendingSplit;
   }
 
+  async function prepareTaskInputs(run,job,{workerPath=job.workerPath,receipts=inheritedReviewInputs(run,job),paths=job.inputPaths}={}) {
+    let materials=workspace.materializeReviewInputs&&receipts.length
+      ?await workspace.materializeReviewInputs(workerPath,receipts,{register:true}):null;
+    const missing=await missingTaskInputs(workerPath,paths);
+    if(missing.length&&workspace.captureReviewInputs&&workspace.materializeReviewInputs){
+      // Exact task declarations are an input manifest; a second manual
+      // registration must not discard ignored data already in the source.
+      const unavailable=await missingTaskInputs(projectRoot,missing);
+      const available=missing.filter(file=>!unavailable.includes(file));
+      if(available.length){
+        const key=JSON.stringify([run.id,[...available].sort()]);
+        let capture=inputCaptures.get(key);
+        if(!capture){
+          capture=workspace.captureReviewInputs(projectRoot,{paths:available});
+          inputCaptures.set(key,capture);
+          capture.finally(()=>{if(inputCaptures.get(key)===capture)inputCaptures.delete(key);}).catch(()=>{});
+        }
+        const receipt=await capture;
+        run.workspace.reviewInputs||=[];
+        if(!run.workspace.reviewInputs.some(item=>item.manifestPath===receipt.manifestPath))run.workspace.reviewInputs.push(receipt);
+        materials=await workspace.materializeReviewInputs(workerPath,[...receipts,receipt],{register:true});
+        job.inputHandoff={status:'ready',paths:available,sourceRoot:projectRoot,manifestPath:receipt.manifestPath};
+        event(run,'task_inputs_recovered',{taskId:job.taskId,paths:available,sourceRoot:projectRoot});
+        await persist(run);
+      }
+    }
+    await assertTaskInputs(workerPath,paths);
+    return materials;
+  }
+
   async function runWorker(run, job, integrate) {
     let workerHandoffStaged = false;
+    const controller = new AbortController();
+    const controllerKey = `${run.id}:${job.taskId}`;
+    workerControllers.set(controllerKey,controller);
+    const parentSignal=executionOptions.get(run.id)?.signal;
+    const workerSignal=parentSignal?AbortSignal.any([parentSignal,controller.signal]):controller.signal;
     try {
+      if(job.pauseRequested)throw Object.assign(new Error('用户已暂停此分支'),{code:'AGENT_PAUSED'});
       if(job.splitChildren?.length){
         job.status='completed';job.output=job.splitOutput;
         event(run,'worker_handoff_recovered',{taskId:job.taskId,taskIds:job.splitChildren});return;
@@ -1433,7 +1643,7 @@ export function createParallelCodexCoordinator({
       job.finishedAt = '';
       job.acceptingGuidance = true;
       job.startedAt ||= new Date().toISOString();
-      executionOptions.get(run.id)?.signal?.throwIfAborted();
+      workerSignal.throwIfAborted();
       event(run, "worker_preparing", { taskId: job.taskId, nodeId: job.nodeId });
       await persist(run);
       if (job.resumeAfterRestart && job.workerPath && job.sourceCommit && workspace.resumeWorker) {
@@ -1453,10 +1663,7 @@ export function createParallelCodexCoordinator({
           });
         }
       }
-      const inheritedInputs=[run.workspace.reviewInputs,run.initialReceipt?.reviewInputs,
-        run.jobs.find(parent=>parent.taskId===job.parentTaskId)?.reviewInputs].flat().filter(Boolean);
-      const inputMaterials=workspace.materializeReviewInputs&&inheritedInputs.length
-        ?await workspace.materializeReviewInputs(job.workerPath,inheritedInputs,{register:true}):null;
+      const inputMaterials=await prepareTaskInputs(run,job);
       // Appended tasks may not exist in the original snapshot. Seed only their
       // own branch file; never copy another worker's ongoing edits.
       for (const relative of [job.subtreeFile, job.taskFile].filter(Boolean)) {
@@ -1475,6 +1682,7 @@ export function createParallelCodexCoordinator({
       }
       // Delivery is a separate durable checkpoint from execution. A failed
       // merge must not ask a successful worker to rediscover or rewrite work.
+      workerSignal.throwIfAborted();
       if (job.resumeAfterRestart && job.workerCompleted
         && !run.userMessages?.some(message => message.taskId === job.taskId && message.status === 'queued')) {
         job.acceptingGuidance = false;
@@ -1522,26 +1730,47 @@ export function createParallelCodexCoordinator({
       job.status = "running";
       event(run, "worker_started", { taskId: job.taskId, nodeId: job.nodeId });
       await persist(run);
-      const workerPrompt=buildWorkerPrompt(job, handoffPath, run.jobs) + (inputMaterials?`\n${inputMaterials.prompt}`:'') + (job.resumeAfterRestart ? `\n【失败分支续跑】复用原隔离目录${recoveryRotation?'，使用新会话从任务、当前树和已保存检查点继续，不重新载入失败的超长历史':'和会话'}；先核对已落盘成果，不重放成功操作，只继续本分支剩余工作。${job.retryReason ? `\n此前失败原因：${job.retryReason}` : ''}` : '')
+      const workerPrompt=buildWorkerPrompt(job, handoffPath, run.jobs) + (inputMaterials?`\n${inputMaterials.prompt}`:'')
+        + (job.inputHandoff?.status==='ready'?`\n【当前输入交接已完成】${JSON.stringify(job.inputHandoff.paths)} 已由宿主从来源项目快照恢复至本次cwd；直接读取并推进任务。历史中“未登记/未交接”的描述已过时，不再将手工登记列为待解决。`:'')
+        + (job.resumeAfterRestart ? `\n【失败分支续跑】复用原隔离目录${recoveryRotation?'，使用新会话从任务、当前树和已保存检查点继续，不重新载入失败的超长历史':'和会话'}；先核对已落盘成果，不重放成功操作，只继续本分支剩余工作。${job.retryReason ? `\n此前失败原因：${job.retryReason}` : ''}` : '')
         + (recoveryRotation ? `\n本分支运行中的用户指导（最新优先）：${JSON.stringify((run.userMessages||[]).filter(message=>message.taskId===job.taskId))}`:'');
       const workerTurnOptions = {
-        signal: executionOptions.get(run.id)?.signal,
+        signal: workerSignal,
         onNotification: message => workerNotification(run,job,message),
         prompt: workerPrompt,
         // A branch receives its scoped task prompt and node materials. Copying
         // parent dialogue here multiplies every prior agent report by fan-out.
-        contextMessages: await materialContext(run, [run.goal?.stageNodeId, job.nodeId]),
+        contextMessages: [...await materialContext(run, [run.goal?.stageNodeId, job.nodeId]),
+          ...await agentDirectory.context({treeId:run.sourceTree?.id,nodeId:run.sourceSelection?.nodeId||job.nodeId,excludeRunId:run.id})],
         systemPrompt: '你是并行分支 Worker。用中文报告进度，只执行本次 Task id 对应的分支说明。父节点对话和资料是背景，不是再次执行整个父目标的指令；不要重复其他分支。完成实际交付后保存自己相关节点的结果。',
         cwd: job.workerPath,
         environment: { TASK_TREE_PROJECT_ROOT: projectRoot, TASK_TREE_CONTEXT_NODE_ID: job.executionNodeId || job.nodeId, TASK_TREE_QUALITY_MODE: 'advisory',
           ...(job.subtreeFile ? { TASK_TREE_CONTEXT_TREE_FILE: job.subtreeFile } : {}) },
-        tools: [...TREE_CONTEXT_TOOLS, PEER_EXCHANGE_TOOL,
-          ...(run.incremental && canWorkerSplit(job, run.jobs) ? [WORKER_SPLIT_TOOL] : [])],
-        toolHandler: (name,args) => name===WORKER_SPLIT_TOOL.function.name
+        tools: [...TREE_CONTEXT_TOOLS, ...AGENT_DIRECTORY_TOOLS, PEER_EXCHANGE_TOOL, DELIVERY_BLOCKER_TOOL,
+          ...(needsDeliveryContractRepair(job)?[DELIVERY_REPAIR_TOOL]:[]),
+          ...(run.incremental && run.finalReviewOnly && canWorkerSplit(job, run.jobs) ? [WORKER_SPLIT_TOOL] : [])],
+        completionGuard: createWorkerDeliveryGuard(job,{projectRoot,
+          onInspection:sample=>event(run,'coordination_delivery_timing',{taskId:job.taskId,...sample})}),
+        toolHandler: async (name,args) => {
+          if(AGENT_DIRECTORY_TOOLS.some(tool=>tool.function.name===name))return agentDirectory.tool(name,args,{treeId:run.sourceTree?.id});
+          if(name===DELIVERY_REPAIR_TOOL.function.name){
+            const result=await repairDeliveryContract(job,args,{projectRoot});
+            event(run,'delivery_contract_repaired',{taskId:job.taskId,...result});
+            await persist(run);
+            return result;
+          }
+          if(name===DELIVERY_BLOCKER_TOOL.function.name){
+            job.deliveryBlocker={...args,at:new Date().toISOString()};
+            event(run,'worker_delivery_blocked',{taskId:job.taskId,...job.deliveryBlocker});
+            await persist(run);
+            throw Object.assign(new Error(`已确认无法完成交付：${args.reason}`),{code:'DELIVERY_BLOCKED',stage:'delivery',failureCategory:'delivery-blocked'});
+          }
+          return name===WORKER_SPLIT_TOOL.function.name
           ? splitWorker(run,job,args,integrate)
           : name===PEER_EXCHANGE_TOOL.function.name
           ? mailboxes.get(run.id).exchange(job.taskId,args)
-          : treeContextHandler(job.workerPath, run.sourceTree)(name,args),
+          : treeContextHandler(job.workerPath, run.sourceTree)(name,args);
+        },
         beforeModelRequest: () => mailboxes.get(run.id).drain(job.taskId),
         initialToolCalls: [{ id: `host-node-${randomUUID()}`, type: 'function', function: { name: 'task_tree_node', arguments: JSON.stringify({ nodeId: job.executionNodeId || job.nodeId }) } }],
         threadId: job.contextSource === "codex" ? "" : (job.contextThreadId || ""),
@@ -1568,7 +1797,9 @@ export function createParallelCodexCoordinator({
           await persist(run);
         }
       };
-      let result = await startTurn(workerTurnOptions);
+      workerSignal.throwIfAborted();
+      let result = await startRunTurn(run,workerTurnOptions);
+      if(job.pauseRequested)throw Object.assign(new Error('用户已暂停此分支；已落盘成果保留，恢复后继续'),{code:'AGENT_PAUSED'});
       if(job.splitChildren?.length)result={...result,status:'completed',output:job.splitOutput,error:undefined};
       // A provider can end a turn with status=stopped without the user having
       // pressed Stop (for example a transient worker/session interruption).
@@ -1577,7 +1808,7 @@ export function createParallelCodexCoordinator({
       // until the model actually completes or the user's signal is aborted.
       while ((result?.status === 'stopped' || (['completed',undefined].includes(result?.status)
         && run.userMessages?.some(message=>message.taskId===job.taskId&&message.status==='queued')))
-        && !executionOptions.get(run.id)?.signal?.aborted) {
+        && !workerSignal.aborted) {
         const guidanceContinuation=result?.status!=='stopped';
         job.output = compactWorkerOutput(result.output || job.output || '');
         if(!guidanceContinuation) {
@@ -1585,13 +1816,14 @@ export function createParallelCodexCoordinator({
         job.error = '模型会话意外停止，正在使用同一工作区和会话续跑';
         event(run, 'worker_stopped', { taskId: job.taskId, nodeId: job.nodeId, threadId: result.threadId || job.contextThreadId || job.threadId || '', output: job.output });
         await persist(run);
-        executionOptions.get(run.id)?.signal?.throwIfAborted();
+        workerSignal.throwIfAborted();
         job.status = 'running';
         job.retryCount = Number(job.retryCount || 0) + 1;
         event(run, 'worker_retrying', { taskId: job.taskId, nodeId: job.nodeId, retryCount: job.retryCount, threadId: result.threadId || job.contextThreadId || job.threadId || '' });
         } else event(run,'worker_guidance_continuing',{taskId:job.taskId});
         await persist(run);
-        result = await startTurn({
+        workerSignal.throwIfAborted();
+        result = await startRunTurn(run,{
           ...workerTurnOptions,
           prompt: guidanceContinuation ? '用户在本分支收尾时发来了新指导，请读取本轮用户消息，落实或回答后再交付；保留已有成果，不重放已完成操作。'
             : `【自动续跑】上一轮模型会话意外停止，未完成本分支任务。保留已落盘的工作区和已有会话上下文；先检查当前成果和未完成项，不重放已成功的工具调用，继续完成原 Task id ${job.taskId}，完成后提交完整结果。${job.output ? `上一轮已输出片段：\n${job.output}` : ''}`,
@@ -1599,6 +1831,7 @@ export function createParallelCodexCoordinator({
           forkThreadId: '',
           forceNewThread: false
         });
+        if(job.pauseRequested)throw Object.assign(new Error('用户已暂停此分支；已落盘成果保留，恢复后继续'),{code:'AGENT_PAUSED'});
       }
       if (result.timing) event(run, "worker_turn_timing", { taskId: job.taskId, nodeId: job.nodeId, timing: result.timing });
       job.acceptingGuidance=false;
@@ -1667,6 +1900,12 @@ export function createParallelCodexCoordinator({
       if(run.coordination?.taskId===job.taskId)run.coordination={phase:'executing',message:'该分支已恢复并整合，继续推进其余任务',updatedAt:new Date().toISOString()};
       event(run, "completed", { taskId: job.taskId, nodeId: job.nodeId, changedFiles: job.changedFiles });
     } catch (error) {
+      if(job.pauseRequested || error.code==='AGENT_PAUSED') {
+        job.status='paused';job.error='';job.resumeAfterRestart=true;
+        job.activity={label:'已暂停；保留已落盘成果，恢复时核对中断操作',at:new Date().toISOString()};
+        event(run,'worker_paused',{taskId:job.taskId});
+        return;
+      }
       job.status = executionOptions.get(run.id)?.signal?.aborted ? 'stopped' : 'failed';
       job.error = error.message;
       if (error.code === 'COMPLETION_REVIEW_FAILED') { job.reviewFailed = true; job.review = error.review || null; }
@@ -1677,6 +1916,10 @@ export function createParallelCodexCoordinator({
         rememberRunContext(run, job);
       }
       job.failure={message:error.message,...executionErrorDetails(error)};
+      if(['MODEL_PROVIDER_UNAVAILABLE','MODEL_PROVIDER_BLOCKED'].includes(error.code)){
+        run.providerFailure={code:error.code,message:error.message,at:new Date().toISOString()};
+        event(run,'provider_execution_blocked',{taskId:job.taskId,...run.providerFailure});
+      }
       const recovery=recoveryDecision(job,error,{aborted:executionOptions.get(run.id)?.signal?.aborted});
       if(recovery&&workspace.resumePersistentWorker) {
         job.recovery=recovery;job.recoveryHistory=[...(job.recoveryHistory||[]),recovery];
@@ -1686,12 +1929,15 @@ export function createParallelCodexCoordinator({
         event(run,'coordination_recovery_scheduled',{taskId:job.taskId,...run.coordination,reason:recovery.reason});
       } else event(run, "blocked", { taskId: job.taskId, nodeId: job.nodeId, error: error.message });
     } finally {
+      if(workerControllers.get(controllerKey)===controller)workerControllers.delete(controllerKey);
       job.acceptingGuidance=false;
       job.activeTools={};
       job.finishedAt=new Date().toISOString();
       if (workerHandoffStaged && job.workerPath) await removeWorkerHandoff(job.workerPath).catch(() => {});
-      if (job.workerPath) await workspace.removeWorker(job.workerPath, { preserveContext: true, contextKey: job.contextKey }).catch(() => {});
-      delete job.workerPath;
+      if (job.workerPath && job.status!=='paused') {
+        await workspace.removeWorker(job.workerPath, { preserveContext: true, contextKey: job.contextKey }).catch(() => {});
+        delete job.workerPath;
+      }
       rememberRunContext(run, job);
       await persist(run);
     }
@@ -1725,57 +1971,45 @@ export function createParallelCodexCoordinator({
     event(run, "merge_conflict_detected", { taskId: sourceJob?.taskId || "", files: conflictFiles, participants: conflict.participantTaskIds });
     await persist(run);
 
-    const sourceThread = sourceJob?.contextThreadId || sourceJob?.threadId || "";
     try {
-      if (!sourceThread) throw new Error(`无法协商合并冲突：${sourceJob?.taskId || "worker"} 没有可用上下文`);
-      // The old implementation opened one model turn per peer and waited for each
-      // turn before starting the resolver. That made conflict latency grow with
-      // the number of participants even though every worker's original task,
-      // branch context, and result were already available to the coordinator.
-      // Send one complete, lossless participant packet to the source context and
-      // let one resolver turn reconcile it. This keeps the semantic decision in a
-      // worker conversation while reducing the normal path to one model round.
+      // Preserve task intent, not the participants' full histories, outputs or
+      // source dumps. The actual three-way versions are read on demand through
+      // conflict-only capabilities shared with direct-node integration.
       const participantPacket = participants.map((job) => ({
         taskId: job.taskId,
         nodeId: job.nodeId,
         title: job.title,
         instruction: job.instruction,
         summary: job.summary,
-        dependencyPrompt: job.dependencyPrompt,
-        acceptancePrompt: job.acceptancePrompt,
         writeSet: job.writeSet,
         dependsOn: job.dependsOn,
-        branchContext: job.branchContext || "",
-        output: job.output || "",
-        evidence: job.evidence || "",
-        changedFiles: job.changedFiles || [],
-        threadId: job.contextThreadId || job.threadId || "",
-        deepLink: job.contextThreadId || job.threadId ? threadDeepLink(job.contextThreadId || job.threadId) : ""
+        changedFiles: (job.changedFiles || []).filter(file=>conflictFiles.includes(file))
       }));
       const resolutionStartedAt = Date.now();
       conflict.resolutionStartedAt = new Date().toISOString();
       await persist(run);
-      const result = await startTurn({
-        contextMessages: await materialContext(run, [run.goal?.stageNodeId, sourceJob.nodeId]),
-        prompt: [
-          "【Task Tree · Merge conflict resolution】",
-          `Git has paused a cherry-pick with conflicts in: ${conflictFiles.join(", ")}.`,
-          "You are the source worker whose commit is being integrated. Resolve every conflict in the current worktree, preserving both branches' stated intent where compatible.",
-          liveWorkspace ? "The current side also contains the user's latest live workspace edits. Preserve those edits as well as the worker results." : "",
-          "The following packet is the complete context collected before this conflict. It includes every participant's task, branch context, output, changed files, and conversation link. Do not start separate peer consultations; use this packet and inspect the actual conflict markers.",
-          `Participant packet: ${JSON.stringify(participantPacket)}`,
-          `All participant conversation links: ${JSON.stringify(threadLinks)}`,
-          "Inspect the conflict markers and edit the current integration worktree. Stage the resolved files with git add. Do not commit or continue/abort the cherry-pick; the host does that. Do not discard another worker merely to make Git clean. Do not run tests. Finish by explaining the merged intent in JSON: {\"event\":\"completed|blocked\",\"evidence\":\"...\",\"peerRequests\":[]}."
-        ].join("\n"),
+      const session=await createMergeConflictSession({cwd:integrationPath,files:conflictFiles,objective:run.objective,
+        context:`${liveWorkspace?'当前版本包含用户最新修改，必须保留相容意图。\n':''}共享接口：${sourceJob.sharedContract||'复用已有接口'}\n分支任务：${JSON.stringify(participantPacket)}`,
+        signal:runSignal(run)});
+      const result = await startRunTurn(run,{
+        ...session,
         cwd: integrationPath,
-        forkThreadId: sourceThread,
         threadName: `任务图 · 冲突合并 · ${sourceJob.taskId}`,
+        executionMode: 'merge-conflict',
+        persistDialogue: false,
+        environment: {
+          TASK_TREE_PROJECT_ROOT: integrationPath,
+          TASK_TREE_CONTEXT_NODE_ID: sourceJob.executionNodeId || sourceJob.nodeId || '',
+          TASK_TREE_CONTEXT_TREE_FILE: sourceJob.subtreeFile || run.branchTree?.path || run.sourceTree?.path || 'task-tree.md',
+          TASK_TREE_QUALITY_MODE: 'advisory'
+        },
         sandbox: "workspace-write",
         approvalPolicy: "never",
         developerInstructions: "Resolve only the active Git conflict in the integration worktree. Preserve both worker intents and do not edit outside this Git project.",
         waitForCompletion: true
       });
       assertTurnCompleted(result);
+      if(await session.completionGuard())throw Object.assign(new Error('合并报告未解决 Git 实际冲突；保留候选'),{code:'MERGE_CONFLICT_UNRESOLVED'});
       conflict.resolverTiming = result.timing || null;
       if (result.timing) event(run, "merge_resolver_turn_timing", { taskId: sourceJob.taskId, timing: result.timing });
       conflict.messages.push({
@@ -1808,8 +2042,10 @@ export function createParallelCodexCoordinator({
   }
 
   async function execute(run) {
+    const signal = runSignal(run);
     try {
-      mailboxes.set(run.id,createPeerMailbox(run,{persist,onEvent:(type,detail)=>event(run,type,detail)}));
+      signal.throwIfAborted();
+      mailboxes.set(run.id,createMailbox(run));
       registerWorkspaceRun(run);
       run.status = run.workspace?.integrationPath ? "running" : "preparing";
       run.error = "";
@@ -1894,7 +2130,7 @@ export function createParallelCodexCoordinator({
               contextKey: target.contextKey,
               persistentContext: true
             });
-            const answer = await startTurn({
+            const answer = await startRunTurn(run,{
               prompt: buildPeerQuestionPrompt(source, target, request),
               contextMessages: await materialContext(run, [run.goal?.stageNodeId, target.nodeId]),
               cwd: targetPath,
@@ -1936,7 +2172,7 @@ export function createParallelCodexCoordinator({
                 contextKey: source.contextKey,
                 persistentContext: true
               });
-              const continuation = await startTurn({
+              const continuation = await startRunTurn(run,{
                 contextMessages: await materialContext(run, [run.goal?.stageNodeId, source.nodeId]),
                 prompt: buildPeerAnswerPrompt(source, target, request, {
                   conclusion: message.response,
@@ -2000,7 +2236,13 @@ export function createParallelCodexCoordinator({
         .map((job) => job.taskId));
       const active = new Map();
 
-      while (queued.size || active.size || additions.get(run.id)?.size || run.jobs.some((job) => ["queued", "planned"].includes(job.status))) {
+      while (queued.size || active.size || additions.get(run.id)?.size || run.jobs.some((job) => ["queued", "planned", "paused"].includes(job.status))) {
+        if (signal.aborted) {
+          // Do not publish a terminal receipt while child cleanup can still
+          // write checkpoints. No new dependency frontier is started on Stop.
+          await Promise.allSettled(active.values());
+          signal.throwIfAborted();
+        }
         const awakened = new Promise((resolve) => wakeups.set(run.id, () => resolve(null)));
         const byId = new Map(run.jobs.map((job) => [job.taskId, job]));
         // New jobs appended through the API enter this same scheduler immediately.
@@ -2016,6 +2258,12 @@ export function createParallelCodexCoordinator({
             queued.delete(taskId);
             continue;
           }
+          if(job.pauseRequested || job.status==='paused'){queued.delete(taskId);continue;}
+          if(run.providerFailure){
+            job.status='blocked';job.error='共享模型账户不可用；未启动此分支，成果保留，处理账户后恢复原任务';
+            job.failure={code:'MODEL_PROVIDER_BLOCKED',stage:'model-request',message:job.error};
+            queued.delete(taskId);event(run,'provider_execution_blocked',{taskId,message:job.error});continue;
+          }
           if (job.dependsOn.some((id) => ["failed", "blocked", "stopped"].includes(byId.get(id)?.status))) {
             job.status = "blocked";
             job.error = "依赖任务失败";
@@ -2024,7 +2272,7 @@ export function createParallelCodexCoordinator({
           }
         }
         const ready = [...queued].filter((taskId) => byId.get(taskId).dependsOn.every((id) => byId.get(id)?.status === "completed"));
-        while (ready.length) {
+        while (ready.length && active.size < MAX_ACTIVE_AGENTS) {
           const taskId = ready.shift();
           queued.delete(taskId);
           const job = byId.get(taskId);
@@ -2032,7 +2280,7 @@ export function createParallelCodexCoordinator({
             .then(() => { void schedulePeerRelay().catch(() => {}); return taskId; });
           active.set(taskId, promise);
         }
-        if (!active.size && queued.size) {
+        if (!active.size && queued.size && !run.jobs.some(job=>job.status==='paused')) {
           for (const taskId of queued) {
             const job = byId.get(taskId);
             job.status = "blocked";
@@ -2041,6 +2289,7 @@ export function createParallelCodexCoordinator({
           queued.clear();
           break;
         }
+        if(!active.size&&!additions.get(run.id)?.size&&run.jobs.some(job=>job.status==='paused'))break;
         if (active.size || additions.get(run.id)?.size) {
           const finished = await Promise.race([...active.values(), awakened]);
           active.delete(finished);
@@ -2048,10 +2297,16 @@ export function createParallelCodexCoordinator({
         wakeups.delete(run.id);
       }
       await integrationQueue;
+      signal.throwIfAborted();
+      if(run.jobs.some(job=>job.status==='paused')){
+        run.status='paused';event(run,'run_paused',{taskIds:run.jobs.filter(job=>job.status==='paused').map(job=>job.taskId)});
+        await persist(run);return publicRun(run);
+      }
       await schedulePeerRelay();
       await peerRelayQueue;
       if (peerRelayError) throw peerRelayError;
       await integrationQueue;
+      signal.throwIfAborted();
 
       run.status = "applying";
       await persist(run);
@@ -2071,8 +2326,9 @@ export function createParallelCodexCoordinator({
       if (failedTasks.length) {
         run.status = "failed";
         run.error = run.jobs.filter((job) => job.status !== "completed").map((job) => `${job.taskId}: ${job.error || job.status}`).join("\n");
-      } else if (run.incremental) {
-        if ((executionOptions.get(run.id)?.finalReviewOnly ?? run.finalReviewOnly) && independentReview) {
+      } else if (run.incremental || (!summary.changedFiles.length && independentReview)) {
+        run.result.appliedFiles ||= [];
+        if (((executionOptions.get(run.id)?.finalReviewOnly ?? run.finalReviewOnly) || !run.incremental) && independentReview) {
           run.status = 'checking';
           run.coordination={phase:'checking',message:'分支已整合，独立检查Agent按完整交付清单最终验收',updatedAt:new Date().toISOString()};
           if(run.branchTree)await recordParallelBranchResults(projectRoot,run);
@@ -2086,6 +2342,8 @@ export function createParallelCodexCoordinator({
             userGuidance: run.userMessages || [],
             sharedContract: run.sharedContract,
             delegationReceipt: coordinationEvidence(run),
+            repairCandidate: details=>repairReviewCandidate(run,details),
+            ...(run.reviewCandidatePath?{resumeCandidate:{workspacePath:run.reviewCandidatePath,snapshotCommit:run.reviewCandidateBaseCommit||run.workspace.snapshotCommit}}:{}),
             ...(run.reviewScopeFiles === undefined ? {} : {reviewScopeFiles:run.reviewScopeFiles}),
             // These are host-created copies of the complete tasks and their
             // execution bookkeeping, not the user's source/business trees.
@@ -2095,10 +2353,12 @@ export function createParallelCodexCoordinator({
             historyMessages: executionOptions.get(run.id)?.contextMessages || [],
             dialogueContext: executionOptions.get(run.id)?.historyMessages,
             treeFile: run.sourceTree?.path,
+            treeId:run.sourceTree?.id,
             signal: executionOptions.get(run.id)?.signal,
             onTiming: sample => event(run, 'final_review_timing', sample),
           });
           run.review = { status:'passed', ...receipt.review };
+          if(receipt.delivery)run.result.delivery=receipt.delivery;
           run.result.appliedFiles = [...new Set([...run.result.appliedFiles, ...receipt.appliedFiles])];
           run.result.treeChanges = [...(run.result.treeChanges || []), ...(receipt.treeChanges || [])];
           for (const job of run.jobs) job.acceptanceStatus = 'passed';
@@ -2114,12 +2374,19 @@ export function createParallelCodexCoordinator({
         await applyRun(run);
       }
     } catch (error) {
-      run.status = "failed";
+      run.status = signal.aborted ? "stopped" : "failed";
+      if (signal.aborted) for (const job of run.jobs) {
+        if (!['completed','failed','blocked','stopped'].includes(job.status)) job.status = 'stopped';
+      }
       run.error = error.message;
-      if (error.review) run.review = { status:'failed', ...error.review };
-      if (run.finalReviewOnly) for (const job of run.jobs) job.acceptanceStatus = 'failed';
+      const reviewPending=['model-quota','model-authentication'].includes(error.review?.failureCategory);
+      if (error.review) run.review = { ...error.review, status:reviewPending?'pending':'failed' };
+      if (run.finalReviewOnly) for (const job of run.jobs) job.acceptanceStatus = reviewPending?'pending':'failed';
       if (error.workspacePath) run.workspacePath = error.workspacePath;
-      event(run, "run_failed", { error: error.message });
+      run.retainedWorkspaces=[...new Map([...(run.retainedWorkspaces||[]),...(error.retainedWorkspaces||[]),
+        ...(run.reviewRepairs||[]).map(retainedRepairReceipt)]
+        .map(receipt=>[`${receipt.role}:${receipt.workspacePath}`,receipt])).values()];
+      event(run, signal.aborted ? "run_stopped" : "run_failed", { error: error.message });
     }
     run.finishedAt = new Date().toISOString();
     run.coordination={phase:run.status==='accepted'?'completed':'blocked',message:run.status==='accepted'?'真实成果已整合，最终独立验收通过':run.error||'尚未通过最终验收',updatedAt:run.finishedAt};
@@ -2173,6 +2440,10 @@ export function createParallelCodexCoordinator({
         completedMs: null
       };
       const markPlannerItem = (message) => {
+        if (['model/request-sent', 'model/request-accepted'].includes(message?.method)) {
+          plannerTiming.model = message.params.model;
+          plannerTiming.reasoningEffort = message.params.reasoningEffort;
+        }
         const itemType = message?.params?.item?.type;
         const elapsed = Date.now() - plannerStartedAt;
         if (itemType === "reasoning" && plannerTiming.firstReasoningMs === null) plannerTiming.firstReasoningMs = elapsed;
@@ -2185,9 +2456,9 @@ export function createParallelCodexCoordinator({
       try {
       const contextMessages = await plannerMaterialContext(run, nodeId);
       const historyMessages = executionOptions.get(run.id)?.contextMessages || [];
-      result = injectedStartTurn ? null : await requestDeepSeekPlanner({ projectRoot, prompt: plannerPrompt, outputSchema, onNotification: markPlannerItem, contextMessages, historyMessages, dialogueContext: executionOptions.get(run.id)?.historyMessages || historyMessages, sourceTree: run.sourceTree });
+      result = injectedStartTurn ? null : await requestDeepSeekPlanner({ projectRoot, prompt: plannerPrompt, outputSchema, onNotification: markPlannerItem, contextMessages, historyMessages, dialogueContext: executionOptions.get(run.id)?.historyMessages || historyMessages, sourceTree: run.sourceTree, signal:runSignal(run) });
       // Tests may inject a deterministic startTurn; production has no Codex fallback.
-      if (!result && injectedStartTurn) result = await startTurn({
+      if (!result && injectedStartTurn) result = await startRunTurn(run,{
         prompt: plannerPrompt,
         ...(historyMessages.length ? { messages: [...historyMessages, { role: 'user', content: plannerPrompt }] } : {}),
         contextMessages,
@@ -2232,7 +2503,7 @@ export function createParallelCodexCoordinator({
         // A slow or wedged reused context is not evidence that the plan is
         // impossible. Retry once in a clean thread; the full failure is kept in
         // the run record and passed to the next prompt for diagnosis.
-        if (plannerAttempt === 0 && /超时|timeout/i.test(String(error.message || error))) {
+        if (!runSignal(run).aborted && plannerAttempt === 0 && /超时|timeout/i.test(String(error.message || error))) {
           plannerAttempt += 1;
           failures.push({ nodeId, error: error.message, output: "Planner completion timeout; retrying with a fresh thread." });
           event(run, "planning_retry", { nodeId, error: error.message, reason: "fresh_planner_thread_after_timeout" });
@@ -2263,6 +2534,7 @@ export function createParallelCodexCoordinator({
 
   async function generatePlan(run, objective) {
     try {
+      runSignal(run).throwIfAborted();
       const source = await readParallelSource(projectRoot, run.sourceSelection);
       run.sourceTree = source.tree;
       let markdown = source.markdown;
@@ -2306,7 +2578,7 @@ export function createParallelCodexCoordinator({
       await persist(run);
       return execute(run);
     } catch (error) {
-      run.status = "failed";
+      run.status = runSignal(run).aborted ? "stopped" : "failed";
       run.error = error.message;
       run.planner = { ...run.planner, status: "failed", error: error.message };
       event(run, "planning_failed", { error: error.message });
@@ -2317,6 +2589,7 @@ export function createParallelCodexCoordinator({
   }
 
   async function recoverAbandonedPlan(run) {
+    if (run.stopRequested) return run;
     if (run.status !== "planning" || pending.has(run.id)) return run;
     // Missing local execution ownership (after restart), not elapsed wall time,
     // identifies abandoned planning. An active planner is protected by pending.
@@ -2327,11 +2600,19 @@ export function createParallelCodexCoordinator({
   }
 
   async function recoverAbandonedExecution(run) {
+    if (run.stopRequested) {
+      if (!pending.has(run.id) && run.status === 'stopping') {
+        run.status='stopped';
+        for (const job of run.jobs) if (!['completed','failed','blocked','stopped'].includes(job.status)) job.status='stopped';
+        await persist(run);
+      }
+      return run;
+    }
     if (pending.has(run.id) || !["queued", "preparing", "running", "applying", "checking"].includes(run.status)) return run;
     {
       // Completed branches keep their receipts. Interrupted branches continue
       // in their existing dirty worktrees; createWorker would reset those edits.
-      run.jobs = run.jobs.map((job) => job.status === "completed" || ["failed","blocked","stopped"].includes(job.status) ? job : { ...job, status: "queued", resumeAfterRestart: true });
+      run.jobs = run.jobs.map((job) => job.pauseRequested ? {...job,status:'paused',resumeAfterRestart:true} : job.status === "completed" || ["failed","blocked","stopped","paused"].includes(job.status) ? job : { ...job, status: "queued", resumeAfterRestart: true });
       run.status = "queued";
       event(run, "execution_requeued_after_restart");
       // Claim ownership before awaiting disk I/O; concurrent status polling or
@@ -2366,6 +2647,163 @@ export function createParallelCodexCoordinator({
     return promise;
   }
 
+  async function repairReviewCandidate(run, {candidatePath,review,attempt,signal,baseCommit:reviewBaseCommit}) {
+    signal ||= executionOptions.get(run.id)?.signal;
+    signal?.throwIfAborted();
+    const sourceCommit=await workspace.head(candidatePath);
+    run.reviewCandidatePath=candidatePath;
+    run.reviewCandidateBaseCommit=reviewBaseCommit||run.workspace.snapshotCommit;
+    const repairInputs=[run.workspace.reviewInputs,run.initialReceipt?.reviewInputs,...run.jobs.map(job=>job.reviewInputs),
+      workspace.captureReviewInputs?await workspace.captureReviewInputs(candidatePath):null].flat().filter(Boolean);
+    const assigned=assignReviewRepairJobs(run.jobs,review);
+    run.reviewRepairs ||= [];
+    run.coordination={phase:'repairing',message:`验收问题退回 ${assigned.length} 个原执行者修复；候选成果保留`,updatedAt:new Date().toISOString()};
+    event(run,'review_repair_started',{attempt,taskIds:assigned.map(item=>item.owner.taskId)});
+    await persist(run);
+    const executeRepair=async(owner,issues,baseCommit,taskId,instruction='',inheritedInputs=repairInputs,requiredInputs=owner.inputPaths,ancestorInstructions=[])=>{
+      signal?.throwIfAborted();
+      // Finalizing the original run archives/moves its run directory. Keep
+      // repair checkpoints in their own retained run so their public receipts
+      // continue to resolve after acceptance as well as after cancellation.
+      const workerPath=await workspace.createWorker(`review-repairs-${run.id}`,taskId,baseCommit);
+      const receipt={attempt,taskId,sourceTaskId:owner.taskId,workspacePath:workerPath,
+        candidatePath,baseCommit,threadId:owner.contextThreadId||owner.threadId||'',issueIds:issues.map(issue=>issue.id),status:'running'};
+      run.reviewRepairs.push(receipt);
+      await persist(run);
+      let subdivision;
+      const repairActivity={};
+      const integrateRepair=async(target,product)=>{
+        try {await workspace.integrate(target,product.commit,product.baseCommit);}
+        catch(error){
+          if(error.code!=='CHERRY_PICK_CONFLICT')throw error;
+          await resolveMergeConflict(run,owner,error.files||[],target,true);
+        }
+      };
+      try {
+        const repairMaterials=await prepareTaskInputs(run,owner,{workerPath,receipts:inheritedInputs,paths:requiredInputs});
+        const response=await (repairTurn||startTurn)({
+          cwd:workerPath, signal,
+          allowAnswerOnly:false,
+          systemPrompt:'你是前一阶段的修复执行者。以本次验收问题和子分支范围为唯一执行目标，先核对当前候选已有成果，不重做完整项目；旧会话中的工作目录已过期，所有修改只在本次cwd。独立修复主动分工，完成后等待宿主只读重验。',
+          developerInstructions:'只修复本次回交问题，保留已有成果；不要在验收会话中实施修复。',
+          prompt:[buildReviewRepairPrompt({objective:run.objective||run.goal?.immediate,review:{...review,issues},attempt}),
+            `原 Task id: ${owner.taskId}\n原分支任务：${owner.instruction||''}`,
+            instruction&&`本子分支只执行：${instruction}`,
+            run.sharedContract&&`共享约定：${run.sharedContract}`,
+            repairMaterials?.prompt,
+            run.reviewRepairs.some(previous=>previous!==receipt&&previous.status!=='running')&&[
+              '【已有修复检查点】以下是同轮及历史修复的精确路径、问题id和状态，不是新的完整项目任务：',
+              JSON.stringify(run.reviewRepairs.filter(previous=>previous!==receipt&&previous.status!=='running').map(retainedRepairReceipt)),
+              '已完成分支先核对当前聚合候选，已包含则不重做。失败或停止分支可能含未合入改进，按本次问题id读取对应检查点、只迁移需要的变化；不要整目录覆盖，也不要重新下载或提取。'
+            ].join('\n'),
+            '当前隔离目录从最新完整候选创建；保留其他分支已交付内容。可调用 task_tree_split_work 将独立修复交给子执行者，不把修复交给验收者。'
+          ].filter(Boolean).join('\n\n'),
+          threadId:receipt.threadId, forceNewThread:!receipt.threadId,
+          waitForCompletion:true,
+          environment:{TASK_TREE_PROJECT_ROOT:workerPath,TASK_TREE_CONTEXT_NODE_ID:owner.executionNodeId||owner.nodeId||'',TASK_TREE_QUALITY_MODE:'advisory',
+            ...(run.sourceTree?.path?{TASK_TREE_CONTEXT_TREE_FILE:run.sourceTree.path}:{})},
+          tools:[...TREE_CONTEXT_TOOLS,WORKER_SPLIT_TOOL],
+          onNotification:notification=>{recordAgentActivity(repairActivity,notification);event(run,'review_repair_progress',{taskId,notification});},
+          onAccepted:async({threadId,turnId})=>{
+            receipt.threadId=threadId;receipt.turnId=turnId;
+            owner.contextThreadId=threadId;owner.threadId=threadId;
+            if(run.jobs.includes(owner))rememberRunContext(run,owner);
+            await persist(run);
+          },
+          toolHandler:async(name,args)=>{
+            if(name!==WORKER_SPLIT_TOOL.function.name)return treeContextHandler(workerPath,run.sourceTree)(name,args);
+            if(subdivision)return subdivision;
+            const children=validateParallelJobs(args.jobs.map(child=>({...child,nodeId:child.nodeId||owner.nodeId})));
+            assertDistinctTaskScopes(children,[owner.instruction,instruction,...ancestorInstructions]);
+            if(!repairActivity.substantiveToolCount){
+              const inspected=await workspace.inspectChanges(workerPath,baseCommit);
+              assertSplitProgress(repairActivity,inspected.changedFiles);
+            }
+            if(children.length<2||children.filter(child=>!child.dependsOn.length).length<2)throw new Error('修复拆分需要至少两个独立就绪任务');
+            subdivision=(async()=>{
+              await workspace.commitCandidateRepairs(workerPath);
+              const base=await workspace.head(workerPath);
+              const childInputs=[inheritedInputs,workspace.captureReviewInputs?await workspace.captureReviewInputs(workerPath):null].flat().filter(Boolean);
+              const queued=new Map(children.map(child=>[child.taskId,child])),done=new Set();
+              const products=[];
+              while(queued.size){
+                signal?.throwIfAborted();
+                const frontier=[...queued.values()].filter(child=>child.dependsOn.every(id=>done.has(id)));
+                if(!frontier.length)throw new Error('修复子任务没有可执行依赖前沿');
+                // Each ready child reads the same committed parent checkpoint;
+                // only host integration writes the parent, after all settle.
+                const frontierBase=await workspace.head(workerPath);
+                const settled=await withSuspendedAgentSlot(()=>Promise.allSettled(frontier.map(child=>executeRepair({...owner,contextThreadId:'',threadId:''},issues,frontierBase,
+                  `${taskId}-${cleanId(child.taskId)}-${randomUUID().slice(0,8)}`,child.instruction,childInputs,
+                  [...new Set([...(requiredInputs||[]),...(child.inputPaths||[])])],[instruction,...ancestorInstructions]))));
+                const failed=settled.find(item=>item.status==='rejected');
+                signal?.throwIfAborted();
+                for(let i=0;i<frontier.length;i++){
+                  if(settled[i].status!=='fulfilled')continue;
+                  await integrateRepair(workerPath,settled[i].value);
+                  products.push(settled[i].value);
+                  queued.delete(frontier[i].taskId);done.add(frontier[i].taskId);
+                }
+                if(failed)throw failed.reason;
+              }
+              return {ok:true,hostCompletion:{status:'completed',output:'独立修复子分支已整合，等待只读重验。'},baseCommit:base,
+                output:products.map(product=>product.output).filter(Boolean).join('\n\n')};
+            })();
+            return subdivision;
+          }
+        });
+        signal?.throwIfAborted();
+        assertTurnCompleted(response);
+        const delegated=subdivision?await subdivision:null;
+        const output=delegated?.output||String(response.structuredOutput||response.messages?.at(-1)?.content||response.output||'');
+        const changed=await workspace.inspectChanges(workerPath,baseCommit);
+        await assertWorkspaceTreeFiles(workerPath,changed.changedFiles);
+        const commit=await workspace.commit(workerPath,`Repair review issues for ${owner.taskId}`,baseCommit);
+        Object.assign(receipt,{status:'completed',commit,changedFiles:changed.changedFiles,output});
+        event(run,'review_repair_worker_completed',{taskId,sourceTaskId:owner.taskId,workspacePath:workerPath});
+        return {commit,baseCommit,output,changedFiles:changed.changedFiles};
+      }catch(error){
+        Object.assign(receipt,{status:signal?.aborted?'stopped':'failed',error:error.message});
+        try {receipt.changedFiles=(await workspace.inspectChanges(workerPath,baseCommit)).changedFiles;}catch{}
+        error.workspacePath ||= workerPath;
+        throw error;
+      }finally{await persist(run);}
+    };
+    const settled=await Promise.allSettled(assigned.map(({owner,issues})=>executeRepair(owner,issues,sourceCommit,
+      `review-repair-${attempt}-${cleanId(owner.taskId)}-${randomUUID().slice(0,8)}`, '', repairInputs,
+      [...new Set([...(owner.inputPaths||[]),...reviewRequiredInputPaths({...review,issues})])] )));
+    const failed=settled.find(item=>item.status==='rejected');
+    try {
+    signal?.throwIfAborted();
+    for(let i=0;i<settled.length;i++){
+      if(settled[i].status!=='fulfilled')continue;
+      const product=settled[i].value;
+      try {await workspace.integrate(candidatePath,product.commit,product.baseCommit);}
+      catch(error){
+        if(error.code!=='CHERRY_PICK_CONFLICT')throw error;
+        await resolveMergeConflict(run,assigned[i].owner,error.files||[],candidatePath,true);
+      }
+      if(product.output){
+        assigned[i].owner.output=product.output;
+        assigned[i].owner.evidence=product.output;
+      }
+      if(!product.changedFiles.length&&product.output.trim()){
+        run.repairDelivery={output:run.jobs.filter(job=>!job.splitChildren?.length).map(job=>job.output||'').filter(Boolean).join('\n\n')};
+      }
+    }
+    if(failed)throw failed.reason;
+    }catch(error){
+      // A single failed/partial repair branch is not the latest full result:
+      // successful siblings are already in this aggregate candidate.
+      error.workspacePath=candidatePath;
+      error.retainedWorkspaces=[...(error.retainedWorkspaces||[]),...run.reviewRepairs.map(retainedRepairReceipt)];
+      throw error;
+    }
+    event(run,'review_repair_completed',{attempt,taskIds:assigned.map(item=>item.owner.taskId)});
+    await persist(run);
+    return run.repairDelivery;
+  }
+
   async function applyRun(run) {
     registerWorkspaceRun(run);
     if (run.status === "accepted") return publicRun(run);
@@ -2378,10 +2816,13 @@ export function createParallelCodexCoordinator({
           `用户目标：${run.objective || run.goal?.immediate || ''}`,
           ...(run.userMessages?.length ? [`用户补充要求：\n${run.userMessages.slice(-8).map(message => String(message.content || '').trim().slice(0,500)).filter(Boolean).join('\n').slice(0,2400)}`] : []),
           ...(run.sharedContract ? [`共享接口约定：${run.sharedContract}`] : []),
+          ...(run.repairDelivery?.output?[`执行阶段修复后的交付答案：\n${run.repairDelivery.output}`]:[]),
           await stageCoordinationEvidence(candidatePath,coordinationEvidence(run))
         ].join('\n\n'));
       const response = await independentReview({
         completionReview:true,
+        completionReviewReadRoots:[projectRoot],
+        signal:executionOptions.get(run.id)?.signal,
         cwd: candidatePath, prompt: reviewPrompt,
         // The review prompt already contains the objective, worker instructions,
         // shared contract and candidate evidence. Do not copy planner/chat
@@ -2398,22 +2839,32 @@ export function createParallelCodexCoordinator({
       run.review = { ...verdict, status: verdict.verdict === 'pass' ? 'passed' : 'failed', candidateCommit: run.review.candidateCommit };
       event(run, verdict.verdict === 'pass' ? 'review_passed' : 'review_failed', { reason: run.review.reason });
       await persist(run);
-      if (verdict.verdict === 'failed') throw completionReviewFailure(verdict);
-      await assertWorkspaceTreeFiles(candidatePath, (await workspace.inspectChanges(candidatePath, liveBaseCommit)).changedFiles);
-      await workspace.commitCandidateRepairs(candidatePath);
+      return verdict;
     } : undefined;
     let applied;
     try { applied = await workspace.accept({
-      integrationPath: run.workspace.integrationPath,
+      integrationPath: run.reviewCandidatePath || run.workspace.integrationPath,
       snapshotCommit: run.workspace.snapshotCommit,
-      changedFiles: run.result?.changedFiles || [],
+      changedFiles: run.reviewCandidatePath?(await workspace.inspectChanges(run.reviewCandidatePath,run.workspace.snapshotCommit)).changedFiles:run.result?.changedFiles||[],
       onInvalidated: sample => event(run, 'candidate_invalidated', sample),
       resolveConflict: (integrationPath, files) => {
         const source = [...run.jobs].reverse().find((job) => job.changedFiles?.some((file) => files.includes(file))) || run.jobs.at(-1);
         return resolveMergeConflict(run, source, files, integrationPath, true);
       },
-      validateCandidate: validateCandidate ? async (...args) => {
-        try { await validateCandidate(...args); }
+      validateCandidate: validateCandidate ? async (candidatePath,liveBaseCommit,meta) => {
+        try {
+          await runReviewRepairCycle({candidatePath,
+            signal:executionOptions.get(run.id)?.signal,
+            review:async reviewAttempt=>validateCandidate(candidatePath,liveBaseCommit,{...meta,reviewAttempt}),
+            repair:details=>repairReviewCandidate(run,{...details,baseCommit:liveBaseCommit}),
+            commit:async()=>{
+              await assertWorkspaceTreeFiles(candidatePath,(await workspace.inspectChanges(candidatePath,liveBaseCommit)).changedFiles);
+              await workspace.commitCandidateRepairs(candidatePath);
+            },
+            fingerprint:async()=>JSON.stringify([await workspace.head(candidatePath),run.repairDelivery||null]),
+            onPhase:(phase,message)=>{run.coordination={phase,message,updatedAt:new Date().toISOString()};event(run,'final_review_phase',{phase,message});}
+          });
+        }
         catch (error) { throw completionReviewInterruption(error); }
       } : undefined
     }); } catch (error) {
@@ -2426,6 +2877,7 @@ export function createParallelCodexCoordinator({
     }
     run.result ||= {};
     run.result.appliedFiles = applied.appliedFiles;
+    if(run.repairDelivery)run.result.delivery=run.repairDelivery;
     run.result.treeChanges = applied.treeChanges || [];
     run.result.cleanup = { status: "queued", error: "" };
     run.status = "accepted";
@@ -2621,8 +3073,11 @@ export function createParallelCodexCoordinator({
         })),
         events: [], peerMessages: []
       };
+      if(options.parentExecution)run.parentExecution=options.parentExecution;
+      for(const job of run.jobs)job.agentId=options.parentExecution?.agentId||retainedAgentId(run.id,job.taskId);
+      if(options.initialUserMessage)run.userMessages=[options.initialUserMessage];
       runs.set(run.id, run);
-    executionOptions.set(run.id, options);
+      setRunOptions(run, options);
       if (options.incremental) await stageBranches(run);
       await persist(run);
       const promise = Promise.resolve().then(() => execute(run)).finally(() => pending.delete(run.id));
@@ -2641,24 +3096,198 @@ export function createParallelCodexCoordinator({
     },
 
     async snapshot(id, options = {}) { const run=await load(id);return run?publicRun(run, options):null; },
+    async listAgents(scope={}) { return agentDirectory.list(scope); },
+    async readAgent(agentId) { return agentDirectory.read(agentId); },
+    async messageAgent(body) { return agentDirectory.send(body); },
+    async agentContext(scope={}) { return agentDirectory.context(scope); },
+    async agentTool(name,args,scope={}) { return agentDirectory.tool(name,args,scope); },
     async getJob(id, taskId) {
       const run=await load(id),job=run?.jobs?.find(job=>job.taskId===taskId);
       if(!job)return null;
-      return {runId:run.id,job:publicJob(job),
+      return {runId:run.id,job:{...publicJob(job,run.jobs),agentId:await agentDirectory.identify(run.id,job.taskId),controls:agentControls(run,job)},
+        followups:(run.followups||[]).filter(item=>item.taskId===taskId),
         userMessages:(run.userMessages||[]).filter(message=>message.taskId===taskId),
         peerMessages:(run.peerMessages||[]).filter(message=>message.fromTaskId===taskId||message.toTaskId===taskId)};
     },
     async sendAgentMessage(id, body) {
       const run=await load(id);
       if(!run)throw Object.assign(new Error('找不到这次并行运行'),{code:'RUN_NOT_FOUND',statusCode:404});
+      const job=run.jobs.find(job=>job.taskId===body.taskId);
+      if(!job)throw Object.assign(new Error('找不到这个 Agent'),{code:'AGENT_NOT_FOUND',statusCode:404});
+      if((typeof body.content!=='string'||!body.content.trim())&&body.attachments?.length)body={...body,content:'请查看我提供的资料，并结合本分支当前进度处理。'};
+      if(typeof body.content!=='string'||!body.content.trim()||typeof body.clientMessageId!=='string'||!body.clientMessageId.trim())
+        throw Object.assign(new Error('请填写指导内容和消息标识'),{code:'INVALID_AGENT_MESSAGE',statusCode:400});
+      if(body.attachments!==undefined&&(!Array.isArray(body.attachments)||body.attachments.some(id=>typeof id!=='string')))
+        throw Object.assign(new Error('attachments 必须是上传附件标识数组'),{code:'INVALID_AGENT_MESSAGE',statusCode:400});
+      if(body.mode!==undefined&&!['followup','resume'].includes(body.mode))
+        throw Object.assign(new Error('消息模式必须是 followup 或 resume'),{code:'INVALID_AGENT_MESSAGE',statusCode:400});
+      const attachments=await Promise.all([...new Set(body.attachments||[])].map(async id=>attachmentReference((await loadAttachment({...attachmentScope(run,job),id})).meta)));
+      const previous=(run.followups||[]).find(item=>item.clientMessageId===body.clientMessageId);
+      if(previous){
+        if(previous.taskId!==body.taskId||previous.content!==body.content.trim()||JSON.stringify(previous.attachments||[])!==JSON.stringify(attachments.map(a=>a.id)))
+          throw Object.assign(new Error('消息标识已用于另一条消息'),{code:'MESSAGE_ID_CONFLICT',statusCode:409});
+        return {message:previous,run:publicRun(run),followupRunId:previous.runId,followupTaskId:previous.followupTaskId};
+      }
+      // A retry of an already accepted live message stays the same message,
+      // even if the worker finished between the original response and retry.
+      if(run.userMessages?.some(message=>message.clientMessageId===body.clientMessageId)) {
+        const mailbox=mailboxes.get(id)||createMailbox(run);
+        const message=await mailbox.sendUserMessage({...body,attachments});
+        if(body.mode==='resume')await this.controlAgent(id,job.taskId,{action:'resume',clientRequestId:`message:${body.clientMessageId}`});
+        return {message,run:publicRun(run)};
+      }
+      if(agentControls(run,job).messageMode==='recover') {
+        if(body.mode!=='resume')throw Object.assign(new Error('请确认继续原任务并整合；已保存成果将被复用'),{code:'RECOVERY_CONFIRMATION_REQUIRED',statusCode:409});
+        const mailbox=mailboxes.get(id)||createMailbox(run);
+        // Persist guidance before scheduling, so a fast integration-only resume
+        // cannot finish before the new request reaches its original worker.
+        const message=await mailbox.sendUserMessage({...body,attachments,allowRecovery:true});
+        await this.controlAgent(id,job.taskId,{action:'resume',clientRequestId:`message:${body.clientMessageId}`});
+        return {message,run:publicRun(run)};
+      }
+      if(agentControls(run,job).messageMode==='continue') {
+        if(body.mode!=='followup')throw Object.assign(new Error('原分支已结束或整合，请确认以独立续接发送；原成果保持不变'),{code:'FOLLOWUP_CONFIRMATION_REQUIRED',statusCode:409});
+        const key=`${id}:${body.clientMessageId}`;
+        const fingerprint=JSON.stringify({taskId:body.taskId,content:body.content.trim(),attachments:attachments.map(a=>a.id)});
+        const inFlight=followupRequests.get(key);
+        if(inFlight){
+          if(inFlight.fingerprint!==fingerprint)throw Object.assign(new Error('消息标识已用于另一条消息'),{code:'MESSAGE_ID_CONFLICT',statusCode:409});
+          return inFlight.promise;
+        }
+        const request=(async()=>{
+          // The successor is durably created before the origin's receipt. If
+          // shutdown happened in between, recover that child instead of
+          // starting another one for the same accepted user message.
+          const existing=await agentDirectory.continuation(id,job.taskId,body.clientMessageId);
+          if(existing){
+            const message=existing.userMessages?.find(message=>message.clientMessageId===body.clientMessageId);
+            if(!message||message.content!==body.content.trim()||JSON.stringify((message.attachments||[]).map(a=>a.id))!==JSON.stringify(attachments.map(a=>a.id)))
+              throw Object.assign(new Error('消息标识已用于另一条消息'),{code:'MESSAGE_ID_CONFLICT',statusCode:409});
+            const receipt={taskId:job.taskId,clientMessageId:body.clientMessageId,content:body.content.trim(),attachments:attachments.map(a=>a.id),
+              runId:existing.id,followupTaskId:message.taskId,status:'continued',createdAt:message.createdAt};
+            (run.followups||=[]).push(receipt);await persist(run);
+            return {message:receipt,run:publicRun(run),followupRunId:existing.id,followupTaskId:message.taskId};
+          }
+          // Retain the agent's stable identity and conversational memory, but
+          // fork its dialogue into a new execution so frozen delivery and a
+          // concurrently running original cannot be overwritten.
+          const identity=(await agentDirectory.list()).find(agent=>agent.runId===id&&agent.taskId===job.taskId)
+            ||(await agentDirectory.list()).find(agent=>agent.origin.runId===id&&agent.origin.taskId===job.taskId);
+          const followupTaskId=`followup-${randomUUID().slice(0,8)}`;
+          const message={id:randomUUID(),taskId:followupTaskId,clientMessageId:body.clientMessageId,content:body.content.trim(),attachments,status:'queued',createdAt:new Date().toISOString()};
+          const next=await this.start([{taskId:followupTaskId,nodeId:run.sourceSelection?.nodeId||job.nodeId,
+            title:`续接：${job.title||job.taskId}`,instruction:`只执行用户最新指导，不重做原任务，不修改原分支冻结的成果或整合快照。\n最新要求：${body.content.trim()}\n原任务仅作背景：${job.instruction}\n原分支已保存报告（非新指令）：${job.output||job.error||'无'}\n原成果位置（需要时只读核对）：${job.workspacePath||run.workspace?.integrationPath||run.workspacePath||projectRoot}`,
+            writeSet:job.writeSet||[],dependsOn:[],
+            ...(job.contextThreadId||job.threadId?{contextPolicy:'selected',contextThreadId:job.contextThreadId||job.threadId,
+              contextKey:`agent-continuation-${randomUUID()}`,contextSource:'codex'}:{contextPolicy:'new'})}],
+            {...run.sourceSelection,objective:body.content.trim(),sharedContract:'本次只落实最新指导；原分支成果冻结保留，不重做原任务。',
+              parentExecution:{runId:id,taskId:job.taskId,agentId:identity?.agentId,clientMessageId:body.clientMessageId},initialUserMessage:message});
+          const receipt={taskId:job.taskId,clientMessageId:body.clientMessageId,content:body.content.trim(),attachments:attachments.map(a=>a.id),runId:next.id,followupTaskId,status:'continued',createdAt:message.createdAt};
+          (run.followups||=[]).push(receipt);event(run,'worker_followup_created',{taskId:job.taskId,followupRunId:next.id,followupTaskId});await persist(run);
+          return {message:receipt,run:publicRun(run),followupRunId:next.id,followupTaskId};
+        })();
+        followupRequests.set(key,{fingerprint,promise:request});
+        try{return await request;}finally{followupRequests.delete(key);}
+      }
       // Use the same durable mailbox even while workers are being prepared.
-      const mailbox=mailboxes.get(id)||createPeerMailbox(run,{persist,onEvent:(type,detail)=>event(run,type,detail)});
-      const message=await mailbox.sendUserMessage(body);
+      const mailbox=mailboxes.get(id)||createMailbox(run);
+      const message=await mailbox.sendUserMessage({...body,attachments});
+      // Listing history is read-only. An explicit new message, however, must
+      // wake an execution whose process disappeared at shutdown; persisting
+      // guidance alone would leave a "running" legacy agent idle forever.
+      await recoverAbandonedExecution(run);
       return {message,run:publicRun(run)};
+    },
+    async stop(id) {
+      const run=await load(id);
+      if(!run)return null;
+      if(['accepted','stopped'].includes(run.status))return publicRun(run);
+      run.stopRequested=true;
+      run.status='stopping';
+      const reason=new DOMException('用户停止整轮执行；保留所有已保存成果','AbortError');
+      runSignal(run);
+      runControllers.get(id).abort(reason);
+      // Also covers a run restored without its original parent's controller.
+      for(const [key,controller] of workerControllers)if(key.startsWith(`${id}:`))controller.abort(reason);
+      for(const job of run.jobs)if(['queued','planned','paused'].includes(job.status))job.status='stopped';
+      event(run,'run_stop_requested',{message:reason.message});
+      wakeups.get(id)?.();
+      if(!pending.has(id)){
+        run.status='stopped';run.finishedAt=new Date().toISOString();
+        for(const job of run.jobs)if(!['completed','failed','blocked','stopped'].includes(job.status))job.status='stopped';
+      }
+      await persist(run);
+      return publicRun(run);
+    },
+
+    async controlAgent(id,taskId,{action,clientRequestId}={}) {
+      const run=await load(id),job=run?.jobs?.find(job=>job.taskId===taskId);
+      if(!job)throw Object.assign(new Error('找不到这个 Agent'),{code:'AGENT_NOT_FOUND',statusCode:404});
+      if(!['pause','resume'].includes(action)||typeof clientRequestId!=='string'||!clientRequestId.trim())
+        throw Object.assign(new Error('需要 pause/resume 和请求标识'),{code:'INVALID_AGENT_CONTROL',statusCode:400});
+      const prior=(run.agentControls||[]).find(item=>item.clientRequestId===clientRequestId);
+      if(prior){if(prior.taskId!==taskId||prior.action!==action)throw Object.assign(new Error('请求标识冲突'),{code:'CONTROL_ID_CONFLICT',statusCode:409});return {run:publicRun(run),job:{...publicJob(job,run.jobs),controls:agentControls(run,job)}};}
+      const controls=agentControls(run,job);
+      if(action==='pause'&&!controls.canPause||action==='resume'&&!controls.canResume)
+        throw Object.assign(new Error('当前分支状态不支持此操作'),{code:'AGENT_CONTROL_UNAVAILABLE',statusCode:409});
+      // Do not consume an idempotency key for a request that cannot run yet.
+      if(action==='resume'&&workerControllers.has(`${id}:${taskId}`))
+        throw Object.assign(new Error('分支仍在暂停收尾，请稍后恢复'),{code:'AGENT_PAUSE_PENDING',statusCode:409});
+      (run.agentControls||=[]).push({taskId,action,clientRequestId,at:new Date().toISOString()});
+      if(action==='resume'&&controls.messageMode==='recover') {
+        // resume() queues the selected dependency closure in the original run.
+        // Its next persisted checkpoint contains both the control receipt and
+        // queue state, so a response retry cannot schedule duplicate execution.
+        await this.resume(id,{taskIds:[taskId]});
+        return {run:publicRun(run),job:{...publicJob(job,run.jobs),controls:agentControls(run,job)}};
+      }
+      if(action==='pause'){
+        job.pauseRequested=true;
+        if(!workerControllers.has(`${id}:${taskId}`)){job.status='paused';job.resumeAfterRestart=true;}
+        event(run,'worker_pause_requested',{taskId});
+        await persist(run);
+        workerControllers.get(`${id}:${taskId}`)?.abort(Object.assign(new Error('用户暂停分支；请在恢复后核对中断操作'),{code:'AGENT_PAUSED'}));
+      }else{
+        // A stopping provider must unwind and retain its worktree before resume.
+        delete job.pauseRequested;job.status='queued';job.acceptingGuidance=true;job.resumeAfterRestart=true;job.finishedAt='';
+        if(run.status==='paused')run.status='queued';
+        event(run,'worker_resumed_by_user',{taskId});await persist(run);
+        if(!pending.has(id))await recoverAbandonedExecution(run);
+      }
+      wakeups.get(id)?.();
+      return {run:publicRun(run),job:{...publicJob(job,run.jobs),controls:agentControls(run,job)}};
     },
     async resume(id, options = {}) {
       const run = await load(id);
       if(!run)throw new Error('找不到需要续跑的并行任务');
+      delete run.providerFailure;
+      if(run.workspace&&workspace.captureReviewInputs){
+        const refreshed=await workspace.captureReviewInputs(projectRoot);
+        run.workspace.reviewInputs=[...(run.workspace.reviewInputs||[]),refreshed];
+      }
+      let selected;
+      if(options.taskIds!==undefined) {
+        if(!Array.isArray(options.taskIds)||!options.taskIds.length||options.taskIds.some(id=>typeof id!=='string'||!run.jobs.some(job=>job.taskId===id)))
+          throw Object.assign(new Error('续跑目标必须是已有分支标识数组'),{code:'INVALID_RESUME_TASKS',statusCode:400});
+        selected=new Set(options.taskIds);
+        // A blocked child also needs its failed prerequisites. Retry only its
+        // blocked consumers, leaving unrelated failed siblings untouched.
+        let changed=true;
+        while(changed){changed=false;for(const job of run.jobs){
+          if(selected.has(job.taskId))for(const id of job.dependsOn){const dependency=run.jobs.find(item=>item.taskId===id);if(['failed','blocked','stopped'].includes(dependency?.status)&&!selected.has(id)){selected.add(id);changed=true;}}
+          if(job.status==='blocked'&&job.dependsOn.some(id=>selected.has(id))&&!selected.has(job.taskId)){selected.add(job.taskId);changed=true;}
+        }}
+      }
+      const shouldRetry=job=>(['failed','blocked','stopped'].includes(job.status)
+        || job.status==='completed'&&selected?.has(job.taskId)&&run.userMessages?.some(message=>message.taskId===job.taskId&&message.status==='queued'))
+        &&(!selected||selected.has(job.taskId));
+      const queueRetry=job=>{
+        // Guidance after a completed branch was integrated is a new delta on
+        // that checkpoint, not a replay of its original patch from the base.
+        if(job.status==='completed'&&job.commit)job.sourceCommit=job.commit;
+        job.retryReason=job.error||job.retryReason||'上次运行未完成';
+        job.status='queued';job.error='';job.finishedAt='';job.resumeAfterRestart=true;
+      };
       if (options.reviewScopeFiles !== undefined) {
         run.reviewScopeFiles = validateReviewScopeFiles(options.reviewScopeFiles);
         await persist(run);
@@ -2673,15 +3302,15 @@ export function createParallelCodexCoordinator({
         if (lastRound?.finishReason === 'stop' && !lastRound.error) job.workerCompleted = true;
       }
       const previousOptions = executionOptions.get(id) || {};
-      executionOptions.set(id,{...previousOptions,...options,finalReviewOnly:run.finalReviewOnly,incremental:run.incremental});
+      if(pending.has(id)&&previousOptions.signal?.aborted)
+        throw Object.assign(new Error('本轮仍在停止收尾；请等待保留成果完成后再继续'),{code:'AGENT_STOP_PENDING',statusCode:409});
+      if(!pending.has(id))delete run.stopRequested;
+      setRunOptions(run,{...options,finalReviewOnly:run.finalReviewOnly,incremental:run.incremental},{restart:!pending.has(id)});
       // An explicit user retry also revives failed siblings while unaffected
       // workers are running. Do not start a second scheduler or replay them.
       if (pending.has(id)) {
-        const retryable = run.jobs.filter(job => ['failed', 'blocked', 'stopped'].includes(job.status));
-        for (const job of retryable) {
-          job.retryReason = job.error || job.retryReason || '上次运行未完成';
-          job.status = 'queued'; job.error = ''; job.finishedAt = ''; job.resumeAfterRestart = true;
-        }
+        const retryable = run.jobs.filter(shouldRetry);
+        for (const job of retryable) queueRetry(job);
         if (retryable.length) {
           event(run, 'run_retry_requested', { taskIds: retryable.map(job => job.taskId) });
           await persist(run);
@@ -2692,11 +3321,8 @@ export function createParallelCodexCoordinator({
       if (["queued", "preparing", "running", "applying", "checking"].includes(run.status)) {
         // After restart, some siblings can already be failed while others
         // were interrupted. An explicit retry revives both in one scheduler.
-        const retryable = run.jobs.filter(job => ['failed', 'blocked', 'stopped'].includes(job.status));
-        for (const job of retryable) {
-          job.retryReason = job.error || job.retryReason || '上次运行未完成';
-          job.status = 'queued'; job.error = ''; job.finishedAt = ''; job.resumeAfterRestart = true;
-        }
+        const retryable = run.jobs.filter(shouldRetry);
+        for (const job of retryable) queueRetry(job);
         if (retryable.length) {
           run.error = ''; run.finishedAt = '';
           event(run, 'run_retry_requested', { taskIds: retryable.map(job => job.taskId) });
@@ -2704,16 +3330,10 @@ export function createParallelCodexCoordinator({
         await recoverAbandonedExecution(run);
         return publicRun(run);
       }
-      if (run.status !== "failed") throw new Error(`当前运行状态 ${run.status} 不支持续跑`);
+      if (!["failed","stopped","paused"].includes(run.status)) throw new Error(`当前运行状态 ${run.status} 不支持续跑`);
 
-      const retryable = run.jobs.filter(job => job.status !== "completed");
-      for (const job of retryable) {
-        job.retryReason = job.error || job.retryReason || "上次运行未完成";
-        job.status = "queued";
-        job.error = "";
-        job.finishedAt = "";
-        job.resumeAfterRestart = true;
-      }
+      const retryable = run.jobs.filter(shouldRetry);
+      for (const job of retryable) queueRetry(job);
       run.status = "queued";
       run.error = "";
       run.result = null;

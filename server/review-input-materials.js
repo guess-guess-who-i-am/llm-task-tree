@@ -8,7 +8,7 @@ const registrationQueues=new Map();
 export const REVIEW_INPUT_REGISTRY='.task-tree-review-inputs.json';
 export const REVIEW_INPUTS_TOOL={
   name:'task_tree_review_inputs',
-  description:'登记或查看本分支测试/复现需要的本地非Git输入。宿主会保存隔离的只读快照供子分支和最终检查使用；不把输入加入Git。只登记实际需要的项目内相对路径（文件或目录），不要登记整个项目、凭据或缓存。生成/取得输入后尽早登记，宿主在交接及结束时捕获。输入副本只读，待交付的修改/派生结果写入另一个产物路径，不能靠修改输入副本交付。',
+  description:'登记或查看本分支测试/复现需要的本地非Git输入。宿主会保存隔离的只读快照供子分支和最终检查使用；不把输入加入Git。只登记实际需要的项目内相对路径（文件或目录），不要登记整个项目、凭据或缓存。目录内软链接与凭据只记安全排除清单，不读取；明确登记的文件须为普通文件。生成/取得输入后尽早登记，宿主在交接及结束时捕获。输入副本只读，待交付的修改/派生结果写入另一个产物路径，不能靠修改输入副本交付。',
   inputSchema:{type:'object',properties:{action:{type:'string',enum:['register','list']},paths:{type:'array',items:{type:'string'}}},required:['action'],additionalProperties:false}
 };
 const fail=(code,message,details={})=>Object.assign(new Error(message),{code,...details});
@@ -43,6 +43,43 @@ async function safePath(root,relative,{missing=false}={}) {
     }
   }
   return current;
+}
+export async function missingTaskInputs(root,paths=[]){
+  const missing=[];
+  for(const value of paths){
+    const relative=relativeInput(value);
+    try {await safePath(root,relative);}
+    catch(error){
+      if(error.code!=='REVIEW_INPUT_MISSING')throw error;
+      missing.push(relative);
+    }
+  }
+  return [...new Set(missing)];
+}
+export async function assertTaskInputs(root,paths=[]){
+  const missing=await missingTaskInputs(root,paths);
+  if(missing.length)throw fail('TASK_INPUT_UNAVAILABLE',`执行必需输入仍缺失：${missing.join('、')}。宿主已核对当前分支及明确来源；请补充这些实际资料后继续原分支，已有成果保留，无需手工登记或重做成功分支。`,{file:missing[0],missingPaths:missing,sourceRoot:root,stage:'input-handoff'});
+}
+export function reviewRequiredInputPaths(review=[]){
+  const envelope=Array.isArray(review)?{issues:review}:review||{};
+  const issues=Array.isArray(envelope.issues)?envelope.issues:[];
+  const paths=new Set();
+  for(const issue of issues){
+    for(const value of Array.isArray(issue?.inputPaths)?issue.inputPaths:[])
+      if(typeof value==='string'&&value.trim())paths.add(value.trim());
+  }
+  // Older saved reviews have no structured field. Recover paths only when the
+  // prose explicitly says they should be handed off or were not handed off.
+  const text=[...issues.flatMap(issue=>[issue?.problem,issue?.acceptanceCriteria]),
+    envelope.reason,envelope.rootCause,envelope.caseStudy,...(Array.isArray(envelope.evidence)?envelope.evidence:[])]
+    .filter(Boolean).join('\n');
+  {
+    const explicit=/(?:交接|补充|提供|恢复|读取|使用|hand\s+off|handoff)\s*[`"']?((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+)/gi;
+    for(const match of text.matchAll(explicit))paths.add(match[1]);
+    const omitted=/(?:[`"']?)((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+)[`"']?\s*(?:未|没有|尚未)(?:被)?(?:交接|提供|传入|传递)|(?:[`"']?)((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+)[`"']?\s+(?:was not handed off|was not provided|was not copied)/gi;
+    for(const match of text.matchAll(omitted))paths.add(match[1]||match[2]);
+  }
+  return [...paths];
 }
 async function registry(root) {
   let raw;
@@ -85,21 +122,31 @@ const version=info=>[info.dev,info.ino,info.size,info.mtimeMs,info.ctimeMs].join
 
 // Inputs are a separate filesystem channel, not project changes. A content
 // snapshot survives the source worker's deletion and never follows a symlink.
-export async function captureReviewInputs({sourceRoot,snapshotRoot=path.join(os.tmpdir(),'llm-task-tree-review-inputs')}={}) {
-  const root=await realpath(sourceRoot),declaration=await registry(root);
+// Directory selection is an inventory, not a claim that every descendant is
+// a required regular file. Keep unsafe descendants in the exclusion receipt;
+// explicitly selected inputs and destination paths still fail closed.
+export async function captureReviewInputs({sourceRoot,snapshotRoot=path.join(os.tmpdir(),'llm-task-tree-review-inputs'),paths}={}) {
+  const root=await realpath(sourceRoot),declaration=paths===undefined?await registry(root):{
+    paths:[...new Set(paths.map(relativeInput))],registered:true};
   if(!declaration.paths.length)return {schema:1,sourceRoot:root,registered:declaration.registered,paths:[],fileCount:0,bytes:0};
   const directory=path.join(snapshotRoot,randomUUID()),blobs=path.join(directory,'blobs');
-  const files=[],directories=[],excluded=[],seen=new Set(),versions=new Map();
+  const files=[],directories=[],excluded=[],seen=new Set(),versions=new Map(),required=new Set(declaration.paths);
   await mkdir(blobs,{recursive:true,mode:0o700});
-  async function visit(relative) {
+  async function visit(relative,{descendant=false}={}) {
     if(seen.has(relative))return;
     seen.add(relative);
     if(blocked(relative)){excluded.push(relative);return;}
-    const source=await safePath(root,relative),before=await lstat(source);
+    let source;
+    try {source=await safePath(root,relative);}
+    catch(error){
+      if(descendant&&!required.has(relative)&&error.code==='REVIEW_INPUT_SYMLINK'){excluded.push(relative);return;}
+      throw error;
+    }
+    const before=await lstat(source);
     versions.set(relative,version(before));
     if(before.isDirectory()){
       directories.push(relative);
-      for(const child of (await readdir(source)).sort())await visit(`${relative}/${child}`);
+      for(const child of (await readdir(source)).sort())await visit(`${relative}/${child}`,{descendant:true});
       return;
     }
     if(!before.isFile())throw fail('REVIEW_INPUT_PATH_INVALID',`检查输入不是普通文件：${relative}`);
@@ -130,10 +177,15 @@ export async function captureReviewInputs({sourceRoot,snapshotRoot=path.join(os.
 export async function materializeReviewInputs({candidatePath,receipts=[]}={}) {
   const root=await realpath(candidatePath),planned=new Map(),directories=new Set(),sources=[];
   for(const receipt of receipts.filter(Boolean)){
-    sources.push({sourceRoot:receipt.sourceRoot,paths:receipt.paths||[],registered:Boolean(receipt.registered),fileCount:receipt.fileCount||0});
+    const source={sourceRoot:receipt.sourceRoot,paths:receipt.paths||[],registered:Boolean(receipt.registered),fileCount:receipt.fileCount||0};
+    sources.push(source);
     if(!receipt.manifestPath)continue;
     const manifest=JSON.parse(await readFile(receipt.manifestPath,'utf8'));
     if(manifest.schema!==1||!Array.isArray(manifest.files))throw fail('REVIEW_INPUT_MANIFEST_INVALID','检查输入快照格式无效');
+    // Existing schema-1 manifests already record exclusions. Surface that
+    // persisted evidence to the checker, not just an in-memory receipt.
+    source.excluded=Array.isArray(manifest.excluded)?manifest.excluded:[];
+    source.manifestPath=receipt.manifestPath;
     for(const directory of manifest.directories||[])directories.add(relativeInput(directory));
     for(const file of manifest.files){
       const relative=relativeInput(file.path);
@@ -187,10 +239,13 @@ export async function materializeReviewInputs({candidatePath,receipts=[]}={}) {
     await chmod(target,file.executable?0o555:0o444);
     copiedPaths.push(relative);
   }
+  const exclusionNotice=sources.filter(source=>source.excluded?.length).map(source=>
+    `安全排除输入共${source.excluded.length}项（符号链接、凭据等均未跟随或复制）：${JSON.stringify(source.excluded.slice(0,8))}；完整清单：${source.manifestPath}。这些项内容未验证，不能据此宣称输入完整或资源全部可用；如目标依赖它们，应报告具体缺失及影响，不得猜测外部文件。`).join('\n');
   const prompt=[
     '【本轮本地输入交接】以下是Worker明确登记并保存的只读输入快照，已按原相对路径放入当前候选工作区；可直接复用原测试命令。它们不是待交付代码，不要编辑或提交这些副本。',
     ...(sources.length?sources.map(source=>`${source.registered?'已登记':'未登记本地输入'}：${source.sourceRoot}；路径：${source.paths.join(', ')||'(无)'}；快照文件数：${source.fileCount}`):['没有收到本轮本地输入登记；若确实需要额外输入，请明确指出缺失路径，不要伪称测试完成。']),
+    ...(exclusionNotice?[exclusionNotice]:[]),
     '如仍缺少输入，使用以上明确来源或登记清单定位；不要执行 find /、全盘扫描或猜测其它工作区来恢复。输入缺失应说明具体路径与受影响测试。'
   ].join('\n');
-  return {prompt,copiedPaths,fileCount:planned.size,sources};
+  return {prompt,copiedPaths,fileCount:planned.size,sources,exclusionNotice};
 }
